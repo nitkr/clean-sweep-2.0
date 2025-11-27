@@ -29,7 +29,6 @@ class Clean_Sweep_Malware_Signatures {
         $this->signatures = [
             // Core danger functions (direct calls) - kept precise ones, removed broad assert()
             '/eval\s*\(\s*[^\'"\s]/',
-            // REMOVED: create_function, register_shutdown_function, call_user_func_array(array_filter - too broad for legitimate WordPress usage
 
             // System command execution (removed broad patterns - now using precise user input detection)
             '/shell_exec\s*\(\s*\$/i',
@@ -103,9 +102,7 @@ class Clean_Sweep_Malware_Signatures {
             '/base64_decode.*[A-Za-z0-9+/=]{150,}/i',
 
             // 3. DIRECT USER INPUT base64 decoding (100% malicious)
-            '/base64_decode.*\\\$_GET/i',
-            '/base64_decode.*\\\$_POST/i',
-            '/base64_decode.*\\\$_REQUEST/i',
+            '/base64_decode.*\\\$_(GET|POST|REQUEST)/i',
 
             // 4. NESTED OBFUSCATION: Decompression + base64_decode
             '/(gzinflate|str_rot13).*base64_decode/i',
@@ -159,10 +156,7 @@ class Clean_Sweep_Malware_Signatures {
             // Only flag dangerous DROP operations, not legitimate plugin uninstalls
 
             // HIGH PRIORITY: DROP with user input variables (VERY dangerous)
-            '/\$wpdb\s*->\s*query\s*\(\s*.*drop.*\$_/i', // DROP with $_ variables
-            '/\$wpdb\s*->\s*query\s*\(\s*.*drop.*\$_REQUEST/i', // DROP with $_REQUEST
-            '/\$wpdb\s*->\s*query\s*\(\s*.*drop.*\$_POST/i', // DROP with $_POST
-            '/\$wpdb\s*->\s*query\s*\(\s*.*drop.*\$_GET/i', // DROP with $_GET
+            '/\$wpdb\s*->\s*query\s*\(\s*.*drop.*\$_(?:GET|POST|REQUEST)/i', // DROP with $_GET/POST/REQUEST
 
             // HIGH PRIORITY: DROP system/core tables directly (bypassing prefix)
             '/\$wpdb\s*->\s*query\s*\(\s*["\']DROP.*users/i', // DROP users table
@@ -183,12 +177,10 @@ class Clean_Sweep_Malware_Signatures {
 
             // File system attacks
             // Advanced File Write Threat Detection (eliminates false positives from legitimate logging)
-            // Pattern 1: fwrite with user-controlled data (the real danger)
-            '/fwrite\s*\(\s*\$[^,]+,\s*(?:\$_(?:GET|POST|REQUEST|COOKIE)|base64_decode|gzinflate|file_get_contents|\$_GET|\$_POST|\$_REQUEST)/i',
+            // Pattern 1: fwrite with user-controlled/dangerous data (consolidated)
+            '/fwrite\s*\(\s*\$[^,]+,\s*(?:\$_(?:GET|POST|REQUEST|COOKIE)|base64_decode|gzinflate|file_get_contents|\$_GET|\$_POST|\$_REQUEST|eval|system|exec|shell_exec|passthru|assert|`)/i',
             // Pattern 2: fwrite to sensitive files (wp-config.php, .htaccess, etc.)
             '/fwrite\s*\(\s*\$[^,]+,\s*[\'"][^\'"]*(wp-config\.php|\.htaccess|php:\/\/|\/proc\/|c:\\\\windows)/i',
-            // Pattern 3: fwrite + eval/create_function in same file
-            '/fwrite\s*\(\s*[^,]+,\s*[^)]{0,150}?(eval|system|exec|shell_exec|passthru|assert|`|base64_decode.*\$_)/i',
             // Pattern 4: fwrite in suspicious files only (not class-*.php, core/, modules/)
             '/(?<!class-)(?<!core/)(?<!modules/)(?<!cache/).*fwrite\s*\(\s*\$/i',
             '/file_put_contents\s*\(\s*[\'\"][^\'\"]*(wp-config\.php|\.htaccess|\/proc\/|php:\/\/|c:\\\\windows)/',
@@ -492,6 +484,9 @@ class Clean_Sweep_Malware_Signatures {
             // === ULTRA-SPECIFIC 2025 MALWARE FAMILY (ndsw ecosystem) ===
             '/var\s+ndsw\s*=\s*true[\s\S]*HttpClient/is',             // Primary — catches 99% (var declaration)
             '/ndsw\s*=\s*true[\s\S]*HttpClient/is',                   // Backup — catches edge cases (no var)
+
+            // Suspicious index.php in wp-content subdirs
+            '#wp-content/(uploads|backup|backups|mu-plugins|[a-z0-9]{6,})/.*index\.php$#i',
         ];
     }
 
