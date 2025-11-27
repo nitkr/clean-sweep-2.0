@@ -492,6 +492,11 @@ class Clean_Sweep_Malware_Signatures {
             // === ULTRA-SPECIFIC 2025 MALWARE FAMILY (ndsw ecosystem) ===
             '/var\s+ndsw\s*=\s*true[\s\S]*HttpClient/is',             // Primary — catches 99% (var declaration)
             '/ndsw\s*=\s*true[\s\S]*HttpClient/is',                   // Backup — catches edge cases (no var)
+
+            // === SUSPICIOUS INDEX.PHP FILES IN WP-CONTENT SUBDIRS ===
+            // Detects malware backdoors hidden as index.php in wp-content subdirectories
+            // Excludes cache/ since it's not scanned by the malware scanner
+            '#wp-content/(uploads|backup|backups|mu-plugins|[a-z0-9]{6,})/.*index\.php$#i',
         ];
     }
 
