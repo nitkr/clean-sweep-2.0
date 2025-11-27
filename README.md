@@ -118,29 +118,51 @@ php clean-sweep/clean-sweep.php
 
 ```
 clean-sweep/
+├── .gitignore               # Git ignore patterns
 ├── clean-sweep.php          # Main entry point
-├── config.php               # Configuration constants
-├── utils.php                # Utility functions
+├── config.php               # Configuration constants and security checks
+├── utils.php                # Utility functions and helpers
 ├── wordpress-api.php        # WordPress API wrappers
 ├── ui.php                   # User interface components
 ├── display.php              # Display and rendering functions
 ├── README.md                # This documentation
 ├── LICENSE                  # GPL v2 license
 ├── assets/
+│   ├── script.js            # Legacy JavaScript (compatibility)
 │   ├── css/
 │   │   └── style.css        # Interface styling
 │   └── js/
-│       ├── ajax.js          # AJAX functionality
-│       ├── core.js          # Core operations
-│       ├── ui.js            # UI interactions
-│       ├── upload.js        # File upload handling
-│       └── reinstall.js     # Re-installation logic
+│       ├── ajax.js          # AJAX functionality and timeout handling
+│       ├── core.js          # Core operations and file management
+│       ├── ui.js            # UI interactions and tabbed interface
+│       ├── upload.js        # File upload and extraction handling
+│       └── reinstall.js     # Plugin and core re-installation logic
 ├── features/
-│   ├── core-reinstall.php   # WordPress core re-installation
-│   ├── plugin-reinstall.php # Plugin management
-│   ├── zip-extract.php      # File extraction
-│   └── database-scan.php    # Database scanning
+│   ├── maintenance/
+│   │   ├── core-reinstall.php   # WordPress core file re-installation
+│   │   ├── plugin-backup.php    # Plugin backup utilities
+│   │   ├── plugin-reinstall.php # WordPress.org plugin management
+│   │   ├── plugin-utils.php     # Plugin utility functions
+│   │   ├── plugin-wordpress.php # WordPress plugin handling
+│   │   └── plugin-wpmudev.php   # WPMU DEV plugin management
+│   ├── security/
+│   │   ├── advanced-analysis.php # Advanced malware analysis
+│   │   ├── core-scanner.php     # Core file integrity scanning
+│   │   ├── database-scan.php    # Database malware detection
+│   │   ├── malware-scan.php     # File-based malware scanning
+│   │   ├── persistence.php      # Malware persistence detection
+│   │   └── signatures.php       # Malware signature database
+│   └── utilities/
+│       └── zip-extract.php      # ZIP file extraction utilities
+├── includes/
+│   └── display/
+│       ├── index.php         # Main display index
+│       ├── malware.php       # Malware scan display
+│       ├── plugins.php       # Plugin management display
+│       ├── ui.php            # UI component display
+│       └── utils.php         # Display utility functions
 ├── backups/                 # Auto-generated backup directories
+├── docs/                    # Documentation files (ignored by git)
 └── logs/                    # Log files and progress tracking
 ```
 
