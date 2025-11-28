@@ -487,6 +487,9 @@ class Clean_Sweep_Malware_Signatures {
 
             // Suspicious index.php in wp-content subdirs
             '#wp-content/(uploads|backup|backups|mu-plugins|[a-z0-9]{6,})/.*index\.php$#i',
+
+            // Cron-based persistence malware (targets core file modification)
+            '/add_action\s*\(\s*[\'"].*cron.*[\'"][^)]*\)\s*;\s*.*(wp-load\.php|wp-settings\.php).*file_put_contents/i',
         ];
     }
 
