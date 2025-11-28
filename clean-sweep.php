@@ -25,6 +25,9 @@ require_once __DIR__ . '/wordpress-api.php'; // WordPress API wrappers
 require_once __DIR__ . '/ui.php';            // User interface components
 require_once __DIR__ . '/display.php';       // Display and rendering functions
 
+// Bootstrap Shield - Enhanced WordPress bootstrap protection
+require_once __DIR__ . '/includes/system/bootstrap-shield.php';
+
 // Feature-specific modules
 require_once __DIR__ . '/features/maintenance/plugin-reinstall.php';  // Plugin reinstallation
 require_once __DIR__ . '/features/maintenance/core-reinstall.php';    // Core file reinstallation
@@ -74,55 +77,7 @@ if ($is_ajax_request) {
         clean_sweep_output_html_header();
     }
 
-/**
- * Bootstrap WordPress environment
- * Attempts to load WordPress from common paths and verifies required functions
- *
- * @return bool True if bootstrap successful, false otherwise
- */
-function clean_sweep_bootstrap_wordpress() {
-    $bootstrap_success = false;
-    $possible_paths = [
-        __DIR__ . '/wp-load.php',
-        __DIR__ . '/../wp-load.php',
-        dirname(__DIR__) . '/wp-load.php',
-        dirname(dirname(__DIR__)) . '/wp-load.php'
-    ];
 
-    foreach ($possible_paths as $wp_load_path) {
-        if (file_exists($wp_load_path)) {
-            require_once $wp_load_path;
-            $bootstrap_success = true;
-            // Only log bootstrap success when an action is being performed
-            if (isset($_POST['action']) && !empty($_POST['action'])) {
-                clean_sweep_log_message("WordPress bootstrapped successfully from: $wp_load_path");
-            }
-            break;
-        }
-    }
-
-    if (!$bootstrap_success) {
-        clean_sweep_log_message("Error: Could not find wp-load.php. Please ensure this script is placed in your WordPress root directory.", 'error');
-        return false;
-    }
-
-    // Include required WordPress admin files
-    require_once ABSPATH . 'wp-admin/includes/file.php';
-    require_once ABSPATH . 'wp-admin/includes/plugin.php';
-
-// Verify required functions are available
-    if (!function_exists('get_plugins')) {
-        clean_sweep_log_message("Error: WordPress functions not available. Bootstrap failed.", 'error');
-        return false;
-    }
-
-    if (!function_exists('download_url')) {
-        clean_sweep_log_message("Error: Required WordPress functions not available. Admin includes failed.", 'error');
-        return false;
-    }
-
-    return true;
-}
 
 /**
  * Execute cleanup of all Clean Sweep files and directories

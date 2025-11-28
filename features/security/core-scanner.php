@@ -105,28 +105,68 @@ class Clean_Sweep_Core_Malware_Scanner {
     private function scan_critical_options($results, $progress_callback = null) {
         global $wpdb;
 
-        // Only scan HIGH-RISK option names - much faster and more accurate
-        $high_risk_patterns = [
+        // Separate exact option names from patterns
+        $exact_options = [
             'active_plugins',
             'cron',
+            'recently_activated',
+            'rewrite_rules'
+        ];
+
+        $pattern_options = [
             'theme_mods_%',
             'widget_%',
-            'recently_activated',
-            'rewrite_rules',
             '_transient_%',
             '_site_transient_%'
         ];
 
-        foreach ($high_risk_patterns as $pattern) {
+        $total_items = count($exact_options) + count($pattern_options);
+        $current_item = 0;
+
+        // Scan exact option names
+        foreach ($exact_options as $option_name) {
+            $current_item++;
             if ($progress_callback) {
-                $progress_callback(1, count($high_risk_patterns), "Scanning {$pattern}");
+                $progress_callback($current_item, $total_items, "Scanning {$option_name}");
+            }
+
+            $results_sql = $wpdb->get_results(
+                $wpdb->prepare(
+                    "SELECT option_name, option_value FROM {$wpdb->options}
+                     WHERE option_name = %s AND LENGTH(option_value) > 0
+                     LIMIT 10",
+                    $option_name
+                )
+            );
+
+            foreach ($results_sql as $row) {
+                // Skip legitimate base64 data (images, etc.)
+                if ($this->is_legitimate_option($row->option_name, $row->option_value)) {
+                    continue;
+                }
+
+                $threats = $this->scan_content($row->option_value, 'wp_options');
+                if (!empty($threats)) {
+                    foreach ($threats as $threat) {
+                        $threat['option_name'] = $row->option_name;
+                        $results['wp_options'][] = $threat;
+                    }
+                }
+            }
+        }
+
+        // Scan option patterns
+        foreach ($pattern_options as $pattern) {
+            $current_item++;
+            if ($progress_callback) {
+                $progress_callback($current_item, $total_items, "Scanning {$pattern}");
             }
 
             $results_sql = $wpdb->get_results(
                 $wpdb->prepare(
                     "SELECT option_name, option_value FROM {$wpdb->options}
                      WHERE option_name LIKE %s AND LENGTH(option_value) > 0
-                     LIMIT 200",
+                     LIMIT 50",
                     $pattern
                 )
             );

@@ -288,6 +288,46 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
         flush();
     }
 
+    // ============================================================================
+    // SAVE CLEAN HASHES FOR FUTURE INTEGRITY CHECKING
+    // ============================================================================
+
+    clean_sweep_log_message("📋 Saving clean core file hashes for future integrity verification");
+
+    // Calculate SHA-256 hashes of freshly installed core files
+    $clean_core_files = [
+        'index.php',
+        'wp-blog-header.php',
+        'wp-load.php',
+        'wp-settings.php',
+        'wp-admin/index.php',
+        'wp-admin/admin.php',
+        'wp-includes/version.php',
+        'wp-includes/wp-db.php'
+    ];
+
+    $clean_hashes = [
+        'timestamp' => time(),
+        'wp_version' => $wp_version,
+        'files' => []
+    ];
+
+    foreach ($clean_core_files as $file) {
+        $file_path = ABSPATH . $file;
+        if (file_exists($file_path)) {
+            $clean_hashes['files'][$file_path] = hash_file('sha256', $file_path);
+        }
+    }
+
+    // Save clean hashes to file
+    $hashes_file = __DIR__ . '/clean-core-hashes.json';
+    if (file_put_contents($hashes_file, json_encode($clean_hashes, JSON_PRETTY_PRINT))) {
+        clean_sweep_log_message("✅ Clean core hashes saved to: $hashes_file (" . count($clean_hashes['files']) . " files)");
+        clean_sweep_log_message("🔍 Future scans will use these clean hashes for integrity verification");
+    } else {
+        clean_sweep_log_message("⚠️ Failed to save clean core hashes", 'warning');
+    }
+
     clean_sweep_log_message("WordPress core re-installation completed successfully");
     clean_sweep_log_message("Files copied: $files_copied");
     clean_sweep_log_message("Backup location: " . __DIR__ . '/' . $core_backup_dir);
