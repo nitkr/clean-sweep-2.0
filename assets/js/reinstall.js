@@ -43,15 +43,35 @@ function startPluginReinstallation(buttonElement) {
         });
     }
 
-    // Show progress container at top
-    const progressContainer = document.getElementById("plugin-progress-container");
-    if (progressContainer) {
-        progressContainer.style.display = "block";
+    // Show progress container at top (create if missing)
+    let progressContainer = document.getElementById("plugin-progress-container");
+
+    // Create progress container if it doesn't exist (HTML update timing issue)
+    if (!progressContainer) {
+        console.log('Creating missing progress container');
+        progressContainer = document.createElement('div');
+        progressContainer.id = 'plugin-progress-container';
+        progressContainer.style.display = 'none';
+        progressContainer.style.margin = '20px 0';
+        progressContainer.innerHTML = `
+            <div class="progress-container">
+                <h3><span id="plugin-status-indicator" class="status-indicator status-processing">Processing</span> Plugin Operation Progress</h3>
+                <div class="progress-bar"><div id="plugin-progress-fill" class="progress-fill" style="width:0%"></div></div>
+                <div id="plugin-progress-text" class="progress-text">Initializing...</div>
+            </div>
+            <div id="plugin-progress-details" style="background:#f8f9fa;border:1px solid #dee2e6;padding:15px;border-radius:4px;margin:10px 0;"></div>
+        `;
+
+        // Add to plugins tab
         if (pluginsTab) {
-            pluginsTab.insertBefore(progressContainer, pluginsTab.firstChild);
+            pluginsTab.appendChild(progressContainer);
         }
-    } else {
-        console.error('Progress container not found');
+    }
+
+    // Show progress container
+    progressContainer.style.display = "block";
+    if (pluginsTab) {
+        pluginsTab.insertBefore(progressContainer, pluginsTab.firstChild);
     }
 
     // NEW: Check for backup choice first before starting batch processing
