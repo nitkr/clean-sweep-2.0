@@ -80,7 +80,7 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
     if (!$disk_check['success']) {
         clean_sweep_log_message("Disk space check failed: {$disk_check['message']}", 'error');
 
-        // For AJAX requests, update progress with disk space warning
+        // For AJAX requests, return disk space warning for UI to handle
         if ($progress_file) {
             $progress_data = [
                 'status' => 'disk_space_warning',
@@ -90,7 +90,7 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
                 'can_proceed_without_backup' => $disk_check['can_proceed'] ?? false
             ];
             clean_sweep_write_progress_file($progress_file, $progress_data);
-            return ['success' => false, 'message' => 'Insufficient disk space for backup', 'disk_check' => $disk_check];
+            return ['disk_space_warning' => $disk_check];
         }
 
         // For CLI/direct requests, show warning and abort
