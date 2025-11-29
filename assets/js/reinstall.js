@@ -345,8 +345,6 @@ function updateReinstallProgress(data) {
         }
 
         // Stop polling while waiting for user decision
-        clearInterval(reinstallProgressInterval);
-        reinstallProgressInterval = null;
         return;
     }
 
@@ -389,11 +387,12 @@ function proceedPluginReinstallWithBackup() {
         statusIndicator.className = "status-indicator status-processing";
     }
 
-    // Initialize new batch processing system
+    // Initialize new batch processing system with IMMEDIATE polling
     const progressUI = new CleanSweep_ProgressUI('plugin-progress-container');
     const progressPoller = new CleanSweep_ProgressPoller(reinstallProgressFile,
         (data) => progressUI.updateProgress(data), // Update callback
-        (data) => handleReinstallCompletion(data)  // Completion callback
+        (data) => handleReinstallCompletion(data), // Completion callback
+        500  // Poll every 500ms for fast operations
     );
 
     // Submit request to continue with backup
@@ -420,7 +419,7 @@ function proceedPluginReinstallWithBackup() {
     })
     .then(data => {
         if (data.success) {
-            // Start polling for real-time progress updates
+            // Start polling IMMEDIATELY for real-time progress updates
             progressPoller.startPolling();
         } else {
             if (progressDetails) {
@@ -476,11 +475,12 @@ function proceedPluginReinstallWithoutBackup() {
         progressText.textContent = "Continuing without backup";
     }
 
-    // Initialize new batch processing system
+    // Initialize new batch processing system with IMMEDIATE polling
     const progressUI = new CleanSweep_ProgressUI('plugin-progress-container');
     const progressPoller = new CleanSweep_ProgressPoller(reinstallProgressFile,
         (data) => progressUI.updateProgress(data), // Update callback
-        (data) => handleReinstallCompletion(data)  // Completion callback
+        (data) => handleReinstallCompletion(data), // Completion callback
+        500  // Poll every 500ms for fast operations
     );
 
     // Submit request to continue without backup
@@ -507,7 +507,7 @@ function proceedPluginReinstallWithoutBackup() {
     })
     .then(data => {
         if (data.success) {
-            // Start polling for real-time progress updates
+            // Start polling IMMEDIATELY for real-time progress updates
             progressPoller.startPolling();
         } else {
             if (progressDetails) {
