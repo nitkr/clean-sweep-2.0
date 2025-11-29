@@ -229,24 +229,19 @@ function clean_sweep_bootstrap_wordpress() {
     }
 
     // ============================================================================
-    // PHASE 2: Verify WordPress Environment Integrity
+    // PHASE 2: Load Admin Files and Initialize Filesystem
     // ============================================================================
 
-    // Initialize WordPress filesystem before loading admin files
-    // This ensures filesystem constants like FS_CHMOD_DIR are defined
-    if (function_exists('WP_Filesystem')) {
-        WP_Filesystem();
-        clean_sweep_log_message("💾 WordPress filesystem initialized", 'info');
-    }
-
-    // Include required WordPress admin files for non-local modes
-    // Local core mode provides its own implementations to avoid conflicts
-    $admin_files_loaded = true;
-    if ($bootstrap_mode !== 'local_core') {
+    // Include required WordPress admin files FIRST (defines filesystem constants like FS_CHMOD_DIR)
+    // Local core mode needs admin functions for plugin operations (download_url, etc.)
+    $admin_files_loaded = false;
+    if ($bootstrap_mode !== 'recovery') {  // Load for local_core and site modes
         try {
             if (defined('ABSPATH')) {
-                require_once ABSPATH . 'wp-admin/includes/file.php';
+                require_once ABSPATH . 'wp-admin/includes/file.php';  // Contains download_url and FS_CHMOD_DIR
                 require_once ABSPATH . 'wp-admin/includes/plugin.php';
+                $admin_files_loaded = true;
+                clean_sweep_log_message("📦 Loaded WordPress admin files for {$bootstrap_mode} mode", 'info');
             } else {
                 throw new Exception("ABSPATH not defined");
             }
@@ -255,7 +250,15 @@ function clean_sweep_bootstrap_wordpress() {
             $admin_files_loaded = false;
         }
     } else {
-        clean_sweep_log_message("📦 Local core mode - using Clean Sweep implementations (skipping WordPress admin files)", 'info');
+        clean_sweep_log_message("🔄 Recovery mode - using fallback implementations", 'info');
+        $admin_files_loaded = true; // Recovery mode handles its own functions
+    }
+
+    // Initialize WordPress filesystem AFTER loading admin files
+    // This ensures filesystem constants like FS_CHMOD_DIR are defined
+    if (function_exists('WP_Filesystem')) {
+        WP_Filesystem();
+        clean_sweep_log_message("💾 WordPress filesystem initialized", 'info');
     }
 
     // Verify required functions are available (mode-specific)
