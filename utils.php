@@ -452,9 +452,14 @@ function clean_sweep_check_disk_space($operation_type, $allow_proceed_without_ba
     $required_size_bytes = $backup_size_bytes * 1.2;
     $required_size_mb = round($required_size_bytes / (1024 * 1024), 1);
 
-    // Get available disk space
-    $available_bytes = disk_free_space(ABSPATH);
+    // Get available disk space with debug logging
+    $abspath = ABSPATH;
+    $available_bytes = disk_free_space($abspath);
     $available_mb = round($available_bytes / (1024 * 1024), 1);
+
+    // Debug logging for disk space issues
+    clean_sweep_log_message("Disk space check debug: Operation='$operation_type', ABSPATH='$abspath'", 'info');
+    clean_sweep_log_message("Disk space check debug: Backup size={$backup_size_mb}MB, Required with buffer={$required_size_mb}MB, Available={$available_mb}MB", 'info');
 
     // Check if sufficient space is available
     if ($available_bytes >= $required_size_bytes) {
