@@ -336,6 +336,12 @@ function clean_sweep_verify_wpmudev_installations($wpmudev_plugins) {
 function clean_sweep_execute_reinstallation($repo_plugins, $progress_file = null, $batch_start = 0, $batch_size = null) {
     clean_sweep_log_message("=== WordPress Plugin Re-installation Started ===");
 
+    // Check if user requested to proceed without backup
+    $proceed_without_backup = isset($_POST['proceed_without_backup']) && $_POST['proceed_without_backup'] === '1';
+    if ($proceed_without_backup) {
+        clean_sweep_log_message("⚠️ User requested to proceed without backup - skipping disk space check and backup creation", 'warning');
+    }
+
     // CRITICAL FIX: Filter out any WPMU DEV plugins that might have slipped through
     // This prevents them from showing in the WordPress.org reinstallation progress
     $filtered_repo_plugins = [];
@@ -455,47 +461,55 @@ function clean_sweep_execute_reinstallation($repo_plugins, $progress_file = null
 
     // Check disk space before creating backup (only for the first batch)
     if ($batch_start === 0) {
-        clean_sweep_log_message("🔍 Starting disk space check for plugin reinstallation (batch_start: $batch_start)", 'info');
+        if (!$proceed_without_backup) {
+            clean_sweep_log_message("🔍 Starting disk space check for plugin reinstallation (batch_start: $batch_start)", 'info');
 
-        try {
-            $disk_check = clean_sweep_check_disk_space('plugin_reinstall');
-            clean_sweep_log_message("📊 Disk check result: " . ($disk_check['success'] ? 'PASSED' : 'FAILED'), 'info');
+            try {
+                $disk_check = clean_sweep_check_disk_space('plugin_reinstall');
+                clean_sweep_log_message("📊 Disk check result: " . ($disk_check['success'] ? 'PASSED' : 'FAILED'), 'info');
 
-            if (!$disk_check['success']) {
-                clean_sweep_log_message("Disk space check failed: {$disk_check['message']}", 'error');
+                if (!$disk_check['success']) {
+                    clean_sweep_log_message("Disk space check failed: {$disk_check['message']}", 'error');
 
-                // For AJAX requests, return the disk space warning
-                if ($progress_file) {
-                    clean_sweep_log_message("📤 Returning disk space warning for AJAX UI", 'info');
-                    $progress_data = [
-                        'status' => 'disk_space_warning',
-                        'progress' => 0,
-                        'message' => 'Insufficient disk space for backup',
-                        'disk_check' => $disk_check,
-                        'can_proceed_without_backup' => $disk_check['can_proceed'] ?? false
-                    ];
-                    clean_sweep_write_progress_file($progress_file, $progress_data);
-                    return ['disk_space_warning' => $disk_check];
+                    // For AJAX requests, return the disk space warning
+                    if ($progress_file) {
+                        clean_sweep_log_message("📤 Returning disk space warning for AJAX UI", 'info');
+                        $progress_data = [
+                            'status' => 'disk_space_warning',
+                            'progress' => 0,
+                            'message' => 'Insufficient disk space for backup',
+                            'disk_check' => $disk_check,
+                            'can_proceed_without_backup' => $disk_check['can_proceed'] ?? false
+                        ];
+                        clean_sweep_write_progress_file($progress_file, $progress_data);
+                        return ['disk_space_warning' => $disk_check];
+                    }
+
+                    // For CLI/direct requests, show warning and abort
+                    clean_sweep_log_message("Plugin reinstallation aborted due to insufficient disk space", 'error');
+                    clean_sweep_log_message("Required: {$disk_check['required_mb']}MB, Available: {$disk_check['available_mb']}MB", 'error');
+                    return $results;
                 }
 
-                // For CLI/direct requests, show warning and abort
-                clean_sweep_log_message("Plugin reinstallation aborted due to insufficient disk space", 'error');
-                clean_sweep_log_message("Required: {$disk_check['required_mb']}MB, Available: {$disk_check['available_mb']}MB", 'error');
-                return $results;
+                clean_sweep_log_message("Disk space check passed: {$disk_check['backup_size_mb']}MB backup, {$disk_check['available_mb']}MB available", 'info');
+
+            } catch (Exception $e) {
+                clean_sweep_log_message("❌ Exception in disk space check: " . $e->getMessage(), 'error');
+                // Continue without disk check if there's an exception
+                clean_sweep_log_message("⚠️ Continuing without disk space check due to exception", 'warning');
             }
-
-            clean_sweep_log_message("Disk space check passed: {$disk_check['backup_size_mb']}MB backup, {$disk_check['available_mb']}MB available", 'info');
-
-        } catch (Exception $e) {
-            clean_sweep_log_message("❌ Exception in disk space check: " . $e->getMessage(), 'error');
-            // Continue without disk check if there's an exception
-            clean_sweep_log_message("⚠️ Continuing without disk space check due to exception", 'warning');
+        } else {
+            clean_sweep_log_message("⚠️ Skipping disk space check - user requested to proceed without backup", 'warning');
         }
 
-        // Create backup only if disk space check passed
-        if (!clean_sweep_create_backup()) {
-            clean_sweep_log_message("Backup failed. Aborting re-installation.", 'error');
-            return $results;
+        // Create backup only if not proceeding without backup and disk space check passed
+        if (!$proceed_without_backup) {
+            if (!clean_sweep_create_backup()) {
+                clean_sweep_log_message("Backup failed. Aborting re-installation.", 'error');
+                return $results;
+            }
+        } else {
+            clean_sweep_log_message("⚠️ Skipping backup creation - proceeding without backup as requested", 'warning');
         }
     } else {
         clean_sweep_log_message("⏭️ Skipping disk space check (batch_start: $batch_start)", 'info');
