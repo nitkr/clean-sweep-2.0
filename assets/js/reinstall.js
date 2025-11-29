@@ -174,6 +174,8 @@ function pollReinstallProgress() {
 }
 
 function updateReinstallProgress(data) {
+    console.log('🔍 updateReinstallProgress called with status:', data.status, data);
+
     const statusIndicator = document.getElementById("plugin-status-indicator");
     const progressFill = document.getElementById("plugin-progress-fill");
     const progressText = document.getElementById("plugin-progress-text");
@@ -181,6 +183,7 @@ function updateReinstallProgress(data) {
 
     // Special handling for disk space warnings
     if (data.status === 'disk_space_warning') {
+        console.log('💾 Detected disk_space_warning status, showing warning UI');
         if (statusIndicator) {
             statusIndicator.textContent = "Warning";
             statusIndicator.className = "status-indicator status-paused";
