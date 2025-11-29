@@ -47,42 +47,7 @@ require_once ABSPATH . 'wp-settings.php';
 // CLEAN SWEEP SPECIFIC FUNCTIONS
 // ============================================================================
 
-/**
- * Download URL function - saves to Clean Sweep backups directory
- */
-if (!function_exists('download_url')) {
-    function download_url($url, $timeout = 300) {
-        // Use Clean Sweep backups directory instead of system temp
-        $backup_dir = __DIR__ . '/../backups';
-        if (!is_dir($backup_dir)) {
-            mkdir($backup_dir, 0755, true);
-        }
-
-        // Download file and save to backups directory
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-        curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
-        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-
-        $data = curl_exec($ch);
-        $error = curl_error($ch);
-        curl_close($ch);
-
-        if ($data === false) {
-            return false;
-        }
-
-        // Save to temp file in backups directory and return path
-        $temp_file = tempnam($backup_dir, 'download_');
-        if ($temp_file && file_put_contents($temp_file, $data) !== false) {
-            return $temp_file;
-        }
-
-        return false;
-    }
-}
+// Download URL function - WordPress core provides this, no need for fallback
 
 // ============================================================================
 // CUSTOM UNZIP FUNCTION (OVERRIDES WORDPRESS VERSION)
