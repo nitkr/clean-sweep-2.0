@@ -174,8 +174,6 @@ function pollReinstallProgress() {
 }
 
 function updateReinstallProgress(data) {
-    console.log('🔍 updateReinstallProgress called with status:', data.status, data);
-
     const statusIndicator = document.getElementById("plugin-status-indicator");
     const progressFill = document.getElementById("plugin-progress-fill");
     const progressText = document.getElementById("plugin-progress-text");
