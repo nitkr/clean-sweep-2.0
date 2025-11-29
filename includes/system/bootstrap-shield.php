@@ -101,17 +101,9 @@ function clean_sweep_bootstrap_wordpress() {
                 if ($wp_settings_path && file_exists($wp_settings_path)) {
                     $content = @file_get_contents($wp_settings_path);
                     if ($content !== false) {
-                        // DEBUG: Log what we're checking
-                        clean_sweep_log_message("DEBUG: Checking file: {$wp_settings_path}", 'info');
-                        clean_sweep_log_message("DEBUG: Content length: " . strlen($content), 'info');
-                        clean_sweep_log_message("DEBUG: First 200 chars: " . substr($content, 0, 200), 'info');
-
                         // Check specific malware patterns
                         $str_rot13_found = stripos($content, 'str_rot13') !== false;
                         $double_php_found = stripos($content, '<?php<?php') !== false;
-
-                        clean_sweep_log_message("DEBUG: str_rot13 found: " . ($str_rot13_found ? 'YES' : 'NO'), 'info');
-                        clean_sweep_log_message("DEBUG: double PHP tags found: " . ($double_php_found ? 'YES' : 'NO'), 'info');
 
                         // Comprehensive corruption checks - malware patterns AND structural validation
                         $corruption_indicators = [
