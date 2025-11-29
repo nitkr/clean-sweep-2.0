@@ -399,12 +399,24 @@ function clean_sweep_run_clean_sweep() {
                 try {
                     // 1. Suppress ALL output during operations
                     ob_start();
-                    $execution_data = clean_sweep_execute_reinstallation($repo_plugins, $progress_file, $batch_start, $batch_size);
+                    $result = clean_sweep_execute_reinstallation($repo_plugins, $progress_file, $batch_start, $batch_size);
                     ob_end_clean(); // Discard any warnings/errors
 
-                    // Extract results and verification_results from execution
-                    $reinstall_results = $execution_data['results'] ?? ['successful' => [], 'failed' => []];
-                    $verification_results = $execution_data['verification_results'] ?? ['verified' => [], 'missing' => [], 'corrupted' => []];
+                    // CRITICAL FIX: Detect backup choice responses and return them directly
+                    if (isset($result['disk_check']) || isset($result['backup_choice'])) {
+                        // This is backup choice data - return it directly without processing
+                        clean_sweep_log_message("Action handler: Detected backup choice response, returning directly", 'info');
+                        while (ob_get_level() > 0) {
+                            ob_end_clean();
+                        }
+                        header('Content-Type: application/json; charset=utf-8', true);
+                        echo json_encode($result, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+                        exit;
+                    }
+
+                    // Otherwise proceed with normal final results processing
+                    $reinstall_results = $result['results'] ?? ['successful' => [], 'failed' => []];
+                    $verification_results = $result['verification_results'] ?? ['verified' => [], 'missing' => [], 'corrupted' => []];
 
                     // Check if this is the final batch
                     $batch_info = $reinstall_results['batch_info'] ?? [];

@@ -313,68 +313,42 @@ function clean_sweep_get_directory_size($directory) {
 
 /**
  * Calculate backup size for plugin reinstallation
- * Now uses ZIP size for accurate calculation
+ * Fast estimation using directory size + buffer for compression
  */
 function clean_sweep_calculate_plugin_backup_size() {
-    global $clean_sweep_backup_info;
-
-    // If we have ZIP backup info from a recent backup, use the exact ZIP size
-    if (isset($clean_sweep_backup_info) && isset($clean_sweep_backup_info['size_bytes'])) {
-        clean_sweep_log_message("Using ZIP backup size: {$clean_sweep_backup_info['size_bytes']} bytes", 'info');
-        return $clean_sweep_backup_info['size_bytes'];
-    }
-
-    // Fallback: Create temporary ZIP to get accurate size
-    clean_sweep_log_message("No recent ZIP backup found, creating temporary ZIP for size calculation", 'info');
-
-    $temp_zip_path = sys_get_temp_dir() . '/clean_sweep_temp_backup_' . time() . '.zip';
-
-    if (!class_exists('ZipArchive')) {
-        clean_sweep_log_message("ZipArchive not available, falling back to directory size calculation", 'warning');
-        return clean_sweep_calculate_directory_size_fallback();
-    }
-
-    $zip = new ZipArchive();
-    if ($zip->open($temp_zip_path, ZipArchive::CREATE) !== TRUE) {
-        clean_sweep_log_message("Failed to create temporary ZIP, falling back to directory size", 'warning');
-        return clean_sweep_calculate_directory_size_fallback();
-    }
-
     $plugins_dir = WP_PLUGIN_DIR;
-    $plugins_dir_length = strlen($plugins_dir) + 1;
+    $total_size = 0;
 
-    $iterator = new RecursiveIteratorIterator(
-        new RecursiveDirectoryIterator($plugins_dir, RecursiveDirectoryIterator::SKIP_DOTS),
-        RecursiveIteratorIterator::LEAVES_ONLY
-    );
+    clean_sweep_log_message("Calculating plugin backup size using fast directory estimation", 'info');
 
-    $files_added = 0;
-    foreach ($iterator as $file) {
-        if ($file->isFile()) {
-            $file_path = $file->getPathname();
-            $relative_path = substr($file_path, $plugins_dir_length);
+    // Calculate size of all plugin directories (recursive)
+    $plugin_dirs = glob($plugins_dir . '/*', GLOB_ONLYDIR);
+    foreach ($plugin_dirs as $dir) {
+        $total_size += clean_sweep_get_directory_size($dir);
+        clean_sweep_log_message("Directory {$dir}: " . clean_sweep_get_directory_size($dir) . " bytes", 'debug');
+    }
 
-            if ($zip->addFile($file_path, $relative_path)) {
-                $files_added++;
-            }
+    // Calculate size of single files in plugins root directory
+    $plugin_files = glob($plugins_dir . '/*.php');
+    $single_file_size = 0;
+    foreach ($plugin_files as $file) {
+        if (is_file($file)) {
+            $file_size = filesize($file);
+            $single_file_size += $file_size;
+            clean_sweep_log_message("Single file {$file}: {$file_size} bytes", 'debug');
         }
     }
 
-    $zip->close();
+    $total_size += $single_file_size;
 
-    if ($files_added > 0 && file_exists($temp_zip_path)) {
-        $zip_size = filesize($temp_zip_path);
-        clean_sweep_log_message("Temporary ZIP created: {$files_added} files, {$zip_size} bytes", 'info');
+    // Add 15% buffer for ZIP compression overhead and filesystem metadata
+    $estimated_size = $total_size * 1.15;
 
-        // Clean up temporary ZIP
-        @unlink($temp_zip_path);
+    clean_sweep_log_message("Plugin backup estimation: directories=" . ($total_size - $single_file_size) .
+                           " bytes, single_files={$single_file_size} bytes, total={$total_size} bytes, " .
+                           "estimated_with_buffer=" . round($estimated_size) . " bytes", 'info');
 
-        return $zip_size;
-    } else {
-        clean_sweep_log_message("Failed to create temporary ZIP, using directory size fallback", 'warning');
-        @unlink($temp_zip_path);
-        return clean_sweep_calculate_directory_size_fallback();
-    }
+    return round($estimated_size);
 }
 
 /**
@@ -404,9 +378,12 @@ function clean_sweep_calculate_directory_size_fallback() {
 
 /**
  * Calculate backup size for core reinstallation
+ * Fast estimation using directory size + buffer for compression
  */
 function clean_sweep_calculate_core_backup_size() {
     $total_size = 0;
+
+    clean_sweep_log_message("Calculating core backup size using fast directory estimation", 'info');
 
     // Files that get backed up during core reinstallation
     $preserve_files = [
@@ -420,18 +397,29 @@ function clean_sweep_calculate_core_backup_size() {
         $full_path = ABSPATH . $file;
         if (file_exists($full_path)) {
             if (is_dir($full_path)) {
-                $total_size += clean_sweep_get_directory_size($full_path);
+                $dir_size = clean_sweep_get_directory_size($full_path);
+                $total_size += $dir_size;
+                clean_sweep_log_message("Directory {$file}: {$dir_size} bytes", 'debug');
             } else {
-                $total_size += filesize($full_path);
+                $file_size = filesize($full_path);
+                $total_size += $file_size;
+                clean_sweep_log_message("File {$file}: {$file_size} bytes", 'debug');
             }
         }
     }
 
-    return $total_size;
+    // Add 15% buffer for ZIP compression overhead and filesystem metadata
+    $estimated_size = $total_size * 1.15;
+
+    clean_sweep_log_message("Core backup estimation: raw_size={$total_size} bytes, " .
+                           "estimated_with_buffer=" . round($estimated_size) . " bytes", 'info');
+
+    return round($estimated_size);
 }
 
 /**
- * Check disk space before backup operations
+ * Check disk space and provide backup size information with user choice
+ * Always returns size info and allows user to choose backup or skip
  */
 function clean_sweep_check_disk_space($operation_type, $allow_proceed_without_backup = true) {
     // Calculate actual backup size needed
@@ -461,32 +449,35 @@ function clean_sweep_check_disk_space($operation_type, $allow_proceed_without_ba
     clean_sweep_log_message("Disk space check debug: Operation='$operation_type', ABSPATH='$abspath'", 'info');
     clean_sweep_log_message("Disk space check debug: Backup size={$backup_size_mb}MB, Required with buffer={$required_size_mb}MB, Available={$available_mb}MB", 'info');
 
-    // Check if sufficient space is available
-    if ($available_bytes >= $required_size_bytes) {
-        return [
-            'success' => true,
-            'backup_size_mb' => $backup_size_mb,
-            'required_mb' => $required_size_mb,
-            'available_mb' => $available_mb
-        ];
-    }
-
-    // Insufficient space - prepare warning message
-    $shortfall_mb = round(($required_size_bytes - $available_bytes) / (1024 * 1024), 1);
-
-    return [
-        'success' => false,
-        'can_proceed' => $allow_proceed_without_backup,
+    // Always provide backup choice information
+    $result = [
+        'success' => true, // Always allow proceeding (with or without backup)
+        'can_proceed' => true,
         'backup_size_mb' => $backup_size_mb,
         'required_mb' => $required_size_mb,
         'available_mb' => $available_mb,
-        'shortfall_mb' => $shortfall_mb,
-        'message' => "{$operation_name} backup needs {$required_size_mb}MB (includes 20% buffer). Only {$available_mb}MB available.",
-        'warning' => "⚠️ Proceeding without backup increases risk of data loss if {$operation_name} fails.",
-        'recommendations' => [
+        'show_choice' => true, // Always show backup choice UI
+        'recommendation' => 'backup' // Default recommendation
+    ];
+
+    // Check if sufficient space is available for backup
+    if ($available_bytes >= $required_size_bytes) {
+        $result['space_status'] = 'sufficient';
+        $result['message'] = "Sufficient space available for {$operation_name} backup.";
+    } else {
+        // Insufficient space for backup
+        $shortfall_mb = round(($required_size_bytes - $available_bytes) / (1024 * 1024), 1);
+        $result['space_status'] = 'insufficient';
+        $result['shortfall_mb'] = $shortfall_mb;
+        $result['recommendation'] = 'skip_backup'; // Recommend skipping backup
+        $result['message'] = "{$operation_name} backup needs {$required_size_mb}MB (includes 20% buffer). Only {$available_mb}MB available.";
+        $result['warning'] = "⚠️ Insufficient space for backup. Proceeding without backup increases risk of data loss if {$operation_name} fails.";
+        $result['recommendations'] = [
             'Free up disk space by deleting unnecessary files',
             'Consider external backup before proceeding',
             'Contact hosting provider for disk space increase'
-        ]
-    ];
+        ];
+    }
+
+    return $result;
 }

@@ -75,11 +75,13 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
         clean_sweep_log_message("Using WordPress version: $wp_version");
     }
 
-    // Check if user requested to proceed without backup
+    // Check if user explicitly requested backup creation
+    $create_backup = isset($_POST['create_backup']) && $_POST['create_backup'] === '1';
     $proceed_without_backup = isset($_POST['proceed_without_backup']) && $_POST['proceed_without_backup'] === '1';
-    if ($proceed_without_backup) {
-        clean_sweep_log_message("⚠️ User requested to proceed without backup - skipping disk space check and backup creation", 'warning');
-    } else {
+
+    if ($create_backup) {
+        clean_sweep_log_message("✅ User requested backup creation", 'info');
+
         // Check disk space before creating backup
         $disk_check = clean_sweep_check_disk_space('core_reinstall');
         if (!$disk_check['success']) {
@@ -105,6 +107,33 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
         }
 
         clean_sweep_log_message("Disk space check passed: {$disk_check['backup_size_mb']}MB backup, {$disk_check['available_mb']}MB available", 'info');
+    } elseif ($proceed_without_backup) {
+        clean_sweep_log_message("⚠️ User requested to proceed without backup - skipping disk space check and backup creation", 'warning');
+    } else {
+        // Always show backup choice UI for AJAX requests
+        if ($progress_file) {
+            clean_sweep_log_message("Showing backup choice UI to user", 'info');
+            $disk_check = clean_sweep_check_disk_space('core_reinstall');
+
+            $progress_data = [
+                'status' => 'backup_choice',
+                'progress' => 0,
+                'message' => 'Choose backup option',
+                'disk_check' => $disk_check
+            ];
+            clean_sweep_write_progress_file($progress_file, $progress_data);
+            return ['backup_choice' => $disk_check];
+        } else {
+            // For direct requests, default to creating backup
+            clean_sweep_log_message("Direct request - defaulting to backup creation", 'info');
+            $create_backup = true;
+
+            $disk_check = clean_sweep_check_disk_space('core_reinstall');
+            if (!$disk_check['success']) {
+                clean_sweep_log_message("Disk space check failed: {$disk_check['message']}", 'error');
+                return ['success' => false, 'message' => 'Insufficient disk space for backup'];
+            }
+        }
     }
 
     // Create ZIP backup for core files (only if not proceeding without backup)

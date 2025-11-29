@@ -138,8 +138,32 @@ function startPluginAnalysis() {
         clearInterval(pluginProgressInterval);
         pluginProgressInterval = null;
 
-        // Show results
-        if (data.success && data.html) {
+        // Handle new OOP architecture response format
+        if (data.success && (data.wp_org_plugins || data.wpmu_dev_plugins || data.non_repo_plugins || data.suspicious_files)) {
+            console.log('✅ Analysis completed - updating UI with new format');
+
+            // Generate HTML for analysis results (mimic the PHP display logic)
+            const html = generateAnalysisResultsHTML(data);
+
+            // Switch to plugins tab
+            switchTab('plugins');
+
+            // Update the plugins tab content with the generated HTML
+            const pluginsTab = document.getElementById('plugins-tab');
+            if (pluginsTab) {
+                pluginsTab.innerHTML = html;
+            }
+
+            // Hide the progress container
+            const progressContainer = document.getElementById("plugin-progress-container");
+            if (progressContainer) {
+                progressContainer.style.display = "none";
+            }
+
+        } else if (data.success && data.html) {
+            // Fallback for old format
+            console.log('✅ Analysis completed - using legacy HTML format');
+
             // Switch to plugins tab
             switchTab('plugins');
 
@@ -159,7 +183,7 @@ function startPluginAnalysis() {
             document.getElementById("plugin-status-indicator").textContent = "Error";
             document.getElementById("plugin-status-indicator").className = "status-indicator status-completed";
         } else {
-            document.getElementById("plugin-progress-details").innerHTML = '<div style="color:#dc3545;">Error: Failed to analyze plugins</div>';
+            document.getElementById("plugin-progress-details").innerHTML = '<div style="color:#dc3545;">Error: Failed to analyze plugins - unexpected response format</div>';
             document.getElementById("plugin-status-indicator").textContent = "Error";
             document.getElementById("plugin-status-indicator").className = "status-indicator status-completed";
         }
@@ -325,36 +349,49 @@ function updateCoreProgress(data) {
     const progressText = document.getElementById("core-progress-text");
     const progressDetails = document.getElementById("core-progress-details");
 
-    // Special handling for disk space warnings
-    if (data.status === 'disk_space_warning') {
-        console.log('💾 Core reinstall: Detected disk_space_warning status, showing warning UI');
+    // Special handling for disk space warnings and backup choice
+    if (data.status === 'disk_space_warning' || data.status === 'backup_choice' || (data.disk_check && data.disk_check.show_choice)) {
+        console.log('💾 Core reinstall: Showing backup choice UI');
 
         if (statusIndicator) {
-            statusIndicator.textContent = "Warning";
+            statusIndicator.textContent = data.disk_check && data.disk_check.space_status === 'insufficient' ? "Warning" : "Ready";
             statusIndicator.className = "status-indicator status-paused";
         }
 
         if (progressText) {
-            progressText.textContent = "Disk space check failed";
+            progressText.textContent = data.disk_check && data.disk_check.space_status === 'insufficient' ?
+                "Backup space insufficient" : "Choose backup option";
         }
 
         if (progressDetails && data.disk_check) {
             const diskCheck = data.disk_check;
+            const isInsufficient = diskCheck.space_status === 'insufficient';
+
             progressDetails.innerHTML = `
                 <div style="color:#856404;background:#fff3cd;border:1px solid #ffeaa7;padding:15px;border-radius:4px;margin:10px 0;">
-                    <h4 style="margin-top:0;">⚠️ Insufficient Disk Space for Core Backup</h4>
-                    <p style="margin-bottom:10px;"><strong>${diskCheck.message}</strong></p>
+                    <h4 style="margin-top:0;">💾 Core Reinstallation - Backup Options</h4>
+                    <p style="margin-bottom:10px;"><strong>Estimated backup size: ${diskCheck.backup_size_mb}MB</strong></p>
                     <div style="background:#f8f9fa;padding:10px;border-radius:3px;margin:10px 0;">
-                        <p style="margin:5px 0;"><strong>Backup Size Needed:</strong> ${diskCheck.backup_size_mb}MB + 20% buffer = ${diskCheck.required_mb}MB</p>
+                        <p style="margin:5px 0;"><strong>Backup Size:</strong> ${diskCheck.backup_size_mb}MB</p>
+                        <p style="margin:5px 0;"><strong>With Buffer:</strong> ${diskCheck.required_mb}MB</p>
                         <p style="margin:5px 0;"><strong>Available Space:</strong> ${diskCheck.available_mb}MB</p>
-                        <p style="margin:5px 0;"><strong>Shortfall:</strong> ${diskCheck.shortfall_mb}MB</p>
+                        ${diskCheck.shortfall_mb ? `<p style="margin:5px 0;color:#dc3545;"><strong>Shortfall:</strong> ${diskCheck.shortfall_mb}MB</p>` : ''}
                     </div>
-                    <p style="color:#6c757d;font-size:14px;margin:10px 0;">
-                        <strong>⚠️ Risk:</strong> ${diskCheck.warning}
-                    </p>
+                    ${isInsufficient ? `
+                        <p style="color:#dc3545;font-size:14px;margin:10px 0;">
+                            <strong>⚠️ Warning:</strong> ${diskCheck.warning}
+                        </p>
+                    ` : `
+                        <p style="color:#28a745;font-size:14px;margin:10px 0;">
+                            <strong>✅ Status:</strong> ${diskCheck.message}
+                        </p>
+                    `}
                     <div style="margin-top:15px;">
-                        <button onclick="proceedCoreReinstallWithoutBackup()" style="background:#28a745;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;margin-right:10px;">
-                            Proceed Without Backup
+                        <button onclick="proceedCoreReinstallWithBackup()" style="background:#28a745;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;margin-right:10px;">
+                            Create Backup (~${diskCheck.backup_size_mb}MB)
+                        </button>
+                        <button onclick="proceedCoreReinstallWithoutBackup()" style="background:#ffc107;color:black;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;margin-right:10px;">
+                            Skip Backup (Faster)
                         </button>
                         <button onclick="cancelCoreReinstall()" style="background:#dc3545;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;">
                             Cancel
@@ -393,6 +430,46 @@ function updateCoreProgress(data) {
         clearInterval(coreProgressInterval);
         coreProgressInterval = null;
     }
+}
+
+// Handle proceeding with core reinstallation with backup
+function proceedCoreReinstallWithBackup() {
+    const progressDetails = document.getElementById("core-progress-details");
+    const progressText = document.getElementById("core-progress-text");
+
+    if (progressDetails) {
+        progressDetails.innerHTML = '<div style="color:#28a745;">⏳ Proceeding with core reinstallation with backup...</div>';
+    }
+    if (progressText) {
+        progressText.textContent = "Creating backup and proceeding";
+    }
+
+    // Submit request to continue with backup
+    const formData = new FormData();
+    formData.append('action', 'reinstall_core');
+    formData.append('wp_version', document.getElementById("wp-version").value);
+    formData.append('progress_file', coreProgressFile);
+    formData.append('create_backup', '1'); // Explicitly request backup
+
+    fetch(window.location.href, {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => {
+        if (response.ok) {
+            // Resume polling to track progress
+            coreProgressInterval = setInterval(pollCoreProgress, 2000);
+        } else {
+            if (progressDetails) {
+                progressDetails.innerHTML = '<div style="color:#dc3545;">Error: Failed to proceed with backup</div>';
+            }
+        }
+    })
+    .catch(error => {
+        if (progressDetails) {
+            progressDetails.innerHTML = '<div style="color:#dc3545;">Error: ' + error.message + '</div>';
+        }
+    });
 }
 
 // Handle proceeding with core reinstallation without backup
@@ -455,6 +532,161 @@ function cancelCoreReinstall() {
     // Stop polling
     clearInterval(coreProgressInterval);
     coreProgressInterval = null;
+}
+
+// Generate HTML for analysis results (mimics PHP display logic)
+function generateAnalysisResultsHTML(data) {
+    let html = '';
+
+    // Analysis summary
+    const totals = data.totals || {};
+    html += '<h3>📦 Plugin Analysis Complete</h3>';
+
+    html += '<div style="background:#e7f3ff;border:1px solid #b8daff;padding:20px;border-radius:4px;margin:20px 0;">';
+    html += '<h4>📊 Analysis Summary</h4>';
+    html += '<div>';
+    html += '<div class="stats-box" style="background:#d1ecf1;border-color:#bee5eb;"><div class="stats-number" style="color:#0c5460;">' + (totals.wordpress_org || 0) + '</div><div class="stats-label">WordPress.org Plugins</div></div>';
+    html += '<div class="stats-box" style="background:#d4edda;border-color:#c3e6cb;"><div class="stats-number" style="color:#155724;">' + (totals.wpmu_dev || 0) + '</div><div class="stats-label">WPMU DEV Plugins</div></div>';
+    html += '<div class="stats-box" style="background:#f8d7da;border-color:#f5c6cb;"><div class="stats-number" style="color:#721c24;">' + (totals.non_repository || 0) + '</div><div class="stats-label">Non-Repository</div></div>';
+    if (totals.suspicious > 0) {
+        html += '<div class="stats-box" style="background:#fff3cd;border-color:#ffeaa7;"><div class="stats-number" style="color:#856404;">' + totals.suspicious + '</div><div class="stats-label">Suspicious Files</div></div>';
+    }
+    html += '</div>';
+    html += '<p><strong>What will happen:</strong> ' + (totals.wordpress_org || 0) + ' WordPress.org plugins and ' + (totals.wpmu_dev || 0) + ' WPMU DEV plugins will be re-installed with their latest versions from official repositories.</p>';
+    html += '</div>';
+
+    // Plugin lists
+    const allPlugins = [];
+
+    // WordPress.org plugins (ACTIONABLE - will be reinstalled)
+    if (data.wp_org_plugins && Object.keys(data.wp_org_plugins).length > 0) {
+        html += '<h4 style="color:#28a745;">📦 WordPress.org Plugins to be Re-installed (' + Object.keys(data.wp_org_plugins).length + ') <button onclick="copyPluginList(\'wordpress_org\')" style="background:#007bff;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:12px;">Copy</button></h4>';
+        html += '<div style="background:#d4edda;padding:15px;border-radius:4px;border:2px solid #28a745;margin:10px 0;max-height:400px;overflow-y:auto;">';
+        html += '<div style="margin-bottom:10px;color:#155724;"><strong>✅ Will be automatically reinstalled with latest versions from WordPress.org</strong></div>';
+        html += generatePluginTable(data.wp_org_plugins, 'wordpress_org');
+        html += '</div>';
+        Object.assign(allPlugins, data.wp_org_plugins);
+    }
+
+    // WPMU DEV plugins (ACTIONABLE - will be reinstalled)
+    if (data.wpmu_dev_plugins && Object.keys(data.wpmu_dev_plugins).length > 0) {
+        html += '<h4 style="color:#7c3aed;">💎 WPMU DEV Premium Plugins to be Re-installed (' + Object.keys(data.wpmu_dev_plugins).length + ') <button onclick="copyPluginList(\'wpmu_dev\')" style="background:#7c3aed;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:12px;">Copy</button></h4>';
+        html += '<div style="background:#e9d5ff;padding:15px;border-radius:4px;border:2px solid #7c3aed;margin:10px 0;max-height:400px;overflow-y:auto;">';
+        html += '<div style="margin-bottom:10px;color:#4c2889;"><strong>✅ Will be automatically reinstalled with latest versions from WPMU DEV</strong></div>';
+        html += generatePluginTable(data.wpmu_dev_plugins, 'wpmu_dev');
+        html += '</div>';
+        Object.assign(allPlugins, data.wpmu_dev_plugins);
+    }
+
+    // Non-repository plugins (INFORMATIONAL - will NOT be reinstalled)
+    if (data.non_repo_plugins && Object.keys(data.non_repo_plugins).length > 0) {
+        html += '<h4 style="color:#6c757d;">🚫 Non-Repository Plugins (' + Object.keys(data.non_repo_plugins).length + ') <button onclick="copyPluginList(\'non_repository\')" style="background:#6c757d;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:12px;">Copy</button></h4>';
+        html += '<div style="background:#f8f9fa;padding:15px;border-radius:4px;border:2px solid #6c757d;margin:10px 0;max-height:150px;overflow-y:auto;">';
+        html += '<div style="margin-bottom:10px;color:#495057;"><strong>ℹ️ Informational only - these custom plugins will not be modified</strong></div>';
+        html += '<ul style="margin:0;padding-left:20px;">';
+        for (const [slug, plugin] of Object.entries(data.non_repo_plugins)) {
+            html += '<li style="margin:5px 0;"><strong>' + (plugin.name || slug) + '</strong> - ' + (plugin.reason || 'Custom plugin') + '</li>';
+        }
+        html += '</ul>';
+        html += '</div>';
+    }
+
+    // Suspicious files (INFORMATIONAL - will NOT be reinstalled)
+    if (data.suspicious_files && data.suspicious_files.length > 0) {
+        html += '<h4 style="color:#dc3545;">⚠️ Suspicious Files & Folders (' + data.suspicious_files.length + ') <button onclick="copyPluginList(\'suspicious\')" style="background:#dc3545;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:12px;">Copy</button></h4>';
+        html += '<div style="background:#f8d7da;padding:15px;border-radius:4px;border:2px solid #dc3545;margin:10px 0;max-height:200px;overflow-y:auto;">';
+        html += '<div style="margin-bottom:10px;color:#721c24;"><strong>⚠️ Security Warning:</strong> These files/folders don\'t belong to any recognized plugins and may be malware or unauthorized content. They will not be automatically processed.</div>';
+        html += '<ul style="margin:0;padding-left:20px;">';
+        for (const file of data.suspicious_files) {
+            const type = file.is_directory ? 'Directory' : 'File';
+            const size = file.size_mb + ' MB';
+            const count = file.is_directory ? ' (' + file.file_count + ' files)' : '';
+            html += '<li style="margin:5px 0;"><strong>' + file.name + '</strong> - ' + type + ' - ' + size + count + '</li>';
+        }
+        html += '</ul>';
+        html += '</div>';
+    }
+
+    // Safety warnings
+    html += '<div style="background:#f8d7da;border:1px solid #f5c6cb;padding:15px;border-radius:4px;margin:20px 0;">';
+    html += '<h4>⚠️ Important Safety Information</h4>';
+    html += '<ul style="margin:10px 0;padding-left:20px;">';
+    html += '<li>A complete backup of your current plugins will be created automatically</li>';
+    html += '<li>Hello Dolly (demo plugin) will be automatically removed if present</li>';
+    html += '<li>This process cannot be undone - review the list above carefully</li>';
+    html += '<li>Ensure you have database backups before proceeding</li>';
+    if (data.suspicious_files && data.suspicious_files.length > 0) {
+        html += '<li><strong>Suspicious files will be deleted</strong> - ensure they are not legitimate before proceeding</li>';
+    }
+    html += '</ul>';
+    html += '</div>';
+
+    // Re-install button
+    const totalToReinstall = (totals.wordpress_org || 0) + (totals.wpmu_dev || 0);
+    html += '<div style="text-align:center;margin:30px 0;">';
+    const escapedPluginsData = JSON.stringify(allPlugins).replace(/"/g, '"');
+    html += '<button onclick="confirmPluginReinstallation(this)" data-plugins="' + escapedPluginsData + '" style="background:#dc3545;color:white;border:none;padding:15px 30px;font-size:18px;font-weight:bold;border-radius:4px;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.2);">';
+    html += '🚀 Start Complete Ecosystem Re-installation (' + totalToReinstall + ' plugins)';
+    html += '</button>';
+    html += '<p style="margin-top:10px;color:#666;font-size:14px;">This action will download and install the latest versions from official repositories</p>';
+    html += '</div>';
+
+    return html;
+}
+
+// Generate plugin table HTML
+function generatePluginTable(plugins, type) {
+    let html = '<table class="plugin-analysis-table" style="width:100%;border-collapse:collapse;">';
+    html += '<thead>';
+    html += '<tr style="background:#f8f9fa;border-bottom:2px solid #dee2e6;">';
+    html += '<th style="padding:10px;text-align:left;border-right:1px solid #dee2e6;">Plugin Name</th>';
+    html += '<th style="padding:10px;text-align:left;border-right:1px solid #dee2e6;">Current Version</th>';
+    if (type === 'wordpress_org') {
+        html += '<th style="padding:10px;text-align:left;border-right:1px solid #dee2e6;">Last Updated</th>';
+        html += '<th style="padding:10px;text-align:left;">Plugin Page</th>';
+    }
+    html += '</tr>';
+    html += '</thead>';
+    html += '<tbody>';
+
+    for (const [slug, plugin] of Object.entries(plugins)) {
+        const name = plugin.name || slug;
+        const version = plugin.version || 'Unknown';
+        const bgColor = type === 'wpmu_dev' ? '#f8f9ff' : 'white';
+
+        html += '<tr style="border-bottom:1px solid #dee2e6;background:' + bgColor + ';">';
+        html += '<td style="padding:10px;border-right:1px solid #dee2e6;"><strong>' + name + '</strong><br><small style="color:#666;">(' + slug + ')</small></td>';
+        html += '<td style="padding:10px;border-right:1px solid #dee2e6;">' + version + '</td>';
+
+        if (type === 'wordpress_org') {
+            const lastUpdated = plugin.last_updated ? formatRelativeTime(plugin.last_updated) : 'Unknown';
+            const pluginUrl = plugin.plugin_url || 'https://wordpress.org/plugins/' + slug;
+            html += '<td style="padding:10px;border-right:1px solid #dee2e6;">' + lastUpdated + '</td>';
+            html += '<td style="padding:10px;"><a href="' + pluginUrl + '" target="_blank" style="color:#007bff;text-decoration:none;">View Plugin →</a></td>';
+        }
+
+        html += '</tr>';
+    }
+
+    html += '</tbody>';
+    html += '</table>';
+    return html;
+}
+
+// Format relative time (simplified version)
+function formatRelativeTime(timestamp) {
+    if (!timestamp) return 'Unknown';
+
+    const now = new Date();
+    const date = new Date(timestamp * 1000);
+    const diffMs = now - date;
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Yesterday';
+    if (diffDays < 30) return diffDays + ' days ago';
+    if (diffDays < 365) return Math.floor(diffDays / 30) + ' months ago';
+    return Math.floor(diffDays / 365) + ' years ago';
 }
 
 // Legacy core reinstallation function (kept for compatibility)
