@@ -2,7 +2,6 @@
 // AJAX functionality for plugin reinstallation with progress tracking
 
 // Plugin reinstallation with AJAX progress tracking
-let reinstallProgressInterval = null;
 let reinstallProgressFile = null;
 
 // Helper function to handle confirm dialog and button passing
@@ -18,12 +17,7 @@ function startPluginReinstallation(buttonElement) {
         return;
     }
 
-    // Stop any existing polling to prevent conflicts
-    if (reinstallProgressInterval) {
-        clearInterval(reinstallProgressInterval);
-        reinstallProgressInterval = null;
-        console.log('🛑 Stopped existing polling to prevent conflicts');
-    }
+    console.log('🚀 Starting plugin reinstallation');
 
     // Get plugin data from the button's data attribute
     const repoPluginsJson = buttonElement.getAttribute('data-plugins');
@@ -139,9 +133,6 @@ function handleBatchResponse(data, repoPluginsJson) {
             }, 1000);
         } else {
             // All batches completed - show results
-            clearInterval(reinstallProgressInterval);
-            reinstallProgressInterval = null;
-
             if (data.html) {
                 switchTab('plugins');
                 const pluginsTab = document.getElementById('plugins-tab');
@@ -155,8 +146,6 @@ function handleBatchResponse(data, repoPluginsJson) {
             }
         }
     } else if (data.error) {
-        clearInterval(reinstallProgressInterval);
-        reinstallProgressInterval = null;
         showError('Error: ' + data.error);
     }
 }
@@ -170,8 +159,6 @@ function showError(message) {
         statusEl.textContent = "Error";
         statusEl.className = "status-indicator status-completed";
     }
-    clearInterval(reinstallProgressInterval);
-    reinstallProgressInterval = null;
 }
 
 function processPluginBatch(repoPluginsJson, batchStart, batchSize) {
@@ -208,11 +195,7 @@ function processPluginBatch(repoPluginsJson, batchStart, batchSize) {
                     processPluginBatch(repoPluginsJson, batchInfo.next_batch_start, batchSize);
                 }, 1000); // Small delay between batches
             } else {
-                // All batches completed - stop polling and show results
-                clearInterval(reinstallProgressInterval);
-                reinstallProgressInterval = null;
-
-                // Show final results
+                // All batches completed - show results
                 if (data.html) {
                     // Switch to plugins tab (in case we're not already there)
                     switchTab('plugins');
@@ -231,10 +214,7 @@ function processPluginBatch(repoPluginsJson, batchStart, batchSize) {
                 }
             }
         } else if (data.error) {
-            // Error occurred - stop processing
-            clearInterval(reinstallProgressInterval);
-            reinstallProgressInterval = null;
-
+            // Error occurred - show error
             const detailsEl = document.getElementById("plugin-progress-details");
             const statusEl = document.getElementById("plugin-status-indicator");
             if (detailsEl) detailsEl.innerHTML = '<div style="color:#dc3545;">Error: ' + data.error + '</div>';
@@ -245,8 +225,6 @@ function processPluginBatch(repoPluginsJson, batchStart, batchSize) {
         }
     })
     .catch(error => {
-        clearInterval(reinstallProgressInterval);
-        reinstallProgressInterval = null;
         const detailsEl = document.getElementById("plugin-progress-details");
         const statusEl = document.getElementById("plugin-status-indicator");
         if (detailsEl) detailsEl.innerHTML = '<div style="color:#dc3545;">Error: ' + error.message + '</div>';
@@ -391,9 +369,6 @@ function updateReinstallProgress(data) {
     // Update status indicator class
     if (statusIndicator && (data.status === 'complete' || data.status === 'error')) {
         statusIndicator.className = "status-indicator status-completed";
-        // Stop polling when complete
-        clearInterval(reinstallProgressInterval);
-        reinstallProgressInterval = null;
     }
 }
 
@@ -401,13 +376,25 @@ function updateReinstallProgress(data) {
 function proceedPluginReinstallWithBackup() {
     const progressDetails = document.getElementById("plugin-progress-details");
     const progressText = document.getElementById("plugin-progress-text");
+    const statusIndicator = document.getElementById("plugin-status-indicator");
 
     if (progressDetails) {
-        progressDetails.innerHTML = '<div style="color:#28a745;">⏳ Proceeding with backup creation...</div>';
+        progressDetails.innerHTML = '<div style="color:#28a745;">⏳ Creating backup before proceeding with plugin reinstallation...</div>';
     }
     if (progressText) {
-        progressText.textContent = "Creating backup and proceeding";
+        progressText.textContent = "Creating backup...";
     }
+    if (statusIndicator) {
+        statusIndicator.textContent = "Backup";
+        statusIndicator.className = "status-indicator status-processing";
+    }
+
+    // Initialize new batch processing system
+    const progressUI = new CleanSweep_ProgressUI('plugin-progress-container');
+    const progressPoller = new CleanSweep_ProgressPoller(reinstallProgressFile,
+        (data) => progressUI.updateProgress(data), // Update callback
+        (data) => handleReinstallCompletion(data)  // Completion callback
+    );
 
     // Submit request to continue with backup
     const formData = new FormData();
@@ -433,11 +420,15 @@ function proceedPluginReinstallWithBackup() {
     })
     .then(data => {
         if (data.success) {
-            // Resume polling to track progress
-            reinstallProgressInterval = setInterval(pollReinstallProgress, 2000);
+            // Start polling for real-time progress updates
+            progressPoller.startPolling();
         } else {
             if (progressDetails) {
                 progressDetails.innerHTML = '<div style="color:#dc3545;">Error: Failed to proceed with backup</div>';
+            }
+            if (statusIndicator) {
+                statusIndicator.textContent = "Error";
+                statusIndicator.className = "status-indicator status-completed";
             }
         }
     })
@@ -445,7 +436,32 @@ function proceedPluginReinstallWithBackup() {
         if (progressDetails) {
             progressDetails.innerHTML = '<div style="color:#dc3545;">Error: ' + error.message + '</div>';
         }
+        if (statusIndicator) {
+            statusIndicator.textContent = "Error";
+            statusIndicator.className = "status-indicator status-completed";
+        }
     });
+}
+
+// Handle reinstallation completion
+function handleReinstallCompletion(data) {
+    console.log('Reinstallation completed:', data);
+
+    // Hide progress container and show results
+    const progressContainer = document.getElementById("plugin-progress-container");
+    if (progressContainer) {
+        progressContainer.style.display = "none";
+    }
+
+    // Show final results
+    if (data.results && data.html) {
+        // Switch to plugins tab and show results
+        switchTab('plugins');
+        const pluginsTab = document.getElementById('plugins-tab');
+        if (pluginsTab) {
+            pluginsTab.innerHTML = data.html;
+        }
+    }
 }
 
 // Handle proceeding without backup
@@ -459,6 +475,13 @@ function proceedPluginReinstallWithoutBackup() {
     if (progressText) {
         progressText.textContent = "Continuing without backup";
     }
+
+    // Initialize new batch processing system
+    const progressUI = new CleanSweep_ProgressUI('plugin-progress-container');
+    const progressPoller = new CleanSweep_ProgressPoller(reinstallProgressFile,
+        (data) => progressUI.updateProgress(data), // Update callback
+        (data) => handleReinstallCompletion(data)  // Completion callback
+    );
 
     // Submit request to continue without backup
     const formData = new FormData();
@@ -484,8 +507,8 @@ function proceedPluginReinstallWithoutBackup() {
     })
     .then(data => {
         if (data.success) {
-            // Resume polling to track progress
-            reinstallProgressInterval = setInterval(pollReinstallProgress, 2000);
+            // Start polling for real-time progress updates
+            progressPoller.startPolling();
         } else {
             if (progressDetails) {
                 progressDetails.innerHTML = '<div style="color:#dc3545;">Error: Failed to proceed without backup</div>';
@@ -515,8 +538,4 @@ function cancelPluginReinstall() {
         statusIndicator.textContent = "Cancelled";
         statusIndicator.className = "status-indicator status-completed";
     }
-
-    // Stop polling
-    clearInterval(reinstallProgressInterval);
-    reinstallProgressInterval = null;
 }

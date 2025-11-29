@@ -37,6 +37,17 @@ class CleanSweep_PluginReinstaller {
             if ($create_backup) {
                 clean_sweep_log_message("PluginReinstaller: Creating backup before reinstallation", 'info');
 
+                // Send progress update: Starting backup
+                if ($progress_file) {
+                    $progress_data = [
+                        'status' => 'processing',
+                        'progress' => 5,
+                        'message' => "Creating backup before plugin reinstallation...",
+                        'details' => "Backup in progress - please wait..."
+                    ];
+                    clean_sweep_write_progress_file($progress_file, $progress_data);
+                }
+
                 $backup_result = clean_sweep_create_backup();
                 if (!$backup_result) {
                     clean_sweep_log_message("PluginReinstaller: Backup creation failed, aborting reinstallation", 'error');
@@ -49,6 +60,17 @@ class CleanSweep_PluginReinstaller {
 
                 clean_sweep_log_message("PluginReinstaller: Backup created successfully", 'info');
                 $results['backup_created'] = true;
+
+                // Send progress update: Backup completed, starting plugin installation
+                if ($progress_file) {
+                    $progress_data = [
+                        'status' => 'processing',
+                        'progress' => 10,
+                        'message' => "Backup completed, starting plugin reinstallation...",
+                        'details' => "Backup saved successfully - now reinstalling plugins"
+                    ];
+                    clean_sweep_write_progress_file($progress_file, $progress_data);
+                }
             } elseif ($proceed_without_backup) {
                 clean_sweep_log_message("PluginReinstaller: Proceeding without backup as requested", 'warning');
             }
@@ -171,53 +193,60 @@ class CleanSweep_PluginReinstaller {
     }
 
     /**
-     * Reinstall WordPress.org plugins
+     * Reinstall WordPress.org plugins using batch processor
      *
      * @param array $wp_org_plugins Plugins to reinstall
      * @param string|null $progress_file Progress file
      * @return array Results
      */
     private function reinstall_wordpress_org_plugins($wp_org_plugins, $progress_file = null) {
-        $results = ['successful' => [], 'failed' => []];
+        if (empty($wp_org_plugins)) {
+            return ['successful' => [], 'failed' => []];
+        }
 
-        $total_plugins = count($wp_org_plugins);
-        $current_count = 0;
+        // Create batch processor for WordPress.org plugins
+        $batchProcessor = new CleanSweep_BatchProcessor($progress_file, 1); // Process one at a time for API rate limiting
 
-        foreach ($wp_org_plugins as $plugin_file => $plugin_data) {
-            $current_count++;
+        // Define the processor function
+        $processor = function($plugin_data, $index, $total) {
             $slug = $plugin_data['slug'];
             $plugin_name = $plugin_data['name'];
 
-            // Update progress
-            if ($progress_file) {
-                $progress_data = [
-                    'status' => 'reinstalling',
-                    'progress' => round(($current_count / $total_plugins) * 100),
-                    'message' => "Re-installing WordPress.org plugin $current_count of $total_plugins: $plugin_name",
-                    'current' => $current_count,
-                    'total' => $total_plugins
-                ];
-                @clean_sweep_write_progress_file($progress_file, $progress_data);
-            }
-
             if (clean_sweep_reinstall_plugin($slug)) {
-                $results['successful'][] = [
+                clean_sweep_log_message("PluginReinstaller: Successfully reinstalled WordPress.org plugin: $plugin_name", 'info');
+                return [
+                    'success' => true,
                     'name' => $plugin_name,
                     'slug' => $slug,
                     'status' => 'Re-installed successfully'
                 ];
-                clean_sweep_log_message("PluginReinstaller: Successfully reinstalled WordPress.org plugin: $plugin_name", 'info');
             } else {
-                $results['failed'][] = [
+                clean_sweep_log_message("PluginReinstaller: Failed to reinstall WordPress.org plugin: $plugin_name", 'error');
+                return [
+                    'success' => false,
                     'name' => $plugin_name,
                     'slug' => $slug,
-                    'status' => 'Re-installation failed'
+                    'error' => 'Re-installation failed'
                 ];
-                clean_sweep_log_message("PluginReinstaller: Failed to reinstall WordPress.org plugin: $plugin_name", 'error');
             }
+        };
 
-            // Small delay to be respectful to the API
-            sleep(1);
+        // Process plugins in batches
+        $batchResults = $batchProcessor->processItems(
+            $wp_org_plugins,
+            $processor,
+            'Reinstalling WordPress.org plugins'
+        );
+
+        // Format results for legacy compatibility
+        $results = ['successful' => [], 'failed' => []];
+
+        foreach ($batchResults['success'] as $success) {
+            $results['successful'][] = $success;
+        }
+
+        foreach ($batchResults['failed'] as $failure) {
+            $results['failed'][] = $failure;
         }
 
         return $results;

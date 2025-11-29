@@ -28,6 +28,11 @@ require_once __DIR__ . '/display.php';       // Display and rendering functions
 // Bootstrap Shield - Enhanced WordPress bootstrap protection
 require_once __DIR__ . '/includes/system/bootstrap-shield.php';
 
+// Batch Processing System - Reusable long-running operation framework
+require_once __DIR__ . '/includes/system/batch-processing/CleanSweep_BatchProcessor.php';
+require_once __DIR__ . '/includes/system/batch-processing/CleanSweep_ProgressManager.php';
+require_once __DIR__ . '/includes/system/batch-processing/CleanSweep_BatchProcessingException.php';
+
 // Feature-specific modules
 require_once __DIR__ . '/features/maintenance/plugin-reinstall.php';  // Plugin reinstallation
 require_once __DIR__ . '/features/maintenance/core-reinstall.php';    // Core file reinstallation
@@ -340,7 +345,7 @@ function clean_sweep_run_clean_sweep() {
                 header('Content-Type: application/json; charset=utf-8', true);
                 echo json_encode([
                     'success' => true,
-                    'results' => $analysis_results,
+                    ...$analysis_results,
                     'html' => $html_content
                 ], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
                 exit;
