@@ -685,6 +685,92 @@ $GLOBALS['wp_locale'] = new WP_Locale();
 $GLOBALS['wp_locale_switcher'] = new WP_Locale_Switcher();
 $GLOBALS['wp_locale_switcher']->init();
 
+// ============================================================================
+// CLEAN SWEEP RECOVERY FALLBACK FUNCTIONS
+// ============================================================================
+
+/**
+ * Download URL function - fallback for recovery mode when WordPress core unavailable
+ */
+if (!function_exists('download_url')) {
+    function download_url($url, $timeout = 300) {
+        // Recovery mode fallback - use Clean Sweep backups directory
+        $backup_dir = __DIR__ . '/../backups';
+        if (!is_dir($backup_dir)) {
+            mkdir($backup_dir, 0755, true);
+        }
+
+        // Download file and save to backups directory
+        $ch = curl_init();
+        curl_setopt($ch, CURLOPT_URL, $url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
+        curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+
+        $data = curl_exec($ch);
+        $error = curl_error($ch);
+        curl_close($ch);
+
+        if ($data === false) {
+            return false;
+        }
+
+        // Save to temp file in backups directory and return path
+        $temp_file = tempnam($backup_dir, 'download_');
+        if ($temp_file && file_put_contents($temp_file, $data) !== false) {
+            return $temp_file;
+        }
+
+        return false;
+    }
+}
+
+/**
+ * Unzip file function - fallback for recovery mode
+ */
+if (!function_exists('unzip_file')) {
+    function unzip_file($file, $to) {
+        // Use PHP's ZipArchive if available
+        if (class_exists('ZipArchive')) {
+            $zip = new ZipArchive();
+            $result = $zip->open($file);
+
+            if ($result === true) {
+                // Create destination directory if it doesn't exist
+                if (!is_dir($to)) {
+                    mkdir($to, 0755, true);
+                }
+
+                // Extract all files
+                $success = $zip->extractTo($to);
+                $zip->close();
+
+                if ($success) {
+                    return true;
+                } else {
+                    return new WP_Error('unzip_failed', 'Failed to extract ZIP file');
+                }
+            } else {
+                return new WP_Error('zip_open_failed', 'Failed to open ZIP file');
+            }
+        }
+
+        // Fallback: try system unzip command
+        if (function_exists('exec')) {
+            $command = "unzip -q -o '$file' -d '$to' 2>/dev/null";
+            exec($command, $output, $return_var);
+
+            if ($return_var === 0) {
+                return true;
+            }
+        }
+
+        // Last resort: return error
+        return new WP_Error('unzip_not_available', 'ZIP extraction not available');
+    }
+}
+
 // Load the functions for the active theme, for both parent and child theme if applicable.
 foreach ( wp_get_active_and_valid_themes() as $theme ) {
 	$wp_theme = wp_get_theme( basename( $theme ) );

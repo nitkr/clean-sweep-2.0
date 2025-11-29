@@ -48,98 +48,15 @@ require_once ABSPATH . 'wp-settings.php';
 // ============================================================================
 
 // ============================================================================
-// CONDITIONAL FALLBACK FUNCTIONS
+// CLEAN SWEEP SPECIFIC FUNCTIONS ONLY
 // ============================================================================
 
 /**
- * Download URL function - ONLY defined when WordPress core unavailable
- * In local_core mode: WordPress provides this, so we don't define it
- * In recovery mode: WordPress unavailable, so we provide fallback
+ * Note: WordPress core functions (download_url, unzip_file, etc.) are NOT defined here
+ * because clean-sweep-bootstrap.php loads WordPress in local_core mode, which provides them.
+ *
+ * Fallback functions are only defined in recovery mode when WordPress core is unavailable.
  */
-if (!function_exists('download_url')) {
-    function download_url($url, $timeout = 300) {
-        // This function only exists in recovery mode when WordPress core is unavailable
-        // Use Clean Sweep backups directory instead of system temp
-        $backup_dir = __DIR__ . '/../backups';
-        if (!is_dir($backup_dir)) {
-            mkdir($backup_dir, 0755, true);
-        }
-
-        // Download file and save to backups directory
-        $ch = curl_init();
-        curl_setopt($ch, CURLOPT_URL, $url);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-        curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
-        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-
-        $data = curl_exec($ch);
-        $error = curl_error($ch);
-        curl_close($ch);
-
-        if ($data === false) {
-            return false;
-        }
-
-        // Save to temp file in backups directory and return path
-        $temp_file = tempnam($backup_dir, 'download_');
-        if ($temp_file && file_put_contents($temp_file, $data) !== false) {
-            return $temp_file;
-        }
-
-        return false;
-    }
-}
-
-// ============================================================================
-// CUSTOM UNZIP FUNCTION (OVERRIDES WORDPRESS VERSION)
-// ============================================================================
-
-/**
- * Custom unzip_file function that overrides WordPress's version
- * Doesn't require filesystem constants like FS_CHMOD_DIR
- */
-if (!function_exists('unzip_file')) {
-    function unzip_file($file, $to) {
-        // Use PHP's ZipArchive if available
-        if (class_exists('ZipArchive')) {
-            $zip = new ZipArchive();
-            $result = $zip->open($file);
-
-            if ($result === true) {
-                // Create destination directory if it doesn't exist
-                if (!is_dir($to)) {
-                    mkdir($to, 0755, true);
-                }
-
-                // Extract all files
-                $success = $zip->extractTo($to);
-                $zip->close();
-
-                if ($success) {
-                    return true;
-                } else {
-                    return new WP_Error('unzip_failed', 'Failed to extract ZIP file');
-                }
-            } else {
-                return new WP_Error('zip_open_failed', 'Failed to open ZIP file');
-            }
-        }
-
-        // Fallback: try system unzip command
-        if (function_exists('exec')) {
-            $command = "unzip -q -o '$file' -d '$to' 2>/dev/null";
-            exec($command, $output, $return_var);
-
-            if ($return_var === 0) {
-                return true;
-            }
-        }
-
-        // Last resort: return error
-        return new WP_Error('unzip_not_available', 'ZIP extraction not available');
-    }
-}
 
 // ============================================================================
 // FILESYSTEM COMPATIBILITY
