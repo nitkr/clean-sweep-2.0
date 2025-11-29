@@ -313,8 +313,74 @@ function clean_sweep_get_directory_size($directory) {
 
 /**
  * Calculate backup size for plugin reinstallation
+ * Now uses ZIP size for accurate calculation
  */
 function clean_sweep_calculate_plugin_backup_size() {
+    global $clean_sweep_backup_info;
+
+    // If we have ZIP backup info from a recent backup, use the exact ZIP size
+    if (isset($clean_sweep_backup_info) && isset($clean_sweep_backup_info['size_bytes'])) {
+        clean_sweep_log_message("Using ZIP backup size: {$clean_sweep_backup_info['size_bytes']} bytes", 'info');
+        return $clean_sweep_backup_info['size_bytes'];
+    }
+
+    // Fallback: Create temporary ZIP to get accurate size
+    clean_sweep_log_message("No recent ZIP backup found, creating temporary ZIP for size calculation", 'info');
+
+    $temp_zip_path = sys_get_temp_dir() . '/clean_sweep_temp_backup_' . time() . '.zip';
+
+    if (!class_exists('ZipArchive')) {
+        clean_sweep_log_message("ZipArchive not available, falling back to directory size calculation", 'warning');
+        return clean_sweep_calculate_directory_size_fallback();
+    }
+
+    $zip = new ZipArchive();
+    if ($zip->open($temp_zip_path, ZipArchive::CREATE) !== TRUE) {
+        clean_sweep_log_message("Failed to create temporary ZIP, falling back to directory size", 'warning');
+        return clean_sweep_calculate_directory_size_fallback();
+    }
+
+    $plugins_dir = WP_PLUGIN_DIR;
+    $plugins_dir_length = strlen($plugins_dir) + 1;
+
+    $iterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($plugins_dir, RecursiveDirectoryIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::LEAVES_ONLY
+    );
+
+    $files_added = 0;
+    foreach ($iterator as $file) {
+        if ($file->isFile()) {
+            $file_path = $file->getPathname();
+            $relative_path = substr($file_path, $plugins_dir_length);
+
+            if ($zip->addFile($file_path, $relative_path)) {
+                $files_added++;
+            }
+        }
+    }
+
+    $zip->close();
+
+    if ($files_added > 0 && file_exists($temp_zip_path)) {
+        $zip_size = filesize($temp_zip_path);
+        clean_sweep_log_message("Temporary ZIP created: {$files_added} files, {$zip_size} bytes", 'info');
+
+        // Clean up temporary ZIP
+        @unlink($temp_zip_path);
+
+        return $zip_size;
+    } else {
+        clean_sweep_log_message("Failed to create temporary ZIP, using directory size fallback", 'warning');
+        @unlink($temp_zip_path);
+        return clean_sweep_calculate_directory_size_fallback();
+    }
+}
+
+/**
+ * Fallback directory size calculation (original method)
+ */
+function clean_sweep_calculate_directory_size_fallback() {
     $total_size = 0;
 
     // Calculate size of all plugin directories
@@ -324,6 +390,15 @@ function clean_sweep_calculate_plugin_backup_size() {
         $total_size += clean_sweep_get_directory_size($dir);
     }
 
+    // Also include single-file plugins in root directory
+    $plugin_files = glob(WP_PLUGIN_DIR . '/*.php');
+    foreach ($plugin_files as $file) {
+        if (is_file($file)) {
+            $total_size += filesize($file);
+        }
+    }
+
+    clean_sweep_log_message("Using fallback directory size calculation: {$total_size} bytes", 'info');
     return $total_size;
 }
 

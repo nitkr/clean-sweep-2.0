@@ -6,55 +6,81 @@
  */
 
 /**
- * Create backup of current plugins
+ * Create ZIP backup of current plugins
  */
 function clean_sweep_create_backup() {
     // Get Clean Sweep root directory (2 levels up from features/maintenance/)
     $clean_sweep_root = dirname(__DIR__, 2);
-    $backup_path = $clean_sweep_root . DIRECTORY_SEPARATOR . BACKUP_DIR;
-    clean_sweep_log_message("Creating backup of current plugins to: " . $backup_path);
+    $backup_dir = $clean_sweep_root . DIRECTORY_SEPARATOR . BACKUP_DIR;
 
-    // Check if backup directory already exists
-    if (file_exists($backup_path)) {
-        clean_sweep_log_message("Backup directory already exists: $backup_path");
-    } else {
-        // Try WordPress filesystem method first
-        if (!wp_mkdir_p($backup_path)) {
-            // Fallback to PHP mkdir with recursive flag
-            if (!mkdir($backup_path, 0755, true)) {
-                clean_sweep_log_message("Failed to create backup directory: $backup_path (permissions or path issue)", 'error');
-                return false;
-            }
-            clean_sweep_log_message("Created backup directory using PHP mkdir: $backup_path");
-        } else {
-            clean_sweep_log_message("Created backup directory using WordPress filesystem: $backup_path");
+    // Create backup directory if it doesn't exist
+    if (!wp_mkdir_p($backup_dir)) {
+        if (!mkdir($backup_dir, 0755, true)) {
+            clean_sweep_log_message("Failed to create backup directory: $backup_dir", 'error');
+            return false;
         }
+    }
+
+    // Generate ZIP filename with timestamp
+    $zip_filename = 'plugins-backup-' . date('Y-m-d-H-i-s') . '.zip';
+    $zip_path = $backup_dir . DIRECTORY_SEPARATOR . $zip_filename;
+
+    clean_sweep_log_message("Creating ZIP backup of plugins to: " . $zip_path);
+
+    // Check if ZipArchive is available
+    if (!class_exists('ZipArchive')) {
+        clean_sweep_log_message("ZipArchive class not available, cannot create ZIP backup", 'error');
+        return false;
+    }
+
+    $zip = new ZipArchive();
+    if ($zip->open($zip_path, ZipArchive::CREATE) !== TRUE) {
+        clean_sweep_log_message("Failed to create ZIP file: $zip_path", 'error');
+        return false;
     }
 
     $plugins_dir = WP_PLUGIN_DIR;
-    $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($plugins_dir));
+    $plugins_dir_length = strlen($plugins_dir) + 1; // +1 for trailing slash
 
+    // Add all plugin files to ZIP with relative paths
+    $iterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($plugins_dir, RecursiveDirectoryIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::LEAVES_ONLY
+    );
+
+    $files_added = 0;
     foreach ($iterator as $file) {
         if ($file->isFile()) {
-            $relative_path = str_replace($plugins_dir . '/', '', $file->getPathname());
-            $backup_file_path = $backup_path . '/' . $relative_path;
+            $file_path = $file->getPathname();
+            $relative_path = substr($file_path, $plugins_dir_length); // Remove plugins dir prefix
 
-            $backup_dir = dirname($backup_file_path);
-            if (!wp_mkdir_p($backup_dir)) {
-                // Fallback to PHP mkdir with recursive flag
-                if (!mkdir($backup_dir, 0755, true)) {
-                    clean_sweep_log_message("Failed to create backup subdirectory: $backup_dir", 'error');
-                    continue;
-                }
-                clean_sweep_log_message("Created backup subdirectory using PHP mkdir: $backup_dir");
-            }
-
-            if (!copy($file->getPathname(), $backup_file_path)) {
-                clean_sweep_log_message("Failed to backup file: " . $file->getPathname(), 'error');
+            if ($zip->addFile($file_path, $relative_path)) {
+                $files_added++;
+            } else {
+                clean_sweep_log_message("Failed to add file to ZIP: $file_path", 'warning');
             }
         }
     }
 
-    clean_sweep_log_message("Backup completed", 'success');
-    return true;
+    $zip->close();
+
+    if ($files_added > 0) {
+        $zip_size = filesize($zip_path);
+        $zip_size_mb = round($zip_size / (1024 * 1024), 1);
+        clean_sweep_log_message("ZIP backup completed: $files_added files, {$zip_size_mb}MB", 'success');
+
+        // Store ZIP path and size for later use
+        global $clean_sweep_backup_info;
+        $clean_sweep_backup_info = [
+            'zip_path' => $zip_path,
+            'size_bytes' => $zip_size,
+            'files_count' => $files_added
+        ];
+
+        return true;
+    } else {
+        clean_sweep_log_message("No files added to ZIP backup", 'error');
+        @unlink($zip_path); // Delete empty ZIP file
+        return false;
+    }
 }
