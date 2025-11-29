@@ -48,21 +48,17 @@ require_once ABSPATH . 'wp-settings.php';
 // ============================================================================
 
 // ============================================================================
-// DOWNLOAD URL FUNCTION
+// CONDITIONAL FALLBACK FUNCTIONS
 // ============================================================================
 
 /**
- * Download URL function - provides fallback when WordPress core unavailable
- * Uses WordPress core function when available for compatibility
+ * Download URL function - ONLY defined when WordPress core unavailable
+ * In local_core mode: WordPress provides this, so we don't define it
+ * In recovery mode: WordPress unavailable, so we provide fallback
  */
 if (!function_exists('download_url')) {
     function download_url($url, $timeout = 300) {
-        // Use WordPress core function if available (normal operation)
-        if (function_exists('wp_download_url')) {
-            return wp_download_url($url, $timeout);
-        }
-
-        // Fallback implementation for recovery scenarios
+        // This function only exists in recovery mode when WordPress core is unavailable
         // Use Clean Sweep backups directory instead of system temp
         $backup_dir = __DIR__ . '/../backups';
         if (!is_dir($backup_dir)) {
