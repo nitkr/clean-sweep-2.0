@@ -75,6 +75,32 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
         clean_sweep_log_message("Using WordPress version: $wp_version");
     }
 
+    // Check disk space before creating backup
+    $disk_check = clean_sweep_check_disk_space('core_reinstall');
+    if (!$disk_check['success']) {
+        clean_sweep_log_message("Disk space check failed: {$disk_check['message']}", 'error');
+
+        // For AJAX requests, update progress with disk space warning
+        if ($progress_file) {
+            $progress_data = [
+                'status' => 'disk_space_warning',
+                'progress' => 0,
+                'message' => 'Insufficient disk space for backup',
+                'disk_check' => $disk_check,
+                'can_proceed_without_backup' => $disk_check['can_proceed'] ?? false
+            ];
+            clean_sweep_write_progress_file($progress_file, $progress_data);
+            return ['success' => false, 'message' => 'Insufficient disk space for backup', 'disk_check' => $disk_check];
+        }
+
+        // For CLI/direct requests, show warning and abort
+        clean_sweep_log_message("Core reinstallation aborted due to insufficient disk space", 'error');
+        clean_sweep_log_message("Required: {$disk_check['required_mb']}MB, Available: {$disk_check['available_mb']}MB", 'error');
+        return ['success' => false, 'message' => 'Insufficient disk space for backup'];
+    }
+
+    clean_sweep_log_message("Disk space check passed: {$disk_check['backup_size_mb']}MB backup, {$disk_check['available_mb']}MB available", 'info');
+
     // Create backup directory for core files
     $core_backup_dir = 'backups/wp-core-backup-' . date('Y-m-d-H-i-s');
     clean_sweep_log_message("Creating core files backup to: $core_backup_dir");

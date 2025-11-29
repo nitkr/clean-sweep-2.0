@@ -286,3 +286,127 @@ function clean_sweep_progress_heartbeat($progress_file, $data, &$last_heartbeat)
         clean_sweep_reset_execution_time();
     }
 }
+
+/**
+ * Calculate directory size recursively (for backup size estimation)
+ */
+function clean_sweep_get_directory_size($directory) {
+    $size = 0;
+
+    if (!is_dir($directory)) {
+        return filesize($directory);
+    }
+
+    $iterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($directory, RecursiveDirectoryIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::SELF_FIRST
+    );
+
+    foreach ($iterator as $file) {
+        if ($file->isFile()) {
+            $size += $file->getSize();
+        }
+    }
+
+    return $size;
+}
+
+/**
+ * Calculate backup size for plugin reinstallation
+ */
+function clean_sweep_calculate_plugin_backup_size() {
+    $total_size = 0;
+
+    // Calculate size of all plugin directories
+    $plugin_dirs = glob(WP_PLUGIN_DIR . '/*', GLOB_ONLYDIR);
+
+    foreach ($plugin_dirs as $dir) {
+        $total_size += clean_sweep_get_directory_size($dir);
+    }
+
+    return $total_size;
+}
+
+/**
+ * Calculate backup size for core reinstallation
+ */
+function clean_sweep_calculate_core_backup_size() {
+    $total_size = 0;
+
+    // Files that get backed up during core reinstallation
+    $preserve_files = [
+        'wp-config.php',
+        'wp-content',    // This is a directory
+        '.htaccess',
+        'robots.txt'
+    ];
+
+    foreach ($preserve_files as $file) {
+        $full_path = ABSPATH . $file;
+        if (file_exists($full_path)) {
+            if (is_dir($full_path)) {
+                $total_size += clean_sweep_get_directory_size($full_path);
+            } else {
+                $total_size += filesize($full_path);
+            }
+        }
+    }
+
+    return $total_size;
+}
+
+/**
+ * Check disk space before backup operations
+ */
+function clean_sweep_check_disk_space($operation_type, $allow_proceed_without_backup = true) {
+    // Calculate actual backup size needed
+    if ($operation_type === 'plugin_reinstall') {
+        $backup_size_bytes = clean_sweep_calculate_plugin_backup_size();
+        $operation_name = 'plugin reinstallation';
+    } elseif ($operation_type === 'core_reinstall') {
+        $backup_size_bytes = clean_sweep_calculate_core_backup_size();
+        $operation_name = 'core reinstallation';
+    } else {
+        return ['success' => false, 'message' => 'Unknown operation type'];
+    }
+
+    // Convert to MB for display
+    $backup_size_mb = round($backup_size_bytes / (1024 * 1024), 1);
+
+    // Add 20% buffer for overhead (compression, temporary files, etc.)
+    $required_size_bytes = $backup_size_bytes * 1.2;
+    $required_size_mb = round($required_size_bytes / (1024 * 1024), 1);
+
+    // Get available disk space
+    $available_bytes = disk_free_space(ABSPATH);
+    $available_mb = round($available_bytes / (1024 * 1024), 1);
+
+    // Check if sufficient space is available
+    if ($available_bytes >= $required_size_bytes) {
+        return [
+            'success' => true,
+            'backup_size_mb' => $backup_size_mb,
+            'required_mb' => $required_size_mb,
+            'available_mb' => $available_mb
+        ];
+    }
+
+    // Insufficient space - prepare warning message
+    $shortfall_mb = round(($required_size_bytes - $available_bytes) / (1024 * 1024), 1);
+
+    return [
+        'success' => false,
+        'can_proceed' => $allow_proceed_without_backup,
+        'backup_size_mb' => $backup_size_mb,
+        'required_mb' => $required_size_mb,
+        'available_mb' => $available_mb,
+        'shortfall_mb' => $shortfall_mb,
+        'message' => "{$operation_name} backup needs {$required_size_mb}MB (includes 20% buffer). Only {$available_mb}MB available.",
+        'warning' => "⚠️ Proceeding without backup increases risk of data loss if {$operation_name} fails.",
+        'recommendations' => [
+            'Free up disk space by deleting unnecessary files',
+            'Consider external backup before proceeding',
+            'Contact hosting provider for disk space increase'
+        ]
+    ];
+}
