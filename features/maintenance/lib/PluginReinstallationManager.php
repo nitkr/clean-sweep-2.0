@@ -128,13 +128,21 @@ class CleanSweep_PluginReinstallationManager {
         $progress_file = $params['progress_file'] ?? null;
         $create_backup = $params['create_backup'] ?? false;
         $proceed_without_backup = $params['proceed_without_backup'] ?? false;
+        $wp_org_plugins = $params['wp_org_plugins'] ?? [];
+        $wpmu_dev_plugins = $params['wpmu_dev_plugins'] ?? [];
         $suspicious_files_to_delete = $params['suspicious_files_to_delete'] ?? [];
+        $batch_start = $params['batch_start'] ?? 0;
+        $batch_size = $params['batch_size'] ?? null;
 
         $reinstall_result = $this->reinstaller->start_reinstallation(
             $progress_file,
             $create_backup,
             $proceed_without_backup,
-            $suspicious_files_to_delete
+            $wp_org_plugins,
+            $wpmu_dev_plugins,
+            $suspicious_files_to_delete,
+            $batch_start,
+            $batch_size
         );
 
         if ($reinstall_result['success']) {

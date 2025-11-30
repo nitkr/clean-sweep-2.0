@@ -144,7 +144,7 @@ function copyPluginList(type) {
     // Find all h3 and h4 elements
     const headings = document.querySelectorAll("h3, h4");
 
-    if (type === "reinstall") {
+    if (type === "wordpress_org") {
         // Find the heading that contains "WordPress.org Plugins to be Re-installed"
         let targetHeading = null;
         headings.forEach(function(heading) {
@@ -175,7 +175,7 @@ function copyPluginList(type) {
                 }
             }
         }
-    } else if (type === "wpmudev") {
+    } else if (type === "wpmu_dev_regular" || type === "wpmudev") {
         // Find the heading that contains "WPMU DEV Premium Plugins to be Re-installed"
         let targetHeading = null;
         headings.forEach(function(heading) {
@@ -204,6 +204,50 @@ function copyPluginList(type) {
                         }
                     });
                 }
+            }
+        }
+    } else if (type === "non_repository") {
+        // Find the heading that contains "Non-Repository Plugins"
+        let targetHeading = null;
+        headings.forEach(function(heading) {
+            if (heading.textContent.includes("Non-Repository Plugins")) {
+                targetHeading = heading;
+            }
+        });
+
+        if (targetHeading) {
+            // Find the next div sibling and then the ul inside it
+            const nextDiv = targetHeading.nextElementSibling;
+            if (nextDiv && nextDiv.tagName === "DIV") {
+                const listItems = nextDiv.querySelectorAll("ul li strong");
+                listItems.forEach(function(item) {
+                    // For non-repository plugins, just get the plugin name (before the " - " reason)
+                    const fullText = item.textContent.trim();
+                    const pluginName = fullText.split(' - ')[0]; // Remove reason part
+                    pluginNames.push(pluginName);
+                });
+            }
+        }
+    } else if (type === "suspicious") {
+        // Find the heading that contains "Suspicious Files & Folders"
+        let targetHeading = null;
+        headings.forEach(function(heading) {
+            if (heading.textContent.includes("Suspicious Files & Folders")) {
+                targetHeading = heading;
+            }
+        });
+
+        if (targetHeading) {
+            // Find the next div sibling and then the ul inside it
+            const nextDiv = targetHeading.nextElementSibling;
+            if (nextDiv && nextDiv.tagName === "DIV") {
+                const listItems = nextDiv.querySelectorAll("ul li strong");
+                listItems.forEach(function(item) {
+                    // For suspicious files, just get the file name (first part before " - ")
+                    const fullText = item.textContent.trim();
+                    const fileName = fullText.split(' - ')[0]; // Remove type/size part
+                    pluginNames.push(fileName);
+                });
             }
         }
     } else if (type === "skipped") {

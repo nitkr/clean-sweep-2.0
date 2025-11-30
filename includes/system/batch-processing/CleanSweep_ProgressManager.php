@@ -85,8 +85,22 @@ class CleanSweep_ProgressManager {
 
         // Add summary information
         if (is_array($results)) {
-            $totalSuccess = $results['total_succeeded'] ?? count($results['success'] ?? []);
-            $totalFailed = $results['total_failed'] ?? count($results['failed'] ?? []);
+            $totalSuccess = 0;
+            $totalFailed = 0;
+
+            // Handle nested results structure from PluginReinstaller
+            if (isset($results['wordpress_org']) || isset($results['wpmu_dev']) || isset($results['suspicious_cleanup'])) {
+                $totalSuccess = count($results['wordpress_org']['successful'] ?? []) +
+                               count($results['wpmu_dev']['successful'] ?? []) +
+                               count($results['suspicious_cleanup']['deleted'] ?? []);
+                $totalFailed = count($results['wordpress_org']['failed'] ?? []) +
+                              count($results['wpmu_dev']['failed'] ?? []) +
+                              count($results['suspicious_cleanup']['failed'] ?? []);
+            } else {
+                // Handle flat structure for other operations (backward compatibility)
+                $totalSuccess = $results['total_succeeded'] ?? count($results['success'] ?? []);
+                $totalFailed = $results['total_failed'] ?? count($results['failed'] ?? []);
+            }
 
             $completionData['summary'] = [
                 'total_successful' => $totalSuccess,

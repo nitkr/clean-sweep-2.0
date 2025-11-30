@@ -7,6 +7,14 @@
  * @author Nithin K R
  */
 
+// Debug toggle - enable with ?debug=true URL parameter or window.CLEAN_SWEEP_DEBUG = true
+if (typeof window !== 'undefined') {
+    window.CLEAN_SWEEP_DEBUG = window.CLEAN_SWEEP_DEBUG || false;
+    if (new URLSearchParams(window.location.search).get('debug') === 'true') {
+        window.CLEAN_SWEEP_DEBUG = true;
+    }
+}
+
 class CleanSweep_ProgressPoller {
 
     /**
@@ -26,7 +34,7 @@ class CleanSweep_ProgressPoller {
         this.isPolling = false;
         this.lastProgress = null;
 
-        console.log('CleanSweep_ProgressPoller initialized for file:', progressFile);
+        if (window.CLEAN_SWEEP_DEBUG) console.log('CleanSweep_ProgressPoller initialized for file:', progressFile);
     }
 
     /**
@@ -38,7 +46,7 @@ class CleanSweep_ProgressPoller {
             return;
         }
 
-        console.log('CleanSweep_ProgressPoller: Starting polling every', this.intervalMs, 'ms');
+        if (window.CLEAN_SWEEP_DEBUG) console.log('CleanSweep_ProgressPoller: Starting polling every', this.intervalMs, 'ms');
         this.isPolling = true;
 
         this.intervalId = setInterval(() => {
@@ -58,7 +66,7 @@ class CleanSweep_ProgressPoller {
             this.intervalId = null;
         }
         this.isPolling = false;
-        console.log('CleanSweep_ProgressPoller: Stopped polling');
+        if (window.CLEAN_SWEEP_DEBUG) console.log('CleanSweep_ProgressPoller: Stopped polling');
     }
 
     /**
@@ -71,12 +79,15 @@ class CleanSweep_ProgressPoller {
         }
 
         try {
-            const response = await fetch(`logs/${this.progressFile}?t=${Date.now()}`);
-            console.log('ProgressPoller: Fetch response status:', response.status);
+            const fetchUrl = `logs/${this.progressFile}?t=${Date.now()}`;
+            if (window.CLEAN_SWEEP_DEBUG) console.log('ProgressPoller: Fetching:', fetchUrl);
+
+            const response = await fetch(fetchUrl);
+            if (window.CLEAN_SWEEP_DEBUG) console.log('ProgressPoller: Fetch response status:', response.status);
 
             if (response.status === 404) {
                 // Progress file doesn't exist yet - silently continue
-                console.log('ProgressPoller: Progress file not found, waiting...');
+                if (window.CLEAN_SWEEP_DEBUG) console.log('ProgressPoller: Progress file not found, waiting...');
                 return;
             }
 
@@ -86,20 +97,55 @@ class CleanSweep_ProgressPoller {
             }
 
             const text = await response.text();
-            console.log('ProgressPoller: Raw response:', text.substring(0, 200) + (text.length > 200 ? '...' : ''));
+            if (window.CLEAN_SWEEP_DEBUG) {
+                console.log('ProgressPoller: Raw response text length:', text.length);
+                console.log('ProgressPoller: Raw response preview:', text.substring(0, 300) + (text.length > 300 ? '...' : ''));
+            }
 
             const data = JSON.parse(text);
-            console.log('ProgressPoller: Parsed data:', data);
+            if (window.CLEAN_SWEEP_DEBUG) console.log('ProgressPoller: Parsed progress data:', {
+                status: data.status,
+                progress: data.progress,
+                message: data.message,
+                hasDetails: !!data.details
+            });
 
             // Check if progress has actually changed
             const progressKey = JSON.stringify(data);
             if (this.lastProgress === progressKey) {
-                console.log('ProgressPoller: No progress change, skipping update');
+                if (window.CLEAN_SWEEP_DEBUG) console.log('ProgressPoller: No progress change, skipping update');
                 return;
             }
             this.lastProgress = progressKey;
 
-            // Handle completion
+            // Handle batch completion (continue polling for next batch)
+            // Check if this is batch completion by looking at batch_info
+            if (data.batch_info && data.batch_info.is_batch_mode && data.results) {
+                // Check if we have results for this batch (indicates batch completion)
+                const hasResults = data.results.successful || data.results.failed;
+                if (hasResults) {
+                    if (window.CLEAN_SWEEP_DEBUG) console.log('ProgressPoller: Batch completed (detected via batch_info and results), triggering completion callback without stopping polling');
+
+                    if (this.completeCallback && typeof this.completeCallback === 'function') {
+                        this.completeCallback(data);
+                    }
+                    // Don't stop polling - continue monitoring for next batch
+                    return;
+                }
+            }
+
+            // Legacy support for explicit batch_complete status
+            if (data.status === 'batch_complete') {
+                if (window.CLEAN_SWEEP_DEBUG) console.log('ProgressPoller: Batch completed (legacy status), triggering completion callback without stopping polling');
+
+                if (this.completeCallback && typeof this.completeCallback === 'function') {
+                    this.completeCallback(data);
+                }
+                // Don't stop polling - continue monitoring for next batch
+                return;
+            }
+
+            // Handle final completion
             if (data.status === 'complete' || data.status === 'error') {
                 console.log('ProgressPoller: Operation completed with status:', data.status);
                 this.stopPolling();
@@ -111,8 +157,11 @@ class CleanSweep_ProgressPoller {
             }
 
             // Handle progress updates
+            if (window.CLEAN_SWEEP_DEBUG) console.log('ProgressPoller: Calling update callback with progress data');
             if (this.updateCallback && typeof this.updateCallback === 'function') {
                 this.updateCallback(data);
+            } else {
+                console.warn('ProgressPoller: No update callback defined!');
             }
 
         } catch (error) {
@@ -165,7 +214,7 @@ class CleanSweep_ProgressPoller {
      */
     setProgressFile(progressFile) {
         this.progressFile = progressFile;
-        console.log('ProgressPoller: Progress file changed to:', progressFile);
+        if (window.CLEAN_SWEEP_DEBUG) console.log('ProgressPoller: Progress file changed to:', progressFile);
     }
 
     /**

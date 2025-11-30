@@ -80,18 +80,30 @@ class CleanSweep_PluginAnalyzer {
             // Generate copy lists for UI
             $copy_lists = $this->generate_copy_lists($wp_org_plugins, $wpmu_dev_plugins, $non_repo_plugins, $suspicious_files);
 
-            // Store WPMU DEV plugins in transient for later use
-            if (!empty($wpmu_dev_plugins)) {
-                set_transient('clean_sweep_wpmudev_plugins', $wpmu_dev_plugins, 3600);
-                clean_sweep_log_message("Stored " . count($wpmu_dev_plugins) . " WPMU DEV plugins for reinstallation phase");
-            }
-
             $wp_org_count = count($wp_org_plugins);
             $wpmu_dev_count = count($wpmu_dev_plugins);
             $non_repo_count = count($non_repo_plugins);
             $suspicious_count = count($suspicious_files);
 
-            clean_sweep_log_message("Analysis complete: $wp_org_count WordPress.org, $wpmu_dev_count WPMU DEV, $non_repo_count non-repository, $suspicious_count suspicious files");
+            // Store FULL analysis data in site_transient keyed by progress_file for AJAX persistence
+            if ($progress_file) {
+                $analysis_key = 'clean_sweep_analysis_' . md5($progress_file);
+                $full_analysis_data = [
+                    'wp_org_plugins' => $wp_org_plugins,
+                    'wpmu_dev_plugins' => $wpmu_dev_plugins,
+                    'non_repo_plugins' => $non_repo_plugins,
+                    'suspicious_files' => $suspicious_files,
+                    'copy_lists' => $copy_lists,
+                    'totals' => [
+                        'wordpress_org' => $wp_org_count,
+                        'wpmu_dev' => $wpmu_dev_count,
+                        'non_repository' => $non_repo_count,
+                        'suspicious' => $suspicious_count,
+                        'total' => $total_plugins
+                    ]
+                ];
+                set_site_transient($analysis_key, $full_analysis_data);
+            }
 
             clean_sweep_log_message("=== WordPress Plugin Analysis Completed ===");
 

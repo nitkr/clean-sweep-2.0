@@ -6,6 +6,9 @@
  * Functions are now split into focused modules for better organization
  */
 
+// Load utilities first (no dependencies)
+require_once __DIR__ . '/lib/WpmuDevUtils.php';
+
 // Load new OOP architecture
 require_once __DIR__ . '/lib/PluginReinstallationManager.php';
 require_once __DIR__ . '/lib/PluginAnalyzer.php';
@@ -16,7 +19,6 @@ require_once __DIR__ . '/lib/PluginReinstaller.php';
 require_once __DIR__ . '/plugin-utils.php';
 require_once __DIR__ . '/plugin-backup.php';
 require_once __DIR__ . '/plugin-wordpress.php';
-require_once __DIR__ . '/plugin-wpmudev.php';
 
 /**
  * Analyze and categorize all installed plugins for reinstallation
@@ -199,7 +201,7 @@ function clean_sweep_verify_wpmudev_installations($wpmudev_plugins) {
  *
  * LEGACY WRAPPER: Now delegates to the new OOP PluginReinstallationManager
  */
-function clean_sweep_execute_reinstallation($repo_plugins, $progress_file = null, $batch_start = 0, $batch_size = null) {
+function clean_sweep_execute_reinstallation($repo_plugins, $progress_file = null, $batch_start = 0, $batch_size = null, $wpmu_dev_plugins = null, $suspicious_files_to_delete = null) {
     // Check backup creation preferences from POST data
     $create_backup = isset($_POST['create_backup']) && $_POST['create_backup'] === '1';
     $proceed_without_backup = isset($_POST['proceed_without_backup']) && $_POST['proceed_without_backup'] === '1';
@@ -221,6 +223,9 @@ function clean_sweep_execute_reinstallation($repo_plugins, $progress_file = null
         'progress_file' => $progress_file,
         'create_backup' => $create_backup,
         'proceed_without_backup' => $proceed_without_backup,
+        'wp_org_plugins' => $repo_plugins,  // Pass WordPress.org plugins explicitly
+        'wpmu_dev_plugins' => $wpmu_dev_plugins,  // Pass WPMU DEV plugins explicitly
+        'suspicious_files_to_delete' => $suspicious_files_to_delete,  // Pass suspicious files to delete
         'batch_start' => $batch_start,
         'batch_size' => $batch_size
     ]);

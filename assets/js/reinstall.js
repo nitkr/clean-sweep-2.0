@@ -1,34 +1,42 @@
-// Clean Sweep - Plugin Reinstallation
-// AJAX functionality for plugin reinstallation with progress tracking
+/**
+ * Clean Sweep - Plugin Reinstallation
+ * AJAX functionality for plugin reinstallation with unified progress tracking
+ */
 
-// Plugin reinstallation with AJAX progress tracking
+// Global progress objects
+let reinstallProgressUI = null;
+let reinstallProgressPoller = null;
 let reinstallProgressFile = null;
+let repoPluginsJson = null;
 
-// Helper function to handle confirm dialog and button passing
+/**
+ * Confirm plugin reinstallation and start the process
+ */
 function confirmPluginReinstallation(button) {
     if (confirm('Are you sure you want to proceed with re-installing the plugins? This will create a backup and replace all WordPress.org plugins with their latest versions.')) {
         startPluginReinstallation(button);
     }
 }
 
+/**
+ * Main entry point for plugin reinstallation
+ */
 function startPluginReinstallation(buttonElement) {
     if (!buttonElement) {
         console.error('Button element is null');
         return;
     }
 
-    console.log('🚀 Starting plugin reinstallation');
 
-    // Get plugin data from the button's data attribute
-    const repoPluginsJson = buttonElement.getAttribute('data-plugins');
 
-    // Generate unique progress file name
-    reinstallProgressFile = 'reinstall_progress_' + Date.now() + '.progress';
+    // Store plugin data
+    repoPluginsJson = buttonElement.getAttribute('data-plugins');
+    reinstallProgressFile = 'plugin_reinstall_session.progress';
 
-    // Hide analysis content and button
+    // Hide analysis content and show progress container
     const pluginsTab = document.getElementById('plugins-tab');
     if (pluginsTab) {
-        // Remove all children except the progress container
+        // Hide all children except progress container
         const children = Array.from(pluginsTab.children);
         children.forEach(child => {
             if (child.id !== 'plugin-progress-container') {
@@ -37,16 +45,12 @@ function startPluginReinstallation(buttonElement) {
         });
     }
 
-    // Show progress container at top (create if missing)
+    // Create progress container if missing
     let progressContainer = document.getElementById("plugin-progress-container");
-
-    // Create progress container if it doesn't exist (HTML update timing issue)
     if (!progressContainer) {
-        console.log('Creating missing progress container');
         progressContainer = document.createElement('div');
         progressContainer.id = 'plugin-progress-container';
-        progressContainer.style.display = 'none';
-        progressContainer.style.margin = '20px 0';
+        progressContainer.style.cssText = 'display:none; margin:20px 0;';
         progressContainer.innerHTML = `
             <div class="progress-container">
                 <h3><span id="plugin-status-indicator" class="status-indicator status-processing">Processing</span> Plugin Operation Progress</h3>
@@ -63,344 +67,37 @@ function startPluginReinstallation(buttonElement) {
     }
 
     // Show progress container
-    progressContainer.style.display = "block";
+    progressContainer.style.display = 'block';
     if (pluginsTab) {
         pluginsTab.insertBefore(progressContainer, pluginsTab.firstChild);
     }
 
-    // NEW: Check for backup choice first before starting batch processing
-    checkBackupChoiceAndStart(repoPluginsJson);
-}
-
-// NEW: Check for backup choice before starting batch processing
-function checkBackupChoiceAndStart(repoPluginsJson) {
-    console.log('🔍 Checking for backup choice before starting reinstallation');
-
-    // Make initial AJAX call to check if backup choice is needed
-    const formData = new FormData();
-    formData.append('action', 'reinstall_plugins');
-    formData.append('repo_plugins', repoPluginsJson);
-    formData.append('progress_file', reinstallProgressFile);
-    formData.append('batch_start', '0'); // First batch
-    formData.append('batch_size', '5');
-
-    fetch(window.location.href, {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.text())
-    .then(text => {
-        try {
-            const data = JSON.parse(text.trim());
-            console.log('📋 Initial response data:', data);
-            return data;
-        } catch (e) {
-            const preview = text.substring(0, 500).replace(/\s+/g, ' ').trim();
-            throw new Error('Failed to parse JSON. Content: ' + preview + (text.length > 500 ? '...' : ''));
-        }
-    })
-    .then(data => {
-        // Check if backup choice UI was returned (backend returns either disk_check or backup_choice)
-        if (data.disk_check || data.backup_choice) {
-            console.log('✅ Backup choice required - showing UI');
-            // Show backup choice UI and wait for user decision
-            updateReinstallProgress(data);
-        } else if (data.results) {
-            console.log('✅ No backup choice needed - starting batch processing');
-            // No backup choice needed, proceed with normal batch processing
-            handleBatchResponse(data, repoPluginsJson);
-        } else {
-            console.error('❌ Unexpected response format:', data);
-            showError('Unexpected response from server');
-        }
-    })
-    .catch(error => {
-        console.error('🚨 Error in backup choice check:', error);
-        showError('Failed to check backup requirements: ' + error.message);
-    });
-}
-
-// Helper function to handle batch processing responses
-function handleBatchResponse(data, repoPluginsJson) {
-    if (data.success) {
-        // Check if there are more batches to process
-        const batchInfo = data.batch_info || {};
-        if (batchInfo.has_more_batches && batchInfo.next_batch_start !== null) {
-            // Process next batch
-            console.log(`Processed initial batch, continuing with batch starting at ${batchInfo.next_batch_start}`);
-            setTimeout(() => {
-                processPluginBatch(repoPluginsJson, batchInfo.next_batch_start, 5);
-            }, 1000);
-        } else {
-            // All batches completed - show results
-            if (data.html) {
-                switchTab('plugins');
-                const pluginsTab = document.getElementById('plugins-tab');
-                if (pluginsTab) {
-                    pluginsTab.innerHTML = data.html;
-                }
-                const progressContainer = document.getElementById("plugin-progress-container");
-                if (progressContainer) {
-                    progressContainer.style.display = "none";
-                }
-            }
-        }
-    } else if (data.error) {
-        showError('Error: ' + data.error);
-    }
-}
-
-// Helper function to show errors
-function showError(message) {
-    const detailsEl = document.getElementById("plugin-progress-details");
-    const statusEl = document.getElementById("plugin-status-indicator");
-    if (detailsEl) detailsEl.innerHTML = '<div style="color:#dc3545;">Error: ' + message + '</div>';
-    if (statusEl) {
-        statusEl.textContent = "Error";
-        statusEl.className = "status-indicator status-completed";
-    }
-}
-
-function processPluginBatch(repoPluginsJson, batchStart, batchSize) {
-    // Submit the request via AJAX for this batch
-    const formData = new FormData();
-    formData.append('action', 'reinstall_plugins');
-    formData.append('repo_plugins', repoPluginsJson);
-    formData.append('progress_file', reinstallProgressFile);
-    formData.append('batch_start', batchStart);
-    formData.append('batch_size', batchSize);
-
-    fetch(window.location.href, {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => response.text())
-    .then(text => {
-        try {
-            const data = JSON.parse(text.trim());
-            return data;
-        } catch (e) {
-            const preview = text.substring(0, 500).replace(/\s+/g, ' ').trim();
-            throw new Error('Failed to parse JSON. Content: ' + preview + (text.length > 500 ? '...' : ''));
-        }
-    })
-    .then(data => {
-        if (data.success) {
-            // Check if there are more batches to process
-            const batchInfo = data.batch_info || {};
-            if (batchInfo.has_more_batches && batchInfo.next_batch_start !== null) {
-                // Process next batch
-                console.log(`Processed batch ${batchStart}-${batchStart + batchSize - 1}, continuing with next batch...`);
-                setTimeout(() => {
-                    processPluginBatch(repoPluginsJson, batchInfo.next_batch_start, batchSize);
-                }, 1000); // Small delay between batches
-            } else {
-                // All batches completed - show results
-                if (data.html) {
-                    // Switch to plugins tab (in case we're not already there)
-                    switchTab('plugins');
-
-                    // Update the plugins tab content with the rendered HTML
-                    const pluginsTab = document.getElementById('plugins-tab');
-                    if (pluginsTab) {
-                        pluginsTab.innerHTML = data.html;
-                    }
-
-                    // Hide the progress container
-                    const progressContainer = document.getElementById("plugin-progress-container");
-                    if (progressContainer) {
-                        progressContainer.style.display = "none";
-                    }
-                }
-            }
-        } else if (data.error) {
-            // Error occurred - show error
-            const detailsEl = document.getElementById("plugin-progress-details");
-            const statusEl = document.getElementById("plugin-status-indicator");
-            if (detailsEl) detailsEl.innerHTML = '<div style="color:#dc3545;">Error: ' + data.error + '</div>';
-            if (statusEl) {
-                statusEl.textContent = "Error";
-                statusEl.className = "status-indicator status-completed";
-            }
-        }
-    })
-    .catch(error => {
-        const detailsEl = document.getElementById("plugin-progress-details");
-        const statusEl = document.getElementById("plugin-status-indicator");
-        if (detailsEl) detailsEl.innerHTML = '<div style="color:#dc3545;">Error: ' + error.message + '</div>';
-        if (statusEl) {
-            statusEl.textContent = "Error";
-            statusEl.className = "status-indicator status-completed";
-        }
-    });
-}
-
-function pollReinstallProgress() {
-    if (!reinstallProgressFile) return;
-
-    console.log('🔄 Polling progress file:', reinstallProgressFile);
-
-    // Progress files are stored in logs directory for web-accessibility
-    fetch('logs/' + reinstallProgressFile + '?t=' + Date.now())
-        .then(response => {
-            console.log('📡 Progress file fetch response:', response.status);
-            if (response.status === 404) {
-                // Progress file doesn't exist yet - silently continue polling
-                console.log('⏳ Waiting for progress file creation...');
-                return null;
-            }
-            if (response.ok) {
-                return response.text();
-            }
-            return null;
-        })
-        .then(text => {
-            if (text) {
-                console.log('📄 Raw progress response text:', text);
-                try {
-                    const data = JSON.parse(text);
-                    console.log('🔍 Parsed progress data:', data);
-                    updateReinstallProgress(data);
-                } catch (e) {
-                    console.warn('⚠️ JSON parsing failed, file might not be complete yet:', e);
-                    // JSON parsing failed, file might not be complete yet
-                }
-            } else {
-                console.log('📄 No text response from progress file');
-            }
-        })
-        .catch(error => {
-            // Only log real network errors, not expected 404s
-            if (!error.message.includes('404')) {
-                console.error('🚨 Progress polling network error:', error);
-            }
-        });
-}
-
-function updateReinstallProgress(data) {
-    console.log('🎯 updateReinstallProgress called with data:', data);
-
-    const statusIndicator = document.getElementById("plugin-status-indicator");
-    const progressFill = document.getElementById("plugin-progress-fill");
-    const progressText = document.getElementById("plugin-progress-text");
-    const progressDetails = document.getElementById("plugin-progress-details");
-
-    console.log('🔍 Checking backup choice conditions:');
-    console.log('  - data.status === disk_space_warning:', data.status === 'disk_space_warning');
-    console.log('  - data.backup_choice exists:', !!data.backup_choice);
-    console.log('  - data.disk_check && data.disk_check.show_choice:', !!(data.disk_check && data.disk_check.show_choice));
-
-    // Special handling for disk space warnings and backup choice
-    if (data.disk_check || data.backup_choice) {
-        console.log('✅ BACKUP CHOICE UI DETECTED - Showing backup choice interface');
-
-        // Use the disk_check data (backend returns either format)
-        const diskCheck = data.disk_check || data.backup_choice;
-
-        if (statusIndicator) {
-            statusIndicator.textContent = diskCheck && diskCheck.space_status === 'insufficient' ? "Warning" : "Ready";
-            statusIndicator.className = "status-indicator status-paused";
-        }
-
-        if (progressText) {
-            progressText.textContent = diskCheck && diskCheck.space_status === 'insufficient' ?
-                "Backup space insufficient" : "Choose backup option";
-        }
-
-        if (progressDetails && diskCheck) {
-            const isInsufficient = diskCheck.space_status === 'insufficient';
-
-            progressDetails.innerHTML = `
-                <div style="color:#856404;background:#fff3cd;border:1px solid #ffeaa7;padding:15px;border-radius:4px;margin:10px 0;">
-                    <h4 style="margin-top:0;">💾 Plugin Reinstallation - Backup Options</h4>
-                    <p style="margin-bottom:10px;"><strong>Estimated backup size: ${diskCheck.backup_size_mb}MB</strong></p>
-                    <div style="background:#f8f9fa;padding:10px;border-radius:3px;margin:10px 0;">
-                        <p style="margin:5px 0;"><strong>Backup Size:</strong> ${diskCheck.backup_size_mb}MB</p>
-                        <p style="margin:5px 0;"><strong>With Buffer:</strong> ${diskCheck.required_mb}MB</p>
-                        <p style="margin:5px 0;"><strong>Available Space:</strong> ${diskCheck.available_mb}MB</p>
-                        ${diskCheck.shortfall_mb ? `<p style="margin:5px 0;color:#dc3545;"><strong>Shortfall:</strong> ${diskCheck.shortfall_mb}MB</p>` : ''}
-                    </div>
-                    ${isInsufficient ? `
-                        <p style="color:#dc3545;font-size:14px;margin:10px 0;">
-                            <strong>⚠️ Warning:</strong> ${diskCheck.warning}
-                        </p>
-                    ` : `
-                        <p style="color:#28a745;font-size:14px;margin:10px 0;">
-                            <strong>✅ Status:</strong> ${diskCheck.message}
-                        </p>
-                    `}
-                    <div style="margin-top:15px;">
-                        <button onclick="proceedPluginReinstallWithBackup()" style="background:#28a745;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;margin-right:10px;">
-                            Create Backup (~${diskCheck.backup_size_mb}MB)
-                        </button>
-                        <button onclick="proceedPluginReinstallWithoutBackup()" style="background:#ffc107;color:black;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;margin-right:10px;">
-                            Skip Backup (Faster)
-                        </button>
-                        <button onclick="cancelPluginReinstall()" style="background:#dc3545;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;">
-                            Cancel
-                        </button>
-                    </div>
-                </div>
-            `;
-        }
-
-        // Stop polling while waiting for user decision
-        return;
-    }
-
-    if (statusIndicator && data.status) {
-        statusIndicator.textContent = data.status.charAt(0).toUpperCase() + data.status.slice(1);
-    }
-
-    if (progressFill && data.progress !== undefined) {
-        progressFill.style.width = data.progress + "%";
-    }
-
-    if (progressText && data.message) {
-        progressText.textContent = data.message;
-    }
-
-    if (progressDetails && data.details) {
-        progressDetails.innerHTML = data.details;
-    }
-
-    // Update status indicator class
-    if (statusIndicator && (data.status === 'complete' || data.status === 'error')) {
-        statusIndicator.className = "status-indicator status-completed";
-    }
-}
-
-// Handle proceeding with backup
-function proceedPluginReinstallWithBackup() {
-    const progressDetails = document.getElementById("plugin-progress-details");
-    const progressText = document.getElementById("plugin-progress-text");
-    const statusIndicator = document.getElementById("plugin-status-indicator");
-
-    if (progressDetails) {
-        progressDetails.innerHTML = '<div style="color:#28a745;">⏳ Creating backup before proceeding with plugin reinstallation...</div>';
-    }
-    if (progressText) {
-        progressText.textContent = "Creating backup...";
-    }
-    if (statusIndicator) {
-        statusIndicator.textContent = "Backup";
-        statusIndicator.className = "status-indicator status-processing";
-    }
-
-    // Initialize new batch processing system with IMMEDIATE polling
-    const progressUI = new CleanSweep_ProgressUI('plugin-progress-container');
-    const progressPoller = new CleanSweep_ProgressPoller(reinstallProgressFile,
-        (data) => progressUI.updateProgress(data), // Update callback
-        (data) => handleReinstallCompletion(data), // Completion callback
-        500  // Poll every 500ms for fast operations
+    // Initialize unified progress UI and poller
+    reinstallProgressUI = new CleanSweep_ProgressUI('plugin-progress-container');
+    reinstallProgressPoller = new CleanSweep_ProgressPoller(reinstallProgressFile, 
+        (data) => reinstallProgressUI.updateProgress(data),
+        handleReinstallCompletion,
+        500 // Fast polling for responsive UI
     );
 
-    // Submit request to continue with backup
+    // Start polling immediately
+    reinstallProgressPoller.startPolling();
+
+    // Kick off the process by checking backup choice
+    checkBackupChoiceAndStart();
+}
+
+/**
+ * Check for backup choice and start the process
+ */
+function checkBackupChoiceAndStart() {
+
+
     const formData = new FormData();
     formData.append('action', 'reinstall_plugins');
+    formData.append('repo_plugins', repoPluginsJson);
     formData.append('progress_file', reinstallProgressFile);
-    formData.append('create_backup', '1'); // Explicitly request backup
-    formData.append('batch_start', '0'); // Restart from beginning
+    formData.append('batch_start', '0');
     formData.append('batch_size', '5');
 
     fetch(window.location.href, {
@@ -408,134 +105,224 @@ function proceedPluginReinstallWithBackup() {
         body: formData
     })
     .then(response => response.text())
-    .then(text => {
-        try {
-            const data = JSON.parse(text.trim());
-            return data;
-        } catch (e) {
-            const preview = text.substring(0, 500).replace(/\s+/g, ' ').trim();
-            throw new Error('Failed to parse JSON. Content: ' + preview + (text.length > 500 ? '...' : ''));
-        }
-    })
+    .then(text => JSON.parse(text.trim()))
     .then(data => {
-        if (data.success) {
-            // Start polling IMMEDIATELY for real-time progress updates
-            progressPoller.startPolling();
-        } else {
+        // Check if this is a backup choice response
+        if (data.disk_check) {
+
+            // Stop polling since we're handling the response directly
+            reinstallProgressPoller.stopPolling();
+
+            // Display backup choice UI - the HTML should be in the response
+            const progressDetails = document.getElementById('plugin-progress-details');
             if (progressDetails) {
-                progressDetails.innerHTML = '<div style="color:#dc3545;">Error: Failed to proceed with backup</div>';
+                // The backup choice HTML should be part of the response
+                // For now, create a simple backup choice UI
+                const backupHtml = `
+                    <div style="color:#856404;background:#fff3cd;border:1px solid #ffeaa7;padding:15px;border-radius:4px;margin:10px 0;">
+                        <h4 style="margin-top:0;">💾 Plugin Reinstallation - Backup Options</h4>
+                        <p style="margin-bottom:10px;"><strong>Estimated backup size: ${data.disk_check.backup_size_mb || 'Unknown'}MB</strong></p>
+                        <div style="background:#f8f9fa;padding:10px;border-radius:3px;margin:10px 0;">
+                            <p style="margin:5px 0;"><strong>Available Space:</strong> ${data.disk_check.available_mb || 'Unknown'}MB</p>
+                        </div>
+                        <div style="margin-top:15px;">
+                            <button onclick="proceedPluginReinstallWithBackup()" style="background:#28a745;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;margin-right:10px;">
+                                Create Backup (~${data.disk_check.backup_size_mb || 'Unknown'}MB)
+                            </button>
+                            <button onclick="proceedPluginReinstallWithoutBackup()" style="background:#ffc107;color:black;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;margin-right:10px;">
+                                Skip Backup (Faster)
+                            </button>
+                            <button onclick="cancelPluginReinstall()" style="background:#dc3545;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;">
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                `;
+                progressDetails.innerHTML = backupHtml;
+
+                // Update progress indicator
+                const statusIndicator = document.getElementById('plugin-status-indicator');
+                if (statusIndicator) {
+                    statusIndicator.textContent = 'Ready';
+                    statusIndicator.className = 'status-indicator status-paused';
+                }
+
+                const progressText = document.getElementById('plugin-progress-text');
+                if (progressText) {
+                    progressText.textContent = 'Choose backup option';
+                }
             }
-            if (statusIndicator) {
-                statusIndicator.textContent = "Error";
-                statusIndicator.className = "status-indicator status-completed";
-            }
+
+            return; // Don't continue with polling
         }
+
+        // For other responses, let the poller handle progress updates
+        // Progress updates will be handled by poller
+        // No need to update UI here - poller handles it
     })
     .catch(error => {
-        if (progressDetails) {
-            progressDetails.innerHTML = '<div style="color:#dc3545;">Error: ' + error.message + '</div>';
-        }
-        if (statusIndicator) {
-            statusIndicator.textContent = "Error";
-            statusIndicator.className = "status-indicator status-completed";
-        }
+        console.error('Error checking backup:', error);
+        reinstallProgressUI.updateProgress({
+            status: 'error',
+            message: 'Failed to initialize operation: ' + error.message
+        });
     });
 }
 
-// Handle reinstallation completion
+/**
+ * Handle reinstallation completion
+ */
 function handleReinstallCompletion(data) {
-    console.log('Reinstallation completed:', data);
+    // Check if this is an intermediate batch completion (more batches needed)
+    if (data.batch_info && data.batch_info.has_more_batches) {
+        // Don't stop polling - continue monitoring progress
+        // Automatically trigger next batch
+        const nextBatchStart = (data.batch_info.batch_start || 0) + (data.batch_info.batch_size || 5);
 
-    // Hide progress container and show results
-    const progressContainer = document.getElementById("plugin-progress-container");
-    if (progressContainer) {
-        progressContainer.style.display = "none";
+        const formData = new FormData();
+        formData.append('action', 'reinstall_plugins');
+        formData.append('progress_file', reinstallProgressFile);
+        formData.append('batch_start', nextBatchStart.toString());
+        formData.append('batch_size', (data.batch_info.batch_size || 5).toString());
+
+        fetch(window.location.href, {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.text())
+        .then(text => JSON.parse(text.trim()))
+        .then(batchData => {
+            // Continue polling - don't show results yet
+        })
+        .catch(error => {
+            console.error('Error starting next batch:', error);
+            // Stop polling and show error
+            reinstallProgressPoller.stopPolling();
+            reinstallProgressUI.updateProgress({
+                status: 'error',
+                message: 'Failed to continue batch processing: ' + error.message
+            });
+        });
+
+        return; // Don't show results or stop polling yet
     }
 
-    // Show final results
+    // This is the final completion - show results
+    reinstallProgressPoller.stopPolling();
+
+    // Show results if available
     if (data.results && data.html) {
-        // Switch to plugins tab and show results
         switchTab('plugins');
         const pluginsTab = document.getElementById('plugins-tab');
         if (pluginsTab) {
             pluginsTab.innerHTML = data.html;
+        } else {
+            console.error('plugins-tab element not found');
         }
+    } else {
+        console.warn('Missing results or html in final completion data');
     }
+
+    // Hide progress container after delay
+    setTimeout(() => {
+        const progressContainer = document.getElementById('plugin-progress-container');
+        if (progressContainer) {
+            progressContainer.style.display = 'none';
+        }
+    }, 3000);
 }
 
-// Handle proceeding without backup
-function proceedPluginReinstallWithoutBackup() {
-    const progressDetails = document.getElementById("plugin-progress-details");
-    const progressText = document.getElementById("plugin-progress-text");
+/**
+ * Proceed with backup
+ */
+function proceedPluginReinstallWithBackup() {
+    console.log('💾 Proceeding with backup creation...');
 
+    // Update UI to show we're proceeding
+    const progressDetails = document.getElementById('plugin-progress-details');
     if (progressDetails) {
-        progressDetails.innerHTML = '<div style="color:#28a745;">⏳ Proceeding without backup as requested...</div>';
+        progressDetails.innerHTML = '<div style="color:#28a745;">⏳ Proceeding with plugin reinstallation with backup...</div>';
     }
+
+    const progressText = document.getElementById('plugin-progress-text');
     if (progressText) {
-        progressText.textContent = "Continuing without backup";
+        progressText.textContent = 'Creating backup and proceeding';
     }
 
-    // Initialize new batch processing system with IMMEDIATE polling
-    const progressUI = new CleanSweep_ProgressUI('plugin-progress-container');
-    const progressPoller = new CleanSweep_ProgressPoller(reinstallProgressFile,
-        (data) => progressUI.updateProgress(data), // Update callback
-        (data) => handleReinstallCompletion(data), // Completion callback
-        500  // Poll every 500ms for fast operations
-    );
-
-    // Submit request to continue without backup
     const formData = new FormData();
     formData.append('action', 'reinstall_plugins');
     formData.append('progress_file', reinstallProgressFile);
-    formData.append('proceed_without_backup', '1');
-    formData.append('batch_start', '0'); // Restart from beginning
+    formData.append('create_backup', '1');
+    formData.append('batch_start', '0');
     formData.append('batch_size', '5');
 
     fetch(window.location.href, {
         method: 'POST',
         body: formData
     })
-    .then(response => response.text())
-    .then(text => {
-        try {
-            const data = JSON.parse(text.trim());
-            return data;
-        } catch (e) {
-            const preview = text.substring(0, 500).replace(/\s+/g, ' ').trim();
-            throw new Error('Failed to parse JSON. Content: ' + preview + (text.length > 500 ? '...' : ''));
-        }
-    })
-    .then(data => {
-        if (data.success) {
-            // Start polling IMMEDIATELY for real-time progress updates
-            progressPoller.startPolling();
+    .then(response => {
+        if (response.ok) {
+            // Restart polling to track actual reinstallation progress
+            reinstallProgressPoller.startPolling();
+            console.log('Backup request sent, polling restarted');
         } else {
-            if (progressDetails) {
-                progressDetails.innerHTML = '<div style="color:#dc3545;">Error: Failed to proceed without backup</div>';
-            }
+            console.error('Backup request failed');
         }
     })
     .catch(error => {
-        if (progressDetails) {
-            progressDetails.innerHTML = '<div style="color:#dc3545;">Error: ' + error.message + '</div>';
-        }
+        console.error('Error sending backup request:', error);
     });
 }
 
-// Handle canceling the operation
-function cancelPluginReinstall() {
-    const progressDetails = document.getElementById("plugin-progress-details");
-    const progressText = document.getElementById("plugin-progress-text");
-    const statusIndicator = document.getElementById("plugin-status-indicator");
+/**
+ * Proceed without backup
+ */
+function proceedPluginReinstallWithoutBackup() {
+    console.log('⚡ Proceeding without backup...');
 
+    // Update UI to show we're proceeding
+    const progressDetails = document.getElementById('plugin-progress-details');
     if (progressDetails) {
-        progressDetails.innerHTML = '<div style="color:#dc3545;">❌ Operation cancelled by user</div>';
+        progressDetails.innerHTML = '<div style="color:#28a745;">⏳ Proceeding with plugin reinstallation without backup...</div>';
     }
+
+    const progressText = document.getElementById('plugin-progress-text');
     if (progressText) {
-        progressText.textContent = "Operation cancelled";
+        progressText.textContent = 'Continuing without backup';
     }
-    if (statusIndicator) {
-        statusIndicator.textContent = "Cancelled";
-        statusIndicator.className = "status-indicator status-completed";
-    }
+
+    const formData = new FormData();
+    formData.append('action', 'reinstall_plugins');
+    formData.append('progress_file', reinstallProgressFile);
+    formData.append('proceed_without_backup', '1');
+    formData.append('batch_start', '0');
+    formData.append('batch_size', '5');
+
+    fetch(window.location.href, {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => {
+        if (response.ok) {
+            // Restart polling to track actual reinstallation progress
+            reinstallProgressPoller.startPolling();
+            console.log('No-backup request sent, polling restarted');
+        } else {
+            console.error('No-backup request failed');
+        }
+    })
+    .catch(error => {
+        console.error('Error sending no-backup request:', error);
+    });
+}
+
+/**
+ * Cancel operation
+ */
+function cancelPluginReinstall() {
+    reinstallProgressPoller.stopPolling();
+    reinstallProgressUI.updateProgress({
+        status: 'error',
+        message: 'Operation cancelled by user'
+    });
 }

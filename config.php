@@ -10,7 +10,7 @@
 
 // Define constants
 define('CLEAN_SWEEP_VERSION', '2.0');
-define('BACKUP_DIR', 'backups/plugins-backup-' . date('Y-m-d-H-i-s'));
+define('BACKUP_DIR', 'backups');
 define('LOG_FILE', 'clean-sweep-log-' . date('Y-m-d-H-i-s') . '.txt');
 define('LOGS_DIR', __DIR__ . '/logs/');
 define('TEMP_DIR', __DIR__ . '/backups/temp/'); // Internal temporary files

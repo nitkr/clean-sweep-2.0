@@ -7,6 +7,14 @@
  * @author Nithin K R
  */
 
+// Debug toggle - enable with ?debug=true URL parameter or window.CLEAN_SWEEP_DEBUG = true
+if (typeof window !== 'undefined') {
+    window.CLEAN_SWEEP_DEBUG = window.CLEAN_SWEEP_DEBUG || false;
+    if (new URLSearchParams(window.location.search).get('debug') === 'true') {
+        window.CLEAN_SWEEP_DEBUG = true;
+    }
+}
+
 class CleanSweep_ProgressUI {
 
     /**
@@ -19,8 +27,112 @@ class CleanSweep_ProgressUI {
         this.container = null;
         this.elements = {};
 
-        console.log('CleanSweep_ProgressUI initialized for container:', containerId);
+        // State transition management
+        this.currentState = null;
+        this.stateStartTime = null;
+        this.minDisplayTimes = {
+            'backup_completed': 1500,  // 1.5 seconds for backup completion
+            'processing': 500,        // 0.5 seconds for processing states
+            'complete': 1000          // 1 second for completion states
+        };
+        this.pendingStateUpdate = null;
+
+        if (window.CLEAN_SWEEP_DEBUG) console.log('CleanSweep_ProgressUI initialized for container:', containerId);
         this.initializeElements();
+    }
+
+    /**
+     * Check if we should allow this state transition
+     *
+     * @param {object} data - Progress data from server
+     * @returns {boolean} Whether to allow the transition
+     */
+    shouldAllowStateTransition(data) {
+        const message = (data.message || '').toLowerCase();
+
+        // Allow free updates during backup creation (contains real-time progress)
+        if (message.includes('creating backup') || message.includes('backup preparation') ||
+            message.includes('files processed') || message.includes('zip size')) {
+            if (window.CLEAN_SWEEP_DEBUG) console.log('ProgressUI: Allowing free backup progress updates');
+            return true;
+        }
+
+        const newStateKey = this.getStateKey(data);
+        const currentTime = Date.now();
+
+        // If this is the first state or a completely different state, allow it
+        if (!this.currentState || this.currentState !== newStateKey) {
+            if (window.CLEAN_SWEEP_DEBUG) console.log('ProgressUI: Allowing state transition - first state or different state');
+            return true;
+        }
+
+        // Check if minimum display time has passed
+        if (this.stateStartTime && this.minDisplayTimes[newStateKey]) {
+            const elapsed = currentTime - this.stateStartTime;
+            const required = this.minDisplayTimes[newStateKey];
+
+            if (elapsed < required) {
+                if (window.CLEAN_SWEEP_DEBUG) console.log(`ProgressUI: Blocking state transition - only ${elapsed}ms elapsed, need ${required}ms`);
+
+                // Queue this update for later if we don't already have one pending
+                if (!this.pendingStateUpdate) {
+                    this.pendingStateUpdate = data;
+                    setTimeout(() => {
+                        if (window.CLEAN_SWEEP_DEBUG) console.log('ProgressUI: Processing queued state update');
+                        this.pendingStateUpdate = null;
+                        this.updateProgress(data);
+                    }, required - elapsed);
+                }
+
+                return false;
+            }
+        }
+
+        if (window.CLEAN_SWEEP_DEBUG) console.log('ProgressUI: Allowing state transition - minimum time met');
+        return true;
+    }
+
+    /**
+     * Update state tracking information
+     *
+     * @param {object} data - Progress data from server
+     */
+    updateStateTracking(data) {
+        const newStateKey = this.getStateKey(data);
+        const currentTime = Date.now();
+
+        // Update state tracking
+        if (this.currentState !== newStateKey) {
+            if (window.CLEAN_SWEEP_DEBUG) console.log(`ProgressUI: State changed from '${this.currentState}' to '${newStateKey}'`);
+            this.currentState = newStateKey;
+            this.stateStartTime = currentTime;
+        }
+    }
+
+    /**
+     * Generate a state key from progress data
+     *
+     * @param {object} data - Progress data from server
+     * @returns {string} State key
+     */
+    getStateKey(data) {
+        // Create a unique key based on message content that indicates important state changes
+        const message = (data.message || '').toLowerCase();
+
+        if (message.includes('backup completed') || message.includes('backup saved successfully')) {
+            return 'backup_completed';
+        }
+
+        if (data.status === 'complete' || data.status === 'success') {
+            return 'complete';
+        }
+
+        if (data.status === 'processing' || data.status === 'starting') {
+            return 'processing';
+        }
+
+        // Default to a key based on status and progress
+        return `${data.status || 'unknown'}_${data.progress || 0}`;
     }
 
     /**
@@ -41,7 +153,7 @@ class CleanSweep_ProgressUI {
             progressDetails: document.getElementById('plugin-progress-details')
         };
 
-        console.log('ProgressUI: Elements initialized');
+        if (window.CLEAN_SWEEP_DEBUG) console.log('ProgressUI: Elements initialized');
     }
 
     /**
@@ -50,7 +162,7 @@ class CleanSweep_ProgressUI {
      * @param {object} data - Progress data from server
      */
     updateProgress(data) {
-        console.log('ProgressUI: Updating progress with data:', data);
+        if (window.CLEAN_SWEEP_DEBUG) console.log('ProgressUI: Updating progress with data:', data);
 
         if (!this.container) {
             console.warn('ProgressUI: Container not available, cannot update');
@@ -58,6 +170,15 @@ class CleanSweep_ProgressUI {
         }
 
         try {
+            // Check if we should allow this state transition
+            if (!this.shouldAllowStateTransition(data)) {
+                if (window.CLEAN_SWEEP_DEBUG) console.log('ProgressUI: State transition blocked - queuing update');
+                return;
+            }
+
+            // Update current state tracking
+            this.updateStateTracking(data);
+
             // Update status indicator
             this.updateStatusIndicator(data.status);
 
@@ -123,7 +244,7 @@ class CleanSweep_ProgressUI {
         const percentage = Math.max(0, Math.min(100, progress || 0));
         fill.style.width = percentage + '%';
 
-        console.log('ProgressUI: Updated progress bar to', percentage + '%');
+        if (window.CLEAN_SWEEP_DEBUG) console.log('ProgressUI: Updated progress bar to', percentage + '%');
     }
 
     /**
@@ -344,6 +465,10 @@ class CleanSweep_ProgressUI {
         return {
             containerId: this.containerId,
             hasContainer: !!this.container,
+            currentState: this.currentState,
+            stateStartTime: this.stateStartTime,
+            minDisplayTimes: this.minDisplayTimes,
+            hasPendingUpdate: !!this.pendingStateUpdate,
             elements: Object.keys(this.elements).reduce((acc, key) => {
                 acc[key] = !!this.elements[key];
                 return acc;

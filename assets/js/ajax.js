@@ -98,8 +98,8 @@ let pluginProgressInterval = null;
 let pluginProgressFile = null;
 
 function startPluginAnalysis() {
-    // Generate unique progress file name
-    pluginProgressFile = 'plugin_progress_' + Date.now() + '.progress';
+    // Use consistent progress file name for caching analysis results
+    pluginProgressFile = 'plugin_analysis_session.progress';
 
     // Show progress container and hide the button
     document.getElementById("plugin-progress-container").style.display = "block";
@@ -568,14 +568,41 @@ function generateAnalysisResultsHTML(data) {
         Object.assign(allPlugins, data.wp_org_plugins);
     }
 
-    // WPMU DEV plugins (ACTIONABLE - will be reinstalled)
+    // WPMU DEV plugins (ACTIONABLE - will be reinstalled, except dashboard)
     if (data.wpmu_dev_plugins && Object.keys(data.wpmu_dev_plugins).length > 0) {
-        html += '<h4 style="color:#7c3aed;">💎 WPMU DEV Premium Plugins to be Re-installed (' + Object.keys(data.wpmu_dev_plugins).length + ') <button onclick="copyPluginList(\'wpmu_dev\')" style="background:#7c3aed;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:12px;">Copy</button></h4>';
-        html += '<div style="background:#e9d5ff;padding:15px;border-radius:4px;border:2px solid #7c3aed;margin:10px 0;max-height:400px;overflow-y:auto;">';
-        html += '<div style="margin-bottom:10px;color:#4c2889;"><strong>✅ Will be automatically reinstalled with latest versions from WPMU DEV</strong></div>';
-        html += generatePluginTable(data.wpmu_dev_plugins, 'wpmu_dev');
-        html += '</div>';
-        Object.assign(allPlugins, data.wpmu_dev_plugins);
+        // Separate dashboard from other plugins
+        const dashboardPlugins = {};
+        const regularWpmuDevPlugins = {};
+
+        for (const [slug, plugin] of Object.entries(data.wpmu_dev_plugins)) {
+            const pid = plugin.wdp_id || plugin.pid || null;
+            if (parseInt(pid) === 119) {
+                dashboardPlugins[slug] = plugin;
+            } else {
+                regularWpmuDevPlugins[slug] = plugin;
+            }
+        }
+
+        const regularCount = Object.keys(regularWpmuDevPlugins).length;
+        const dashboardCount = Object.keys(dashboardPlugins).length;
+        const totalWpmuDev = Object.keys(data.wpmu_dev_plugins).length;
+
+        if (regularCount > 0) {
+            html += '<h4 style="color:#7c3aed;">💎 WPMU DEV Premium Plugins to be Re-installed (' + regularCount + ' of ' + totalWpmuDev + ' detected) <button onclick="copyPluginList(\'wpmu_dev_regular\')" style="background:#7c3aed;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:12px;">Copy</button></h4>';
+            html += '<div style="background:#e9d5ff;padding:15px;border-radius:4px;border:2px solid #7c3aed;margin:10px 0;max-height:400px;overflow-y:auto;">';
+            html += '<div style="margin-bottom:10px;color:#4c2889;"><strong>✅ Will be automatically reinstalled with latest versions from WPMU DEV</strong></div>';
+            html += generatePluginTable(regularWpmuDevPlugins, 'wpmu_dev');
+            html += '</div>';
+            Object.assign(allPlugins, regularWpmuDevPlugins);
+        }
+
+        if (dashboardCount > 0) {
+            html += '<h4 style="color:#6c757d;">🔄 WPMU DEV Dashboard (' + dashboardCount + ')</h4>';
+            html += '<div style="background:#f8f9fa;padding:15px;border-radius:4px;border:2px solid #6c757d;margin:10px 0;max-height:200px;overflow-y:auto;">';
+            html += '<div style="margin-bottom:10px;color:#495057;"><strong>⏭️ Will be skipped - required for WPMU DEV network operation</strong></div>';
+            html += generatePluginTable(dashboardPlugins, 'wpmu_dev_dashboard');
+            html += '</div>';
+        }
     }
 
     // Non-repository plugins (INFORMATIONAL - will NOT be reinstalled)
@@ -595,7 +622,7 @@ function generateAnalysisResultsHTML(data) {
     if (data.suspicious_files && data.suspicious_files.length > 0) {
         html += '<h4 style="color:#dc3545;">⚠️ Suspicious Files & Folders (' + data.suspicious_files.length + ') <button onclick="copyPluginList(\'suspicious\')" style="background:#dc3545;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:12px;">Copy</button></h4>';
         html += '<div style="background:#f8d7da;padding:15px;border-radius:4px;border:2px solid #dc3545;margin:10px 0;max-height:200px;overflow-y:auto;">';
-        html += '<div style="margin-bottom:10px;color:#721c24;"><strong>⚠️ Security Warning:</strong> These files/folders don\'t belong to any recognized plugins and may be malware or unauthorized content. They will not be automatically processed.</div>';
+        html += '<div style="margin-bottom:10px;color:#721c24;"><strong>⚠️ Security Warning:</strong> These files/folders don\'t belong to any recognized plugins and may be malware or unauthorized content. <strong>They will be automatically deleted during reinstallation.</strong> Please verify these are not legitimate files before proceeding.</div>';
         html += '<ul style="margin:0;padding-left:20px;">';
         for (const file of data.suspicious_files) {
             const type = file.is_directory ? 'Directory' : 'File';
@@ -621,11 +648,16 @@ function generateAnalysisResultsHTML(data) {
     html += '</ul>';
     html += '</div>';
 
-    // Re-install button
-    const totalToReinstall = (totals.wordpress_org || 0) + (totals.wpmu_dev || 0);
+    // Re-install button - exclude dashboard from count
+    const wordpressOrgCount = totals.wordpress_org || 0;
+    const wpmuDevTotal = totals.wpmu_dev || 0;
+    const dashboardCount = data.wpmu_dev_plugins ? Object.values(data.wpmu_dev_plugins).filter(p => parseInt(p.wdp_id || p.pid) === 119).length : 0;
+    const wpmuDevToReinstall = wpmuDevTotal - dashboardCount;
+    const totalToReinstall = wordpressOrgCount + wpmuDevToReinstall;
+
     html += '<div style="text-align:center;margin:30px 0;">';
     const escapedPluginsData = JSON.stringify(allPlugins).replace(/"/g, '"');
-    html += '<button onclick="confirmPluginReinstallation(this)" data-plugins="' + escapedPluginsData + '" style="background:#dc3545;color:white;border:none;padding:15px 30px;font-size:18px;font-weight:bold;border-radius:4px;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.2);">';
+    html += '<button onclick="startPluginReinstallation(this)" data-plugins="' + escapedPluginsData + '" style="background:#dc3545;color:white;border:none;padding:15px 30px;font-size:18px;font-weight:bold;border-radius:4px;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.2);">';
     html += '🚀 Start Complete Ecosystem Re-installation (' + totalToReinstall + ' plugins)';
     html += '</button>';
     html += '<p style="margin-top:10px;color:#666;font-size:14px;">This action will download and install the latest versions from official repositories</p>';

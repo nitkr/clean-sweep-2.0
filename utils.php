@@ -184,20 +184,38 @@ function clean_sweep_get_active_plugins_list() {
  * Keeps files in logs directory for web-accessibility throughout entire operation
  */
 function clean_sweep_write_progress_file($progress_file, $data) {
-    if (!$progress_file) return;
+    if (!$progress_file) {
+        return false;
+    }
 
     // Store in PROGRESS_DIR (logs/ directory) for web access during operations
     $file_path = PROGRESS_DIR . $progress_file;
 
     $json_data = json_encode($data, JSON_PRETTY_PRINT);
+    if ($json_data === false) {
+        return false;
+    }
 
     // Ensure directory exists
     $dir = dirname($file_path);
     if (!is_dir($dir)) {
-        mkdir($dir, 0755, true);
+        if (!mkdir($dir, 0755, true)) {
+            return false;
+        }
     }
 
-    @file_put_contents($file_path, $json_data);
+    // Check if directory is writable
+    if (!is_writable($dir)) {
+        return false;
+    }
+
+    // Write the file and check for errors
+    $result = file_put_contents($file_path, $json_data);
+    if ($result === false) {
+        return false;
+    }
+
+    return true;
 }
 
 /**

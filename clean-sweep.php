@@ -296,15 +296,6 @@ function clean_sweep_run_clean_sweep() {
     // ACCESS GLOBAL VARIABLES
     global $is_ajax_request;
 
-    // DEBUG LOGGING FOR PAGINATION ISSUES
-    clean_sweep_log_message("=== REQUEST ANALYSIS ===", 'info');
-    clean_sweep_log_message("Action: " . (isset($_POST['action']) ? $_POST['action'] : 'NOT_SET'), 'info');
-    clean_sweep_log_message("Request ID: " . (isset($_POST['request_id']) ? $_POST['request_id'] : 'NOT_SET'), 'info');
-    clean_sweep_log_message("Page: " . (isset($_POST['page']) ? $_POST['page'] : 'NOT_SET'), 'info');
-    clean_sweep_log_message("Per Page: " . (isset($_POST['per_page']) ? $_POST['per_page'] : 'NOT_SET'), 'info');
-    clean_sweep_log_message("Progress File: " . (isset($_POST['progress_file']) ? $_POST['progress_file'] : 'NOT_SET'), 'info');
-    clean_sweep_log_message("Is AJAX: " . ($is_ajax_request ? 'YES' : 'NO'), 'info');
-
     // Determine the requested action from POST data
     $action = isset($_POST['action']) ? $_POST['action'] : '';
 
@@ -341,13 +332,15 @@ function clean_sweep_run_clean_sweep() {
                     ob_end_clean();
                 }
 
-                // 4. Return properly encoded JSON
-                header('Content-Type: application/json; charset=utf-8', true);
-                echo json_encode([
+                $json_response = [
                     'success' => true,
                     ...$analysis_results,
                     'html' => $html_content
-                ], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
+                ];
+
+                // 4. Return properly encoded JSON
+                header('Content-Type: application/json; charset=utf-8', true);
+                echo json_encode($json_response, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
                 exit;
             } else {
                 // Regular request - show progress and results
@@ -372,31 +365,44 @@ function clean_sweep_run_clean_sweep() {
             $batch_size = isset($_POST['batch_size']) ? intval($_POST['batch_size']) : 5;
 
             // OPTIMIZATION: Analyze plugins once, reuse for all batches
+            $analysis_key = 'clean_sweep_analysis_' . md5($progress_file);
             if ($batch_start == 0) {
                 // FIRST BATCH: Perform analysis and store for reuse
                 $analysis = clean_sweep_analyze_plugins($progress_file);
-                set_transient('clean_sweep_batch_analysis', $analysis, 3600); // 1 hour expiry
+                set_transient($analysis_key, $analysis, 3600); // 1 hour expiry
                 clean_sweep_log_message("Plugin analysis stored for optimized batch processing");
+
+                // Initialize cumulative results for first batch
+                $cumulative_results_key = 'clean_sweep_results_' . md5($progress_file);
+                set_transient($cumulative_results_key, [
+                    'wordpress_org' => ['successful' => [], 'failed' => []],
+                    'wpmu_dev' => ['successful' => [], 'failed' => []],
+                    'verification_results' => ['verified' => [], 'missing' => [], 'corrupted' => []]
+                ], 3600);
+                clean_sweep_log_message("Initialized cumulative results with verification arrays", 'info');
+                clean_sweep_log_message("Initialized cumulative results for batch processing", 'info');
             } else {
                 // SUBSEQUENT BATCHES: Use stored analysis for instant processing
-                $analysis = get_transient('clean_sweep_batch_analysis');
+                $analysis = get_transient($analysis_key);
                 if (!$analysis) {
                     // Fallback if transient expired (rare - storage/save issue)
                     clean_sweep_log_message("Warning: Stored analysis expired, re-analyzing", 'warning');
                     $analysis = clean_sweep_analyze_plugins($progress_file);
-                    set_transient('clean_sweep_batch_analysis', $analysis, 3600);
+                    set_transient($analysis_key, $analysis, 3600);
                 }
             }
 
             $repo_plugins = $analysis['wp_org_plugins'];  // WordPress.org plugins to reinstall
             $wpmu_dev_plugins = $analysis['wpmu_dev_plugins'];  // WPMU DEV plugins to reinstall
+            $suspicious_files_to_delete = $analysis['suspicious_files'] ?? [];  // Suspicious files to delete
 
             // Only log analysis details on first batch to avoid spam
             if ($batch_start == 0) {
                 $total_categorized = count($repo_plugins) + count($wpmu_dev_plugins);
                 clean_sweep_log_message("AJAX Reinstall: Total plugins from analysis: $total_categorized" .
                                       ", WordPress.org: " . count($repo_plugins) .
-                                      ", WPMU DEV: " . count($wpmu_dev_plugins));
+                                      ", WPMU DEV: " . count($wpmu_dev_plugins) .
+                                      ", Suspicious files: " . count($suspicious_files_to_delete));
             }
 
             if ($progress_file) {
@@ -404,7 +410,7 @@ function clean_sweep_run_clean_sweep() {
                 try {
                     // 1. Suppress ALL output during operations
                     ob_start();
-                    $result = clean_sweep_execute_reinstallation($repo_plugins, $progress_file, $batch_start, $batch_size);
+                    $result = clean_sweep_execute_reinstallation($repo_plugins, $progress_file, $batch_start, $batch_size, $wpmu_dev_plugins, $suspicious_files_to_delete);
                     ob_end_clean(); // Discard any warnings/errors
 
                     // CRITICAL FIX: Detect backup choice responses and return them directly
@@ -419,32 +425,160 @@ function clean_sweep_run_clean_sweep() {
                         exit;
                     }
 
-                    // Otherwise proceed with normal final results processing
-                    $reinstall_results = $result['results'] ?? ['successful' => [], 'failed' => []];
+                    // ACCUMULATE RESULTS ACROSS BATCHES
+                    $cumulative_results_key = 'clean_sweep_results_' . md5($progress_file);
+                    $cumulative_results = get_transient($cumulative_results_key);
+
+                    if (!$cumulative_results) {
+                        // Initialize if not found (shouldn't happen but safety check)
+                        $cumulative_results = [
+                            'wordpress_org' => ['successful' => [], 'failed' => []],
+                            'wpmu_dev' => ['successful' => [], 'failed' => []],
+                            'verification_results' => ['verified' => [], 'missing' => [], 'corrupted' => []]
+                        ];
+                        clean_sweep_log_message("Warning: Cumulative results not found, initializing", 'warning');
+                    }
+
+                    // Add current batch results to cumulative results
+                    if (isset($result['wordpress_org'])) {
+                        $cumulative_results['wordpress_org']['successful'] = array_merge(
+                            $cumulative_results['wordpress_org']['successful'],
+                            $result['wordpress_org']['successful'] ?? []
+                        );
+                        $cumulative_results['wordpress_org']['failed'] = array_merge(
+                            $cumulative_results['wordpress_org']['failed'],
+                            $result['wordpress_org']['failed'] ?? []
+                        );
+                    }
+
+                    if (isset($result['wpmu_dev'])) {
+                        $cumulative_results['wpmu_dev']['successful'] = array_merge(
+                            $cumulative_results['wpmu_dev']['successful'],
+                            $result['wpmu_dev']['successful'] ?? []
+                        );
+                        $cumulative_results['wpmu_dev']['failed'] = array_merge(
+                            $cumulative_results['wpmu_dev']['failed'],
+                            $result['wpmu_dev']['failed'] ?? []
+                        );
+                    }
+
+                    // Accumulate verification results as well
+                    if (isset($result['verification_results'])) {
+                        $cumulative_results['verification_results']['verified'] = array_merge(
+                            $cumulative_results['verification_results']['verified'],
+                            $result['verification_results']['verified'] ?? []
+                        );
+                        $cumulative_results['verification_results']['missing'] = array_merge(
+                            $cumulative_results['verification_results']['missing'],
+                            $result['verification_results']['missing'] ?? []
+                        );
+                        $cumulative_results['verification_results']['corrupted'] = array_merge(
+                            $cumulative_results['verification_results']['corrupted'],
+                            $result['verification_results']['corrupted'] ?? []
+                        );
+                    }
+
+                    // Save updated cumulative results
+                    set_transient($cumulative_results_key, $cumulative_results, 3600);
+                    clean_sweep_log_message("Updated cumulative results: WP.org successful=" .
+                                           count($cumulative_results['wordpress_org']['successful']) .
+                                           ", WPMU DEV successful=" . count($cumulative_results['wpmu_dev']['successful']), 'info');
+
+                    // Prepare results for this batch response (current batch only)
+                    $reinstall_results = [
+                        'successful' => array_merge(
+                            $result['wordpress_org']['successful'] ?? [],
+                            $result['wpmu_dev']['successful'] ?? []
+                        ),
+                        'failed' => array_merge(
+                            $result['wordpress_org']['failed'] ?? [],
+                            $result['wpmu_dev']['failed'] ?? []
+                        )
+                    ];
                     $verification_results = $result['verification_results'] ?? ['verified' => [], 'missing' => [], 'corrupted' => []];
 
-                    // Check if this is the final batch
-                    $batch_info = $reinstall_results['batch_info'] ?? [];
+                    // FIX: Get batch_info from $result (top level), not $reinstall_results
+                    $batch_info = $result['batch_info'] ?? [];
+
                     $is_final_batch = !($batch_info['has_more_batches'] ?? false);
 
                     if ($is_final_batch) {
-                        // Final batch - plugin-reinstall.php now returns both results and verification results
+                        clean_sweep_log_message("Action handler: FINAL batch - loading cumulative results");
 
-                        // Write completion status
+                        // Load the complete cumulative results from all batches
+                        $cumulative_results_key = 'clean_sweep_results_' . md5($progress_file);
+                        $final_cumulative_results = get_transient($cumulative_results_key);
+
+                        if (!$final_cumulative_results) {
+                            clean_sweep_log_message("Warning: Final cumulative results not found, using current batch", 'warning');
+                            $final_cumulative_results = [
+                                'wordpress_org' => ['successful' => $result['wordpress_org']['successful'] ?? [], 'failed' => $result['wordpress_org']['failed'] ?? []],
+                                'wpmu_dev' => ['successful' => $result['wpmu_dev']['successful'] ?? [], 'failed' => $result['wpmu_dev']['failed'] ?? []],
+                                'verification_results' => $verification_results
+                            ];
+                        }
+
+                        // Combine all successful and failed plugins from cumulative results
+                        // Add source information to each plugin
+                        $wordpress_org_successful = array_map(function($plugin) {
+                            $plugin['source'] = 'wordpress_org';
+                            return $plugin;
+                        }, $final_cumulative_results['wordpress_org']['successful'] ?? []);
+
+                        $wordpress_org_failed = array_map(function($plugin) {
+                            $plugin['source'] = 'wordpress_org';
+                            return $plugin;
+                        }, $final_cumulative_results['wordpress_org']['failed'] ?? []);
+
+                        $wpmu_dev_successful = array_map(function($plugin) {
+                            $plugin['source'] = 'wpmu_dev';
+                            return $plugin;
+                        }, $final_cumulative_results['wpmu_dev']['successful'] ?? []);
+
+                        $wpmu_dev_failed = array_map(function($plugin) {
+                            $plugin['source'] = 'wpmu_dev';
+                            return $plugin;
+                        }, $final_cumulative_results['wpmu_dev']['failed'] ?? []);
+
+                        $final_reinstall_results = [
+                            'successful' => array_merge($wordpress_org_successful, $wpmu_dev_successful),
+                            'failed' => array_merge($wordpress_org_failed, $wpmu_dev_failed)
+                        ];
+
+                        clean_sweep_log_message("Action handler: FINAL batch - generating HTML with cumulative results: successful=" .
+                                               count($final_reinstall_results['successful']) . ", failed=" . count($final_reinstall_results['failed']), 'info');
+
+                        // Generate HTML for final results using CUMULATIVE verification results
+                        ob_start();
+                        clean_sweep_display_final_results($final_reinstall_results, $final_cumulative_results['verification_results'] ?? $verification_results);
+                        $html_content = ob_get_clean();
+
+                        // Final batch - write completion status WITH HTML
                         $completion_data = [
                             'status' => 'complete',
                             'progress' => 100,
                             'message' => 'Plugin re-installation completed successfully!',
+                            'results' => $final_reinstall_results,  // Use cumulative results
+                            'html' => $html_content,  // Include HTML in progress file for JS to read
+                            'batch_info' => $batch_info  // Include batch info
+                        ];
+
+                        clean_sweep_write_progress_file($progress_file, $completion_data);
+                    } else {
+                        clean_sweep_log_message("Action handler: INTERMEDIATE batch - updating progress with batch_info");
+                        // Calculate total items for progress calculation
+                        $total_items = count($repo_plugins) + count($wpmu_dev_plugins);
+                        $batch_info['total_items'] = $total_items;  // Add total_items to batch_info
+
+                        // INTERMEDIATE batch - update progress file to indicate more batches needed
+                        $intermediate_data = [
+                            'status' => 'processing',  // NOT complete for intermediate batches
+                            'progress' => min(95, round(($batch_info['batch_start'] + $batch_info['batch_size']) / max($batch_info['total_items'], 1) * 100)),
+                            'message' => 'Processing batch ' . (($batch_info['batch_start'] / $batch_info['batch_size']) + 1) . ' of ' . ceil($batch_info['total_items'] / $batch_info['batch_size']) . '...',
+                            'batch_info' => $batch_info,  // Include batch info so JS knows to continue
                             'results' => $reinstall_results
                         ];
-                        clean_sweep_write_progress_file($progress_file, $completion_data);
-
-                        // Generate HTML for final batch using real verification results
-                        ob_start();
-                        clean_sweep_display_final_results($reinstall_results, $verification_results);
-                        $html_content = ob_get_clean();
-                    } else {
-                        // More batches to process - return batch info
+                        clean_sweep_write_progress_file($progress_file, $intermediate_data);
                         $html_content = '';
                     }
 
@@ -452,6 +586,8 @@ function clean_sweep_run_clean_sweep() {
                     while (ob_get_level() > 0) {
                         ob_end_clean();
                     }
+
+
 
                     // 4. Return properly encoded JSON
                     header('Content-Type: application/json; charset=utf-8', true);

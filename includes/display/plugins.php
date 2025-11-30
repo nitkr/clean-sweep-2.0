@@ -11,198 +11,113 @@
 function clean_sweep_display_final_results($reinstall_results, $verification_results) {
     $success_count = count($reinstall_results['successful']);
     $fail_count = count($reinstall_results['failed']);
-    $verified_count = count($verification_results['verified']);
-    $missing_count = count($verification_results['missing']);
-    $corrupted_count = count($verification_results['corrupted']);
 
     if (!defined('WP_CLI') || !WP_CLI) {
         echo '<h2>📊 Final Reinstallation Results</h2>';
         echo '<p style="background:#e7f3ff;border:1px solid #b8daff;padding:15px;border-radius:4px;margin:20px 0;">';
-        echo 'Reinstallation complete. Below is a combined summary of the process and verification of installed plugins.';
+        echo 'Reinstallation complete. All plugins have been processed for re-installation from their official sources.';
         echo '</p>';
 
-        // Combined stats
+        // Installation stats only
         echo '<div>';
         echo '<div class="stats-box" style="background:#d4edda;border-color:#c3e6cb;"><div class="stats-number" style="color:#155724;">' . $success_count . '</div><div class="stats-label">Reinstalled Successfully</div></div>';
-        echo '<div class="stats-box" style="background:#d1ecf1;border-color:#bee5eb;"><div class="stats-number" style="color:#0c5460;">' . $verified_count . '</div><div class="stats-label">Verified</div></div>';
-        echo '<div class="stats-box" style="background:#f8d7da;border-color:#f5c6cb;"><div class="stats-number" style="color:#721c24;">' . ($fail_count + $missing_count) . '</div><div class="stats-label">Issues (Failed/Missing)</div></div>';
-        echo '<div class="stats-box" style="background:#fff3cd;border-color:#ffeaa7;"><div class="stats-number" style="color:#856404;">' . $corrupted_count . '</div><div class="stats-label">Corrupted</div></div>';
+        echo '<div class="stats-box" style="background:#f8d7da;border-color:#f5c6cb;"><div class="stats-number" style="color:#721c24;">' . $fail_count . '</div><div class="stats-label">Failed</div></div>';
         echo '</div>';
 
-        // Combined table
+        // Plugin results table
         echo '<table class="summary-table">';
         echo '<thead>';
         echo '<tr>';
         echo '<th>Plugin Name</th>';
         echo '<th>Reinstall Status</th>';
-        echo '<th>Verification Status</th>';
+        echo '<th>Source</th>';
         echo '<th>Details</th>';
         echo '</tr>';
         echo '</thead>';
         echo '<tbody>';
 
-        // Process verified plugins (assume success if verified)
-        foreach ($verification_results['verified'] as $plugin) {
-            $reinstall_status = '✅ Success';
-            $reinstall_class = 'plugin-success';
-            $details = 'Installed and accessible';
+        // Process successful plugins
+        foreach ($reinstall_results['successful'] as $plugin) {
+            $source = 'WordPress.org';
+            $source_color = '#007bff';
+            $details = 'Successfully reinstalled from WordPress.org repository';
 
-            // Check if in failed WordPress.org results
-            $failed_wordpress_org = false;
-            foreach ($reinstall_results['failed'] as $f) {
-                if ($f['slug'] === $plugin['slug']) {
-                    $failed_wordpress_org = true;
-                    break;
-                }
-            }
-
-            // Check if this plugin was handled by WPMU DEV instead (successfully)
-            $handled_by_wpmudev = false;
-            if (isset($reinstall_results['wpmudev'])) {
-                foreach ($reinstall_results['wpmudev']['wpmudev_plugins'] as $wpmudp) {
-                    // WPMU DEV plugins use 'filename' field, not 'slug'
-                    $wpmudev_identifier = $wpmudp['filename'] ?? $wpmudp['slug'] ?? '';
-                    if ($wpmudev_identifier === $plugin['slug'] &&
-                        isset($wpmudp['installed']) && $wpmudp['installed']) {
-                        $handled_by_wpmudev = true;
-                        break;
-                    }
-                }
-            }
-
-            if ($handled_by_wpmudev) {
-                // Show as WPMU DEV success instead of WordPress.org failure
-                $reinstall_status = '✅ WPMU DEV';
-                $reinstall_class = 'plugin-success';
+            // Check if this was a WPMU DEV plugin
+            if (isset($plugin['source']) && $plugin['source'] === 'wpmu_dev') {
+                $source = 'WPMU DEV';
+                $source_color = '#7c3aed';
                 $details = 'Successfully reinstalled from WPMU DEV Premium network';
-            } elseif ($failed_wordpress_org) {
-                // Actual WordPress.org failure
-                $reinstall_status = '❌ Failed';
-                $reinstall_class = 'plugin-error';
-                $details = 'WordPress.org reinstall failed - check logs';
             }
 
-            echo '<tr class="' . $reinstall_class . '">';
+            echo '<tr class="plugin-success">';
             echo '<td>' . htmlspecialchars($plugin['name']) . '</td>';
-            echo '<td><span style="' . ($handled_by_wpmudev ? 'color:#7c3aed;' : 'color:#28a745;') . 'font-weight:bold;">' . $reinstall_status . '</span></td>';
-            echo '<td><span style="color:#28a745;font-weight:bold;">✅ Verified</span></td>';
+            echo '<td><span style="color:#28a745;font-weight:bold;">✅ Success</span></td>';
+            echo '<td><span style="color:' . $source_color . ';font-weight:bold;">' . $source . '</span></td>';
             echo '<td>' . htmlspecialchars($details) . '</td>';
             echo '</tr>';
         }
 
-        // Process missing
-        foreach ($verification_results['missing'] as $plugin) {
-            $reinstall_status = '✅ Success';
-            $reinstall_class = 'plugin-success';
-            $failed = false;
-            foreach ($reinstall_results['failed'] as $f) {
-                if ($f['slug'] === $plugin['slug']) {
-                    $failed = true;
-                    $reinstall_status = '❌ Failed';
-                    $reinstall_class = 'plugin-error';
-                    break;
-                }
-            }
-            echo '<tr class="plugin-error ' . $reinstall_class . '">';
-            echo '<td>' . htmlspecialchars($plugin['name']) . '</td>';
-            echo '<td><span style="' . ($failed ? 'color:#dc3545;' : 'color:#28a745;') . 'font-weight:bold;">' . $reinstall_status . '</span></td>';
-            echo '<td><span style="color:#dc3545;font-weight:bold;">❌ Missing</span></td>';
-            echo '<td>Not found - check logs</td>';
-            echo '</tr>';
-        }
-
-        // Process corrupted
-        foreach ($verification_results['corrupted'] as $plugin) {
-            $reinstall_status = '✅ Success';
-            $reinstall_class = 'plugin-success';
-            $failed = false;
-            foreach ($reinstall_results['failed'] as $f) {
-                if ($f['slug'] === $plugin['slug']) {
-                    $failed = true;
-                    $reinstall_status = '❌ Failed';
-                    $reinstall_class = 'plugin-error';
-                    break;
-                }
-            }
-            echo '<tr class="plugin-warning ' . $reinstall_class . '">';
-            echo '<td>' . htmlspecialchars($plugin['name']) . '</td>';
-            echo '<td><span style="' . ($failed ? 'color:#dc3545;' : 'color:#28a745;') . 'font-weight:bold;">' . $reinstall_status . '</span></td>';
-            echo '<td><span style="color:#ffc107;font-weight:bold;">⚠️ Corrupted</span></td>';
-            echo '<td>Incomplete - manual fix needed</td>';
-            echo '</tr>';
-        }
-
-        // Add any failed that weren't in verification (rare)
+        // Process failed plugins
         foreach ($reinstall_results['failed'] as $plugin) {
-            $found = false;
-            foreach (array_merge($verification_results['verified'], $verification_results['missing'], $verification_results['corrupted']) as $v) {
-                if ($v['slug'] === $plugin['slug']) {
-                    $found = true;
-                    break;
-                }
+            $source = 'WordPress.org';
+            $source_color = '#007bff';
+            $details = 'Reinstallation failed - check logs for details';
+
+            // Check if this was a WPMU DEV plugin
+            if (isset($plugin['source']) && $plugin['source'] === 'wpmu_dev') {
+                $source = 'WPMU DEV';
+                $source_color = '#7c3aed';
             }
-            if (!$found) {
-                echo '<tr class="plugin-error">';
-                echo '<td>' . htmlspecialchars($plugin['name']) . '</td>';
-                echo '<td><span style="color:#dc3545;font-weight:bold;">❌ Failed</span></td>';
-                echo '<td><span style="color:#dc3545;font-weight:bold;">❌ Not Verified</span></td>';
-                echo '<td>Reinstall failed - check logs</td>';
-                echo '</tr>';
-            }
+
+            echo '<tr class="plugin-error">';
+            echo '<td>' . htmlspecialchars($plugin['name']) . '</td>';
+            echo '<td><span style="color:#dc3545;font-weight:bold;">❌ Failed</span></td>';
+            echo '<td><span style="color:' . $source_color . ';font-weight:bold;">' . $source . '</span></td>';
+            echo '<td>' . htmlspecialchars($details) . '</td>';
+            echo '</tr>';
         }
 
         echo '</tbody>';
         echo '</table>';
 
-        // Combined summary message
-        $all_good = ($fail_count === 0 && $missing_count === 0 && $corrupted_count === 0);
-        if ($all_good) {
+        // Summary message
+        if ($fail_count === 0) {
             echo '<div style="background:#d4edda;border:1px solid #c3e6cb;padding:15px;border-radius:4px;margin:20px 0;color:#155724;">';
-            echo '<h3>🎉 Reinstallation and Verification Complete!</h3>';
-            echo '<p>All ' . $success_count . ' plugins were successfully re-installed and verified.</p>';
+            echo '<h3>🎉 Reinstallation Complete!</h3>';
+            echo '<p>All ' . $success_count . ' plugins were successfully re-installed from their official sources.</p>';
             echo '</div>';
         } else {
             echo '<div style="background:#f8d7da;border:1px solid #f5c6cb;padding:15px;border-radius:4px;margin:20px 0;color:#721c24;">';
             echo '<h3>⚠️ Issues Detected</h3>';
-            echo '<p>' . ($fail_count + $missing_count + $corrupted_count) . ' plugins had issues during reinstall or verification. Review the table and logs above.</p>';
+            echo '<p>' . $fail_count . ' plugins failed to reinstall. Review the table and logs above for details.</p>';
             echo '</div>';
         }
 
     } else {
-        // CLI merged output
+        // CLI output
         echo "\n📊 FINAL REINSTALLATION RESULTS\n";
         echo str_repeat("=", 50) . "\n";
         echo "✅ Reinstalled Successfully: $success_count\n";
-        echo "✅ Verified: $verified_count\n";
-        echo "❌ Failed/Missing: " . ($fail_count + $missing_count) . "\n";
-        echo "⚠️  Corrupted: $corrupted_count\n";
+        echo "❌ Failed: $fail_count\n";
         echo str_repeat("=", 50) . "\n";
 
         if (!empty($reinstall_results['successful'])) {
-            echo "\n✅ SUCCESSFULLY RE-INSTALLED & VERIFIED:\n";
-            foreach ($verification_results['verified'] as $plugin) {
-                echo "  • {$plugin['name']} - Verified\n";
+            echo "\n✅ SUCCESSFULLY RE-INSTALLED:\n";
+            foreach ($reinstall_results['successful'] as $plugin) {
+                $source = isset($plugin['source']) && $plugin['source'] === 'wpmu_dev' ? 'WPMU DEV' : 'WordPress.org';
+                echo "  • {$plugin['name']} - {$source}\n";
             }
         }
 
-        if (!empty($reinstall_results['failed']) || !empty($verification_results['missing']) || !empty($verification_results['corrupted'])) {
-            echo "\n⚠️  PLUGINS WITH ISSUES:\n";
-            // Failed
+        if (!empty($reinstall_results['failed'])) {
+            echo "\n❌ FAILED TO REINSTALL:\n";
             foreach ($reinstall_results['failed'] as $plugin) {
-                echo "  • {$plugin['name']} - Reinstall Failed\n";
-            }
-            // Missing
-            foreach ($verification_results['missing'] as $plugin) {
-                echo "  • {$plugin['name']} - Missing after install\n";
-            }
-            // Corrupted
-            foreach ($verification_results['corrupted'] as $plugin) {
-                echo "  • {$plugin['name']} - Corrupted installation\n";
+                echo "  • {$plugin['name']} - Check logs for details\n";
             }
         }
 
-        if ($fail_count === 0 && $missing_count === 0 && $corrupted_count === 0) {
-            echo "\n🎉 ALL PLUGINS SUCCESSFULLY RE-INSTALLED AND VERIFIED!\n";
+        if ($fail_count === 0) {
+            echo "\n🎉 ALL PLUGINS SUCCESSFULLY RE-INSTALLED!\n";
         } else {
             echo "\n⚠️  ISSUES DETECTED - CHECK LOGS FOR DETAILS\n";
         }
@@ -214,9 +129,9 @@ function clean_sweep_display_final_results($reinstall_results, $verification_res
  */
 function clean_sweep_display_plugins_tab_content($plugin_results) {
     if ($plugin_results) {
-        $repo_count = count($plugin_results['wp_org_plugins']);
+        $repo_count = count($plugin_results['wp_org_plugins'] ?? []);
         $wpmudev_count = count($plugin_results['wpmu_dev_plugins'] ?? []);
-        $skipped_count = count($plugin_results['skipped'] ?? []);
+        $skipped_count = count($plugin_results['non_repo_plugins'] ?? []);
         $total_to_reinstall = $repo_count + $wpmudev_count;
 
         echo '<h3>📦 Plugin Analysis Complete</h3>';
