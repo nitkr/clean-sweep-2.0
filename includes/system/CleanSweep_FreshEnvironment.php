@@ -1043,12 +1043,23 @@ EOT;
         $code .= "    return \$filtered;\n";
         $code .= "});\n\n";
 
+        // Define missing WordPress URL constants before loading plugins
+        $code .= "// Define WordPress URL constants needed for plugin functions\n";
+        $code .= "if (!defined('WP_PLUGIN_URL')) {\n";
+        $code .= "    define('WP_PLUGIN_URL', WP_CONTENT_URL . '/plugins');\n";
+        $code .= "}\n";
+        $code .= "if (!defined('WPMU_PLUGIN_URL')) {\n";
+        $code .= "    define('WPMU_PLUGIN_URL', WP_PLUGIN_URL);\n";
+        $code .= "}\n\n";
+
         // Explicitly load safe plugins with detailed debugging
         $code .= "// Explicitly load required safe plugins with debugging\n";
         foreach ($safe_plugins as $plugin_key => $plugin_config) {
             $code .= "// Loading safe plugin: {$plugin_config['name']} ({$plugin_config['file']})\n";
             $code .= "if (file_exists(WP_PLUGIN_DIR . '/{$plugin_config['file']}')) {\n";
             $code .= "    clean_sweep_log_message('✅ DEBUG: Safe plugin file exists: {$plugin_config['file']}', 'error');\n";
+            $code .= "    clean_sweep_log_message('🔍 DEBUG: WP_PLUGIN_URL = ' . WP_PLUGIN_URL, 'error');\n";
+            $code .= "    clean_sweep_log_message('🔍 DEBUG: WPMU_PLUGIN_URL = ' . WPMU_PLUGIN_URL, 'error');\n";
             $code .= "    \$before_load = class_exists('WPMUDEV_Dashboard') ? 'YES' : 'NO';\n";
             $code .= "    clean_sweep_log_message('🔍 DEBUG: WPMUDEV_Dashboard class before load: ' . \$before_load, 'error');\n";
             $code .= "    include_once WP_PLUGIN_DIR . '/{$plugin_config['file']}';\n";
