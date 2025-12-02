@@ -437,7 +437,7 @@ function clean_sweep_display_plugins_tab_content($plugin_results) {
             $plugin_results['wp_org_plugins'] ?? [],
             $plugin_results['wpmu_dev_plugins'] ?? []
         );
-        echo '<button onclick="confirmPluginReinstallation(this)" data-plugins="' . htmlspecialchars(json_encode($all_plugins_to_reinstall)) . '" style="background:#dc3545;color:white;border:none;padding:15px 30px;font-size:18px;font-weight:bold;border-radius:4px;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.2);">';
+        echo '<button id="reinstall-button" onclick="confirmPluginReinstallation(this)" data-plugins="' . htmlspecialchars(json_encode($all_plugins_to_reinstall)) . '" style="background:#dc3545;color:white;border:none;padding:15px 30px;font-size:18px;font-weight:bold;border-radius:4px;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.2);">';
         echo '🚀 Start Complete Ecosystem Re-installation (' . $total_to_reinstall . ' plugins)';
         echo '</button>';
         echo '<p style="margin-top:10px;color:#666;font-size:14px;">WordPress.org plugins from official repository + WPMU DEV premium plugins from secured network</p>';

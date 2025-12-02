@@ -6,10 +6,11 @@ let reinstallProgressInterval = null;
 let reinstallProgressFile = null;
 
 // Helper function to handle confirm dialog and button passing
+// NOTE: This is legacy code - new workflow uses modal dialog in core.js
 function confirmPluginReinstallation(button) {
-    if (confirm('Are you sure you want to proceed with re-installing the plugins? This will create a backup and replace all WordPress.org plugins with their latest versions.')) {
-        startPluginReinstallation(button);
-    }
+    // This should not be called anymore - the new workflow in core.js handles this
+    console.warn('Legacy confirmPluginReinstallation called - should use core.js workflow');
+    return false;
 }
 
 function startPluginReinstallation(buttonElement) {
