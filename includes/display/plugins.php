@@ -85,10 +85,13 @@ function clean_sweep_display_final_results($reinstall_results, $verification_res
                 }
             }
 
+            // Check if this is a WPMU DEV plugin based on verification status
+            $is_wpmu_dev_plugin = isset($plugin['status']) && strpos($plugin['status'], 'WPMU DEV') !== false;
+
             if ($skipped) {
                 // Already set above
-            } elseif ($handled_by_wpmudev) {
-                // Show as WPMU DEV success instead of WordPress.org failure
+            } elseif ($handled_by_wpmudev || $is_wpmu_dev_plugin) {
+                // Show as WPMU DEV success
                 $reinstall_status = '✅ WPMU DEV';
                 $reinstall_class = 'plugin-success';
                 $details = 'Downloaded from WPMU DEV Premium secured network';
@@ -101,7 +104,7 @@ function clean_sweep_display_final_results($reinstall_results, $verification_res
 
             echo '<tr class="' . $reinstall_class . '">';
             echo '<td>' . htmlspecialchars($plugin['name']) . '</td>';
-            echo '<td><span style="' . ($skipped ? 'color:#17a2b8;' : ($handled_by_wpmudev ? 'color:#7c3aed;' : 'color:#28a745;')) . 'font-weight:bold;">' . $reinstall_status . '</span></td>';
+            echo '<td><span style="' . ($skipped ? 'color:#17a2b8;' : ($handled_by_wpmudev || $is_wpmu_dev_plugin ? 'color:#7c3aed;' : 'color:#28a745;')) . 'font-weight:bold;">' . $reinstall_status . '</span></td>';
             echo '<td><span style="color:#28a745;font-weight:bold;">✅ Verified</span></td>';
             echo '<td>' . htmlspecialchars($details) . '</td>';
             echo '</tr>';

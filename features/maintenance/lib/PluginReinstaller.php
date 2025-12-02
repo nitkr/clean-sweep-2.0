@@ -298,28 +298,77 @@ class CleanSweep_PluginReinstaller {
         $file_name = $file_data['name'];
 
         clean_sweep_log_message("PluginReinstaller: Processing suspicious file: $file_path", 'info');
+        clean_sweep_log_message("PluginReinstaller: File exists check: " . (file_exists($file_path) ? 'YES' : 'NO'), 'info');
+        clean_sweep_log_message("PluginReinstaller: File readable check: " . (is_readable($file_path) ? 'YES' : 'NO'), 'info');
 
+        // Try PHP unlink first as it's more reliable
+        if (file_exists($file_path) && is_readable($file_path)) {
+            if (is_dir($file_path)) {
+                // For directories, use recursive deletion
+                $deleted = $this->delete_directory_recursive($file_path);
+            } else {
+                // For files, use unlink
+                $deleted = @unlink($file_path);
+            }
+
+            if ($deleted) {
+                $results['suspicious_cleanup']['deleted'][] = [
+                    'name' => $file_name,
+                    'path' => $file_path,
+                    'status' => 'Deleted successfully'
+                ];
+                clean_sweep_log_message("PluginReinstaller: Successfully deleted suspicious file: $file_name", 'info');
+                return;
+            }
+        }
+
+        // Fallback to WordPress filesystem
         global $wp_filesystem;
         if (!$wp_filesystem) {
             require_once ABSPATH . 'wp-admin/includes/file.php';
             WP_Filesystem();
         }
 
-        if ($wp_filesystem->delete($file_path, true)) {
+        clean_sweep_log_message("PluginReinstaller: Trying WordPress filesystem deletion", 'info');
+        if ($wp_filesystem->delete($file_path, true)) { // true for recursive deletion
             $results['suspicious_cleanup']['deleted'][] = [
                 'name' => $file_name,
                 'path' => $file_path,
-                'status' => 'Deleted successfully'
+                'status' => 'Deleted successfully (WP filesystem)'
             ];
-            clean_sweep_log_message("PluginReinstaller: Successfully deleted suspicious file: $file_name", 'info');
+            clean_sweep_log_message("PluginReinstaller: Successfully deleted suspicious file with WP filesystem: $file_name", 'info');
         } else {
             $results['suspicious_cleanup']['failed'][] = [
                 'name' => $file_name,
                 'path' => $file_path,
-                'status' => 'Deletion failed'
+                'status' => 'Deletion failed - may not have permission or file in use'
             ];
-            clean_sweep_log_message("PluginReinstaller: Failed to delete suspicious file: $file_name", 'warning');
+            clean_sweep_log_message("PluginReinstaller: Failed to delete suspicious file: $file_name (path: $file_path)", 'warning');
         }
+    }
+
+    /**
+     * Recursively delete a directory
+     *
+     * @param string $directory Directory path
+     * @return bool Success
+     */
+    private function delete_directory_recursive($directory) {
+        if (!is_dir($directory)) {
+            return false;
+        }
+
+        $files = array_diff(scandir($directory), ['.', '..']);
+        foreach ($files as $file) {
+            $path = $directory . '/' . $file;
+            if (is_dir($path)) {
+                $this->delete_directory_recursive($path);
+            } else {
+                @unlink($path);
+            }
+        }
+
+        return @rmdir($directory);
     }
 
     /**

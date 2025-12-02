@@ -175,15 +175,10 @@ function pollReinstallProgress() {
 }
 
 function showBackupChoiceDuringProgress(button) {
-    // Show initial confirmation dialog (without backup choice)
-    if (!confirm('Are you sure you want to proceed with re-installing the plugins? This will replace all WordPress.org plugins with their latest versions.')) {
-        return;
-    }
-
     // Store plugin data globally
     repoPluginsJson = button.getAttribute('data-plugins');
 
-    // Start the reinstallation process
+    // Start the reinstallation process directly (no redundant confirmation)
     startPluginReinstallationWithBackupChoice(button);
 }
 
