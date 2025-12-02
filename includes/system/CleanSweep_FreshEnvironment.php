@@ -958,15 +958,6 @@ EOT;
 
         $content .= "foreach (wp_get_active_and_valid_plugins() as \$plugin) {\n";
         $content .= "    wp_register_plugin_realpath(\$plugin);\n";
-        $content .= "    \$plugin_data = get_plugin_data(\$plugin, false, false);\n";
-        $content .= "    \$textdomain = \$plugin_data['TextDomain'];\n";
-        $content .= "    if (\$textdomain) {\n";
-        $content .= "        if (\$plugin_data['DomainPath']) {\n";
-        $content .= "            \$GLOBALS['wp_textdomain_registry']->set_custom_path(\$textdomain, dirname(\$plugin) . \$plugin_data['DomainPath']);\n";
-        $content .= "        } else {\n";
-        $content .= "            \$GLOBALS['wp_textdomain_registry']->set_custom_path(\$textdomain, dirname(\$plugin));\n";
-        $content .= "        }\n";
-        $content .= "    }\n";
         $content .= "    include_once \$plugin;\n";
         $content .= "}\n\n";
 
