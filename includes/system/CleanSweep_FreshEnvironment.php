@@ -1016,8 +1016,8 @@ EOT;
 
         // WPMU DEV Dashboard is required for WPMU DEV operations
         if ($operation === 'wpmu_dev_reinstall' || $operation === 'premium_plugin_reinstall') {
-            $safe_plugins['wpmudev_dashboard'] = [
-                'file' => 'wpmudev-dashboard/wpmudev-dashboard.php',
+            $safe_plugins['wpmudev_updates'] = [
+                'file' => 'wpmudev-updates/update-notifications.php',
                 'name' => 'WPMU DEV Dashboard'
             ];
         }
@@ -1030,24 +1030,49 @@ EOT;
             return "add_filter('option_active_plugins', '__return_empty_array');\n";
         }
 
-        // Generate selective plugin loading code
+        // Generate selective plugin loading code with debugging
         $code = "// Selective plugin loading for operation: {$operation}\n";
+        $code .= "clean_sweep_log_message('🔍 DEBUG: Selective plugin loading initialized for operation: {$operation}', 'error');\n";
 
         // Create array of safe plugin files
         $safe_files = array_column($safe_plugins, 'file');
         $code .= "add_filter('option_active_plugins', function(\$plugins) {\n";
         $code .= "    \$safe_plugins = " . var_export($safe_files, true) . ";\n";
-        $code .= "    return array_intersect(\$plugins, \$safe_plugins);\n";
+        $code .= "    \$filtered = array_intersect(\$plugins, \$safe_plugins);\n";
+        $code .= "    clean_sweep_log_message('🔍 DEBUG: Active plugins filtered from ' . count(\$plugins) . ' to ' . count(\$filtered) . ' safe plugins', 'error');\n";
+        $code .= "    return \$filtered;\n";
         $code .= "});\n\n";
 
-        // Explicitly load safe plugins
-        $code .= "// Explicitly load required safe plugins\n";
+        // Explicitly load safe plugins with detailed debugging
+        $code .= "// Explicitly load required safe plugins with debugging\n";
         foreach ($safe_plugins as $plugin_key => $plugin_config) {
+            $code .= "// Loading safe plugin: {$plugin_config['name']} ({$plugin_config['file']})\n";
             $code .= "if (file_exists(WP_PLUGIN_DIR . '/{$plugin_config['file']}')) {\n";
+            $code .= "    clean_sweep_log_message('✅ DEBUG: Safe plugin file exists: {$plugin_config['file']}', 'error');\n";
+            $code .= "    \$before_load = class_exists('WPMUDEV_Dashboard') ? 'YES' : 'NO';\n";
+            $code .= "    clean_sweep_log_message('🔍 DEBUG: WPMUDEV_Dashboard class before load: ' . \$before_load, 'error');\n";
             $code .= "    include_once WP_PLUGIN_DIR . '/{$plugin_config['file']}';\n";
-            $code .= "    clean_sweep_log_message('Loaded safe plugin: {$plugin_config['name']}', 'debug');\n";
+            $code .= "    \$after_load = class_exists('WPMUDEV_Dashboard') ? 'YES' : 'NO';\n";
+            $code .= "    clean_sweep_log_message('✅ DEBUG: Loaded safe plugin: {$plugin_config['name']} - WPMUDEV_Dashboard class after load: ' . \$after_load, 'error');\n";
+            $code .= "    if (\$after_load === 'YES') {\n";
+            $code .= "        clean_sweep_log_message('🎉 DEBUG: WPMU DEV Dashboard class successfully loaded!', 'error');\n";
+            $code .= "    } else {\n";
+            $code .= "        clean_sweep_log_message('❌ DEBUG: WPMU DEV Dashboard class NOT loaded after including plugin', 'error');\n";
+            $code .= "    }\n";
+            $code .= "} else {\n";
+            $code .= "    clean_sweep_log_message('❌ DEBUG: Safe plugin file NOT found: {$plugin_config['file']}', 'error');\n";
             $code .= "}\n";
         }
+
+        // Add final check after all plugins loaded
+        $code .= "\n// Final check after all safe plugins loaded\n";
+        $code .= "clean_sweep_log_message('🔍 DEBUG: Final WPMU DEV availability check after plugin loading', 'error');\n";
+        $code .= "if (function_exists('clean_sweep_is_wpmudev_available')) {\n";
+        $code .= "    \$available = clean_sweep_is_wpmudev_available() ? 'YES' : 'NO';\n";
+        $code .= "    clean_sweep_log_message('🔍 DEBUG: WPMU DEV availability after loading: ' . \$available, 'error');\n";
+        $code .= "} else {\n";
+        $code .= "    clean_sweep_log_message('❌ DEBUG: clean_sweep_is_wpmudev_available function not available', 'error');\n";
+        $code .= "}\n\n";
 
         return $code;
     }
