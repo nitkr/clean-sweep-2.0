@@ -454,9 +454,6 @@ EOT;
         // 2. Define site paths BEFORE WordPress bootstrap (fixes database/filesystem mismatch)
         $this->defineSitePaths();
 
-        // 3. Setup path interception BEFORE WordPress bootstrap (fixes textdomain registry null error)
-        $this->setupPathInterception();
-
         // 4. Generate a safe wp-settings.php that uses clean files from fresh but content to real site
         $safe_settings = $this->generateSafeWpSettings($site_root);
         if (!$safe_settings) {
