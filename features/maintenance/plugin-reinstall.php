@@ -6,7 +6,16 @@
  * Functions are now split into focused modules for better organization
  */
 
-// Load plugin management modules
+// Load utilities first (no dependencies)
+require_once __DIR__ . '/lib/WpmuDevUtils.php';
+
+// Load new OOP architecture for advanced features
+require_once __DIR__ . '/lib/PluginReinstallationManager.php';
+require_once __DIR__ . '/lib/PluginAnalyzer.php';
+require_once __DIR__ . '/lib/BackupManager.php';
+require_once __DIR__ . '/lib/PluginReinstaller.php';
+
+// Load legacy plugin management modules (for compatibility)
 require_once __DIR__ . '/plugin-utils.php';
 require_once __DIR__ . '/plugin-backup.php';
 require_once __DIR__ . '/plugin-wordpress.php';
