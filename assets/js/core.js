@@ -137,6 +137,144 @@ function copyToClipboard(text, buttonElement) {
     });
 }
 
+let pendingReinstallationData = null;
+
+function confirmPluginReinstallation(button) {
+    const pluginsData = JSON.parse(button.getAttribute('data-plugins'));
+    const createBackup = document.getElementById('create-backup-checkbox').checked;
+
+    // Store the data for later use
+    pendingReinstallationData = {
+        plugins: pluginsData,
+        createBackup: createBackup,
+        button: button
+    };
+
+    // Populate confirmation dialog
+    const confirmationDetails = document.getElementById('confirmation-details');
+    const wordpressOrgCount = Object.keys(pluginsData).filter(slug => pluginsData[slug] && !pluginsData[slug].wdp_id).length;
+    const wpmuDevCount = Object.keys(pluginsData).filter(slug => pluginsData[slug] && pluginsData[slug].wdp_id).length;
+
+    confirmationDetails.innerHTML = `
+        <div style="background:#f8f9fa;padding:15px;border-radius:6px;margin-bottom:15px;">
+            <h4 style="margin:0 0 10px 0;color:#2c3e50;">📦 Reinstallation Summary</h4>
+            <ul style="margin:0;padding-left:20px;">
+                <li><strong>${wordpressOrgCount}</strong> plugins from WordPress.org repository</li>
+                <li><strong>${wpmuDevCount}</strong> plugins from WPMU DEV secured network</li>
+                <li><strong>${createBackup ? '✅' : '❌'}</strong> Automatic backup ${createBackup ? 'will be created' : 'will be skipped'}</li>
+            </ul>
+        </div>
+        <div style="background:#fff3cd;padding:15px;border-radius:6px;border:1px solid #ffeaa7;">
+            <h4 style="margin:0 0 10px 0;color:#856404;">⚠️ Important Warning</h4>
+            <p style="margin:0;color:#856404;">This action will replace all selected plugins with fresh versions from their official sources. This process cannot be undone.</p>
+            ${createBackup ? '<p style="margin:5px 0 0 0;color:#856404;"><strong>✓ Backup:</strong> Your current plugins will be safely backed up first.</p>' : '<p style="margin:5px 0 0 0;color:#dc3545;"><strong>⚠️ No Backup:</strong> No backup will be created. Ensure you have recent backups.</p>'}
+        </div>
+    `;
+
+    // Show confirmation dialog
+    document.getElementById('backup-confirmation-dialog').style.display = 'flex';
+}
+
+function proceedWithReinstallation() {
+    if (!pendingReinstallationData) return;
+
+    const { plugins, createBackup, button } = pendingReinstallationData;
+
+    // Hide confirmation dialog
+    document.getElementById('backup-confirmation-dialog').style.display = 'none';
+
+    // Start the actual reinstallation process
+    startPluginReinstallation(button, plugins, createBackup);
+
+    // Clear pending data
+    pendingReinstallationData = null;
+}
+
+function cancelReinstallation() {
+    document.getElementById('backup-confirmation-dialog').style.display = 'none';
+    pendingReinstallationData = null;
+}
+
+function startPluginReinstallation(button, plugins, createBackup) {
+    const progressContainer = document.getElementById("plugin-progress-container");
+    const progressFill = document.getElementById("plugin-progress-fill");
+    const progressText = document.getElementById("plugin-progress-text");
+    const statusIndicator = document.getElementById("plugin-status-indicator");
+
+    // Update UI
+    button.disabled = true;
+    button.textContent = "Starting...";
+    progressContainer.style.display = "block";
+
+    // Prepare form data
+    const formData = new FormData();
+    formData.append("action", "reinstall_plugins");
+    formData.append("plugins", JSON.stringify(plugins));
+    formData.append("create_backup", createBackup ? "1" : "0");
+
+    // Start progress polling
+    const progressFile = "plugin_reinstall_" + Date.now();
+    const pollInterval = setInterval(() => {
+        fetch(`logs/${progressFile}.progress?t=${Date.now()}`)
+            .then(response => {
+                if (response.status === 404) return null;
+                return response.json();
+            })
+            .then(data => {
+                if (data) {
+                    updateProgress(data.current || 0, data.total || 100, data.status || "Processing");
+                    if (progressFill) progressFill.style.width = (data.progress || 0) + "%";
+                    if (progressText) progressText.textContent = data.message || "Processing...";
+                    if (statusIndicator) {
+                        if (data.status === "complete") {
+                            statusIndicator.className = "status-indicator status-completed";
+                            statusIndicator.textContent = "Complete";
+                        } else if (data.status === "error") {
+                            statusIndicator.className = "status-indicator status-error";
+                            statusIndicator.textContent = "Failed";
+                        }
+                    }
+
+                    if (data.status === "complete") {
+                        clearInterval(pollInterval);
+                        button.disabled = false;
+                        button.textContent = "✅ Complete - View Results";
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 2000);
+                    } else if (data.status === "error") {
+                        clearInterval(pollInterval);
+                        button.disabled = false;
+                        button.textContent = "❌ Failed - Check Logs";
+                    }
+                }
+            })
+            .catch(error => {
+                console.error("Progress polling error:", error);
+            });
+    }, 1000);
+
+    // Send the request
+    fetch("", {
+        method: "POST",
+        body: formData,
+        headers: {
+            "X-Requested-With": "XMLHttpRequest"
+        }
+    })
+    .then(response => response.text())
+    .then(text => {
+        console.log("Plugin reinstallation started");
+        // Progress polling will handle the rest
+    })
+    .catch(error => {
+        console.error("Plugin reinstallation error:", error);
+        clearInterval(pollInterval);
+        button.disabled = false;
+        button.textContent = "❌ Error - Try Again";
+    });
+}
+
 function copyPluginList(type) {
     let pluginNames = [];
     const button = event.target;

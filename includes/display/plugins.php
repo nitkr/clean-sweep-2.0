@@ -242,8 +242,17 @@ function clean_sweep_display_plugins_tab_content($plugin_results) {
         $skipped_count = count($skipped);
         $total_to_reinstall = $repo_count + $wpmudev_count;
 
+        $cached_indicator = '';
+        if (isset($plugin_results['cached_at']) && isset($plugin_results['cache_expires'])) {
+            $time_remaining = $plugin_results['cache_expires'] - time();
+            if ($time_remaining > 0) {
+                $minutes_remaining = round($time_remaining / 60);
+                $cached_indicator = " <span style='background:#17a2b8;color:white;padding:2px 6px;border-radius:10px;font-size:11px;font-weight:normal;'>CACHED ({$minutes_remaining}min left)</span>";
+            }
+        }
+
         echo '<div class="analysis-header">';
-        echo '<h3>🔍 Advanced Plugin Analysis Complete</h3>';
+        echo '<h3>🔍 Advanced Plugin Analysis Complete' . $cached_indicator . '</h3>';
         echo '<p>Comprehensive security analysis with suspicious file detection and detailed categorization</p>';
         echo '</div>';
 
@@ -419,7 +428,22 @@ function clean_sweep_display_plugins_tab_content($plugin_results) {
         echo '</ul>';
         echo '</div>';
 
-        // Start button with AJAX
+        // Backup choice option and confirmation dialog
+        echo '<div style="background:#f8f9fa;border:1px solid #dee2e6;padding:20px;border-radius:8px;margin:20px 0;">';
+        echo '<h4 style="margin:0 0 15px 0;color:#2c3e50;">🛡️ Backup & Safety Options</h4>';
+        echo '<div style="display:flex;align-items:center;margin-bottom:15px;">';
+        echo '<input type="checkbox" id="create-backup-checkbox" checked style="margin-right:10px;width:18px;height:18px;">';
+        echo '<label for="create-backup-checkbox" style="font-weight:500;color:#2c3e50;">Create automatic backup before reinstallation</label>';
+        echo '</div>';
+        echo '<div style="font-size:13px;color:#6c757d;margin-bottom:15px;">';
+        echo '<strong>Backup includes:</strong> Current plugins directory, database tables (optional), and configuration files.';
+        echo '</div>';
+        echo '<div style="font-size:12px;color:#856404;background:#fff3cd;padding:10px;border-radius:4px;border:1px solid #ffeaa7;">';
+        echo '<strong>⚠️ Note:</strong> Backup creation is recommended but can be skipped if you have recent backups or are in a testing environment.';
+        echo '</div>';
+        echo '</div>';
+
+        // Start button with AJAX and confirmation
         echo '<div style="text-align:center;margin:30px 0;">';
         // Combine all plugins that will be reinstalled
         $all_plugins_to_reinstall = array_merge(
@@ -430,6 +454,20 @@ function clean_sweep_display_plugins_tab_content($plugin_results) {
         echo '🚀 Start Complete Ecosystem Re-installation (' . $total_to_reinstall . ' plugins)';
         echo '</button>';
         echo '<p style="margin-top:10px;color:#666;font-size:14px;">WordPress.org plugins from official repository + WPMU DEV premium plugins from secured network</p>';
+        echo '</div>';
+
+        // Confirmation dialog (hidden by default)
+        echo '<div id="backup-confirmation-dialog" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:10000;justify-content:center;align-items:center;">';
+        echo '<div style="background:white;padding:30px;border-radius:8px;max-width:500px;width:90%;box-shadow:0 10px 30px rgba(0,0,0,0.3);">';
+        echo '<h3 style="margin:0 0 20px 0;color:#2c3e50;text-align:center;">🛡️ Confirm Plugin Reinstallation</h3>';
+        echo '<div id="confirmation-details" style="margin-bottom:20px;font-size:14px;line-height:1.6;">';
+        echo '<!-- Details will be populated by JavaScript -->';
+        echo '</div>';
+        echo '<div style="display:flex;gap:10px;justify-content:center;">';
+        echo '<button onclick="proceedWithReinstallation()" style="background:#28a745;color:white;border:none;padding:12px 25px;border-radius:4px;cursor:pointer;font-weight:600;">✅ Proceed</button>';
+        echo '<button onclick="cancelReinstallation()" style="background:#6c757d;color:white;border:none;padding:12px 25px;border-radius:4px;cursor:pointer;font-weight:600;">❌ Cancel</button>';
+        echo '</div>';
+        echo '</div>';
         echo '</div>';
 
         // Progress display area (always present for AJAX operations)

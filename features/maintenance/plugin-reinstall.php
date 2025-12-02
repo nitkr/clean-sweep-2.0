@@ -25,9 +25,24 @@ require_once __DIR__ . '/plugin-wordpress.php';
  * Returns arrays categorized by whether they should be handled by WPMU DEV or WordPress.org
  *
  * LEGACY WRAPPER: Now delegates to the new advanced PluginAnalyzer class
+ * FEATURES: Cached analysis results, improved batch processing, backup choice option
  */
-function clean_sweep_analyze_plugins($progress_file = null) {
+function clean_sweep_analyze_plugins($progress_file = null, $force_refresh = false) {
     try {
+        // Check for cached analysis results first (unless force refresh is requested)
+        $cache_key = 'clean_sweep_plugin_analysis_cache';
+        $cache_expiry = 1800; // 30 minutes
+
+        if (!$force_refresh) {
+            $cached_result = get_transient($cache_key);
+            if ($cached_result !== false && is_array($cached_result)) {
+                clean_sweep_log_message("Using cached plugin analysis results (expires in " . round(($cache_expiry - (time() - get_option('_transient_timeout_' . $cache_key, 0))) / 60) . " minutes)");
+                return $cached_result;
+            }
+        }
+
+        clean_sweep_log_message("Running fresh plugin analysis" . ($force_refresh ? " (force refresh requested)" : ""));
+
         // Use the advanced PluginAnalyzer class
         $analyzer = new CleanSweep_PluginAnalyzer();
         $result = $analyzer->analyze($progress_file);
@@ -72,13 +87,21 @@ function clean_sweep_analyze_plugins($progress_file = null) {
         clean_sweep_log_message("=== Advanced Plugin Analysis Completed ===");
         clean_sweep_log_message("WordPress.org: $wp_org_count, WPMU DEV: $wpmu_dev_count, Non-repository: $non_repo_count, Suspicious files: $suspicious_count");
 
-        // Return backward-compatible format with additional advanced data
-        return array_merge(compact('wp_org_plugins', 'wpmu_dev_plugins', 'skipped'), [
+        // Prepare the complete result set for caching
+        $complete_result = array_merge(compact('wp_org_plugins', 'wpmu_dev_plugins', 'skipped'), [
             'non_repo_plugins' => $non_repo_plugins,
             'suspicious_files' => $suspicious_files,
             'copy_lists' => $result['copy_lists'] ?? [],
-            'totals' => $result['totals'] ?? []
+            'totals' => $result['totals'] ?? [],
+            'cached_at' => time(),
+            'cache_expires' => time() + $cache_expiry
         ]);
+
+        // Cache the analysis results
+        set_transient($cache_key, $complete_result, $cache_expiry);
+        clean_sweep_log_message("Analysis results cached for $cache_expiry seconds");
+
+        return $complete_result;
 
     } catch (Exception $e) {
         clean_sweep_log_message("Plugin analysis exception: " . $e->getMessage(), 'error');
@@ -244,9 +267,10 @@ function clean_sweep_verify_wpmudev_installations($wpmudev_plugins) {
 }
 
 /**
- * Analyze plugins without re-installing
+ * Execute plugin reinstallation with advanced features
+ * Supports backup choice, cached analysis, and improved batch processing
  */
-function clean_sweep_execute_reinstallation($repo_plugins, $progress_file = null, $batch_start = 0, $batch_size = null) {
+function clean_sweep_execute_reinstallation($repo_plugins, $progress_file = null, $batch_start = 0, $batch_size = null, $create_backup = true) {
     clean_sweep_log_message("=== WordPress Plugin Re-installation Started ===");
 
     // CRITICAL FIX: Filter out any WPMU DEV plugins that might have slipped through
@@ -366,12 +390,15 @@ function clean_sweep_execute_reinstallation($repo_plugins, $progress_file = null
         clean_sweep_log_message("Initial progress file created for JavaScript polling");
     }
 
-    // Create backup only for the first batch to avoid multiple backups
-    if ($batch_start === 0) {
+    // Create backup only for the first batch to avoid multiple backups (if requested)
+    if ($batch_start === 0 && $create_backup) {
+        clean_sweep_log_message("User requested backup creation - proceeding...");
         if (!clean_sweep_create_backup()) {
             clean_sweep_log_message("Backup failed. Aborting re-installation.", 'error');
             return $results;
         }
+    } elseif ($batch_start === 0 && !$create_backup) {
+        clean_sweep_log_message("User opted out of backup creation - proceeding without backup");
     }
 
     // Get active plugins before re-installation
