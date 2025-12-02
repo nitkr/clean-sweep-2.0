@@ -31,7 +31,7 @@ function clean_sweep_analyze_plugins($progress_file = null) {
     $skipped = [];          // Plugins that can't be reinstalled (non-repository)
 
     // Check if we can write to plugins directory
-    if (!wp_is_writable(WP_PLUGIN_DIR)) {
+    if (!wp_is_writable(ORIGINAL_WP_PLUGIN_DIR)) {
         clean_sweep_log_message("Error: Plugins directory is not writable. Please check file permissions.", 'error');
         return compact('wp_org_plugins', 'wpmu_dev_plugins', 'skipped');
     }
@@ -52,7 +52,7 @@ function clean_sweep_analyze_plugins($progress_file = null) {
     // Direct one-pass categorization through all plugins
     foreach ($all_plugins as $plugin_file => $plugin_data) {
         $current_count++;
-        $plugin_path = WP_PLUGIN_DIR . '/' . $plugin_file;
+        $plugin_path = ORIGINAL_WP_PLUGIN_DIR . '/' . $plugin_file;
 
         // Extract slug for WordPress.org operations
         $plugin_dir = dirname($plugin_file);
@@ -64,7 +64,7 @@ function clean_sweep_analyze_plugins($progress_file = null) {
 
         // Special handling for Hello Dolly - remove it entirely
         if ($slug === 'hello') {
-            $plugin_file_path = WP_PLUGIN_DIR . '/' . $plugin_file;
+            $plugin_file_path = ORIGINAL_WP_PLUGIN_DIR . '/' . $plugin_file;
             if (file_exists($plugin_file_path)) {
                 clean_sweep_log_message("Removing Hello Dolly plugin (demo plugin): {$plugin_data['Name']}");
 
@@ -218,13 +218,13 @@ function clean_sweep_verify_installations($expected_plugins) {
                 // Verify plugin files exist and are readable
                 if ($plugin_dir === '.' || $plugin_dir === '') {
                     // Plugin is in root directory
-                    $main_file = WP_PLUGIN_DIR . '/' . $plugin_file;
+                    $main_file = ORIGINAL_WP_PLUGIN_DIR . '/' . $plugin_file;
                     if (!file_exists($main_file) || !is_readable($main_file)) {
                         $plugin_corrupted = true;
                     }
                 } else {
                     // Plugin is in subdirectory
-                    $plugin_dir_path = WP_PLUGIN_DIR . '/' . $plugin_slug;  // FIXED: Use proper slug
+                    $plugin_dir_path = ORIGINAL_WP_PLUGIN_DIR . '/' . $plugin_slug;  // FIXED: Use proper slug
                     if (is_dir($plugin_dir_path)) {
                         // Check for main plugin file
                         $main_file = $plugin_dir_path . '/' . basename($plugin_file);
@@ -293,7 +293,7 @@ function clean_sweep_verify_wpmudev_installations($wpmudev_plugins) {
             $plugin_found = true;
 
             // Verify the plugin file actually exists and is readable
-            $plugin_path = WP_PLUGIN_DIR . '/' . $plugin_file;
+            $plugin_path = ORIGINAL_WP_PLUGIN_DIR . '/' . $plugin_file;
             if (!file_exists($plugin_path) || !is_readable($plugin_path)) {
                 $plugin_corrupted = true;
             }
@@ -342,7 +342,7 @@ function clean_sweep_execute_reinstallation($repo_plugins, $progress_file = null
     foreach ($repo_plugins as $slug => $plugin_data) {
         // Double-check this is not a WPMU DEV plugin
         // Check if there's a corresponding plugin file
-        $plugin_dir = WP_PLUGIN_DIR . '/' . $slug;
+        $plugin_dir = ORIGINAL_WP_PLUGIN_DIR . '/' . $slug;
         $skip_plugin = false;
 
         if (is_dir($plugin_dir)) {

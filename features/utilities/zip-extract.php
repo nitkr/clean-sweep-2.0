@@ -306,7 +306,9 @@ function clean_sweep_execute_zip_extraction() {
 
     // Get extraction path
     $extract_path = isset($_POST['extract_path']) ? $_POST['extract_path'] : 'wp-content';
-    $full_extract_path = ABSPATH . $extract_path;
+    // Use original site paths in recovery mode
+    $base_path = defined('ORIGINAL_ABSPATH') ? ORIGINAL_ABSPATH : ABSPATH;
+    $full_extract_path = $base_path . $extract_path;
 
     clean_sweep_log_message("Extracting files to: $full_extract_path");
     clean_sweep_log_message("Extract path type: $extract_path");

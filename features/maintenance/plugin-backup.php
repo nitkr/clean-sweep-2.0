@@ -31,7 +31,7 @@ function clean_sweep_create_backup() {
         }
     }
 
-    $plugins_dir = WP_PLUGIN_DIR;
+    $plugins_dir = ORIGINAL_WP_PLUGIN_DIR;
     $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($plugins_dir));
 
     foreach ($iterator as $file) {

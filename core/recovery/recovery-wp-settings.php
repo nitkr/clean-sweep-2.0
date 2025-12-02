@@ -8,12 +8,92 @@
  * @package WordPress
  */
 
+// Define ABSPATH FIRST - needed for WordPress bootstrap to work with site database
+if (!defined('ABSPATH')) {
+    define( 'ABSPATH', dirname(dirname(dirname(__DIR__))) . '/' );
+}
+
+// Load fresh wp-config.php FIRST - before ANY WordPress code
+$fresh_config = dirname(__FILE__) . '/wp-config.php';
+if (file_exists($fresh_config)) {
+    require_once $fresh_config;
+} else {
+    // Fallback: define table_prefix if fresh wp-config.php is missing
+    $table_prefix = 'wp_';
+}
+
+/**
+ * Calculate the relative path from one absolute path to another
+ *
+ * @param string $from Absolute path to calculate from
+ * @param string $to   Absolute path to calculate to
+ * @return string      Relative path from $from to $to
+ */
+function get_relative_path($from, $to) {
+    // Normalize paths by removing trailing slashes
+    $from = rtrim($from, '/');
+    $to = rtrim($to, '/');
+
+    // Split paths into arrays
+    $from_parts = explode('/', $from);
+    $to_parts = explode('/', $to);
+
+    // Find common prefix
+    $common_parts = array();
+    $max_common = min(count($from_parts), count($to_parts));
+
+    for ($i = 0; $i < $max_common; $i++) {
+        if ($from_parts[$i] === $to_parts[$i]) {
+            $common_parts[] = $from_parts[$i];
+        } else {
+            break;
+        }
+    }
+
+    // Calculate relative path
+    $up_levels = count($from_parts) - count($common_parts);
+    $down_parts = array_slice($to_parts, count($common_parts));
+
+    // Build relative path
+    $relative_parts = array_fill(0, $up_levels, '..');
+    $relative_parts = array_merge($relative_parts, $down_parts);
+
+    return implode('/', $relative_parts);
+}
+
 /**
  * Stores the location of the WordPress directory of functions, classes, and core content.
+ * In recovery mode, use fresh WordPress core files.
  *
  * @since 1.0.0
  */
-define( 'WPINC', 'wp-includes' );
+if (defined('CLEAN_SWEEP_RECOVERY_MODE') && CLEAN_SWEEP_RECOVERY_MODE) {
+    // Define ABSPATH first so we can calculate relative WPINC
+    if (!defined('ABSPATH')) {
+        define( 'ABSPATH', dirname(dirname(dirname(__DIR__))) . '/' ); // Point to site root
+    }
+
+    // Use fresh WordPress core files from recovery directory
+    if (!defined('WPINC')) {
+        // Calculate relative path from ABSPATH to fresh wp-includes (portable for any install dir)
+        $clean_sweep_root = dirname(dirname(__DIR__)); // Clean Sweep root directory
+        $fresh_wp_includes = $clean_sweep_root . '/core/fresh/wp-includes';
+        // WPINC should be relative to ABSPATH for proper concatenation
+        $relative_wpinc = str_replace(ABSPATH, '', $fresh_wp_includes);
+        define( 'WPINC', $relative_wpinc );
+    }
+} else {
+    if (!defined('WPINC')) {
+        define( 'WPINC', 'wp-includes' );
+    }
+}
+
+// ============================================================================
+// BASIC RECOVERY FUNCTIONS
+// ============================================================================
+
+// Note: Translation functions (__(), _e(), _x()) are provided by WordPress core
+// No stub definitions needed in recovery mode
 
 /**
  * Version information for the current WordPress release.
@@ -115,8 +195,8 @@ require ABSPATH . WPINC . '/meta.php';
 require ABSPATH . WPINC . '/functions.php';
 require ABSPATH . WPINC . '/class-wp-meta-query.php';
 require ABSPATH . WPINC . '/class-wp-matchesmapregex.php';
-require ABSPATH . WPINC . '/class-wp.php';
-require ABSPATH . WPINC . '/class-wp-error.php';
+if (!class_exists('WP')) require ABSPATH . WPINC . '/class-wp.php';
+if (!class_exists('WP_Error')) require ABSPATH . WPINC . '/class-wp-error.php';
 require ABSPATH . WPINC . '/pomo/mo.php';
 require ABSPATH . WPINC . '/l10n/class-wp-translation-controller.php';
 require ABSPATH . WPINC . '/l10n/class-wp-translations.php';
@@ -420,23 +500,32 @@ add_action( 'after_setup_theme', array( wp_interactivity(), 'add_hooks' ) );
  */
 $GLOBALS['wp_embed'] = new WP_Embed();
 
-/**
- * WordPress Textdomain Registry object.
- *
- * Used to support just-in-time translations for manually loaded text domains.
- *
- * @since 6.1.0
- *
- * @global WP_Textdomain_Registry $wp_textdomain_registry WordPress Textdomain Registry.
- */
-$GLOBALS['wp_textdomain_registry'] = new WP_Textdomain_Registry();
-$GLOBALS['wp_textdomain_registry']->init();
+// Load fresh wp-config.php explicitly first to ensure $table_prefix is defined
+// This must happen before any WordPress constants are defined
+$fresh_config = dirname(__FILE__) . '/wp-config.php';
+if (file_exists($fresh_config)) {
+    require_once $fresh_config;
+} else {
+    // Fallback: define table_prefix if fresh wp-config.php is missing
+    $table_prefix = 'wp_';
+}
 
-// Load multisite-specific files.
-if ( is_multisite() ) {
-	require ABSPATH . WPINC . '/ms-functions.php';
-	require ABSPATH . WPINC . '/ms-default-filters.php';
-	require ABSPATH . WPINC . '/ms-deprecated.php';
+/**
+ * Stores the location of the WordPress directory of functions, classes, and core content.
+ * In recovery mode, use fresh WordPress core files.
+ *
+ * @since 1.0.0
+ */
+if (defined('CLEAN_SWEEP_RECOVERY_MODE') && CLEAN_SWEEP_RECOVERY_MODE) {
+    // Use fresh WordPress core files from recovery directory
+    if (!defined('WPINC')) {
+        // Calculate relative path from ABSPATH to fresh wp-includes (portable for any install dir)
+        $clean_sweep_root = dirname(dirname(__DIR__)); // Clean Sweep root directory
+        $fresh_wp_includes = $clean_sweep_root . '/core/fresh/wp-includes';
+        // WPINC should be relative to ABSPATH for proper concatenation
+        $relative_wpinc = str_replace(ABSPATH, '', $fresh_wp_includes);
+        define( 'WPINC', $relative_wpinc );
+    }
 }
 
 // Define constants that rely on the API to obtain the default value.
