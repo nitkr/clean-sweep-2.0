@@ -16,8 +16,12 @@ class CleanSweep_PluginAnalyzer {
      * @return array Analysis results
      */
     public function analyze($progress_file = null) {
-        // Plugin functions are now loaded by selective plugin loading in wp-settings.php
-        // No need to load them again here to avoid redeclaration errors
+        // Load WordPress plugin functions conditionally to avoid redeclaration errors
+        // Only load if not already available from selective plugin loading
+        if (!function_exists('get_plugins')) {
+            require_once ABSPATH . WPINC . '/wp-admin/includes/plugin.php';
+            clean_sweep_log_message("Loaded WordPress plugin functions from fresh installation", 'debug');
+        }
 
         clean_sweep_log_message("=== WordPress Plugin Analysis Started ===");
         clean_sweep_log_message("Version: " . CLEAN_SWEEP_VERSION);
