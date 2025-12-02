@@ -19,7 +19,6 @@ require_once __DIR__ . '/lib/PluginReinstaller.php';
 require_once __DIR__ . '/plugin-utils.php';
 require_once __DIR__ . '/plugin-backup.php';
 require_once __DIR__ . '/plugin-wordpress.php';
-require_once __DIR__ . '/plugin-wpmudev.php';
 
 /**
  * Analyze and categorize all installed plugins for reinstallation
