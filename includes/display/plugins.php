@@ -428,20 +428,7 @@ function clean_sweep_display_plugins_tab_content($plugin_results) {
         echo '</ul>';
         echo '</div>';
 
-        // Backup choice option and confirmation dialog
-        echo '<div style="background:#f8f9fa;border:1px solid #dee2e6;padding:20px;border-radius:8px;margin:20px 0;">';
-        echo '<h4 style="margin:0 0 15px 0;color:#2c3e50;">🛡️ Backup & Safety Options</h4>';
-        echo '<div style="display:flex;align-items:center;margin-bottom:15px;">';
-        echo '<input type="checkbox" id="create-backup-checkbox" checked style="margin-right:10px;width:18px;height:18px;">';
-        echo '<label for="create-backup-checkbox" style="font-weight:500;color:#2c3e50;">Create automatic backup before reinstallation</label>';
-        echo '</div>';
-        echo '<div style="font-size:13px;color:#6c757d;margin-bottom:15px;">';
-        echo '<strong>Backup includes:</strong> Current plugins directory, database tables (optional), and configuration files.';
-        echo '</div>';
-        echo '<div style="font-size:12px;color:#856404;background:#fff3cd;padding:10px;border-radius:4px;border:1px solid #ffeaa7;">';
-        echo '<strong>⚠️ Note:</strong> Backup creation is recommended but can be skipped if you have recent backups or are in a testing environment.';
-        echo '</div>';
-        echo '</div>';
+
 
         // Start button with AJAX and confirmation
         echo '<div style="text-align:center;margin:30px 0;">';
