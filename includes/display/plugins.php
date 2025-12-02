@@ -417,11 +417,11 @@ function clean_sweep_display_plugins_tab_content($plugin_results) {
             echo '</div>';
         }
 
-        // Safety warnings
+        // Safety warnings (backup choice now handled during progress)
         echo '<div style="background:#f8d7da;border:1px solid #f5c6cb;padding:15px;border-radius:4px;margin:20px 0;">';
         echo '<h4>⚠️ Important Safety Information</h4>';
         echo '<ul style="margin:10px 0;padding-left:20px;">';
-        echo '<li>A complete backup of your current plugins will be created automatically</li>';
+        echo '<li>You will be asked whether to create a backup before proceeding</li>';
         echo '<li>Hello Dolly (demo plugin) will be automatically removed if present</li>';
         echo '<li>This process cannot be undone - review the list above carefully</li>';
         echo '<li>Ensure you have database backups before proceeding</li>';
@@ -443,19 +443,7 @@ function clean_sweep_display_plugins_tab_content($plugin_results) {
         echo '<p style="margin-top:10px;color:#666;font-size:14px;">WordPress.org plugins from official repository + WPMU DEV premium plugins from secured network</p>';
         echo '</div>';
 
-        // Confirmation dialog (hidden by default)
-        echo '<div id="backup-confirmation-dialog" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:10000;justify-content:center;align-items:center;">';
-        echo '<div style="background:white;padding:30px;border-radius:8px;max-width:500px;width:90%;box-shadow:0 10px 30px rgba(0,0,0,0.3);">';
-        echo '<h3 style="margin:0 0 20px 0;color:#2c3e50;text-align:center;">🛡️ Confirm Plugin Reinstallation</h3>';
-        echo '<div id="confirmation-details" style="margin-bottom:20px;font-size:14px;line-height:1.6;">';
-        echo '<!-- Details will be populated by JavaScript -->';
-        echo '</div>';
-        echo '<div style="display:flex;gap:10px;justify-content:center;">';
-        echo '<button onclick="proceedWithReinstallation()" style="background:#28a745;color:white;border:none;padding:12px 25px;border-radius:4px;cursor:pointer;font-weight:600;">✅ Proceed</button>';
-        echo '<button onclick="cancelReinstallation()" style="background:#6c757d;color:white;border:none;padding:12px 25px;border-radius:4px;cursor:pointer;font-weight:600;">❌ Cancel</button>';
-        echo '</div>';
-        echo '</div>';
-        echo '</div>';
+
 
         // Progress display area (always present for AJAX operations)
         echo '<div id="plugin-progress-container" style="display:none;margin:20px 0;">';
