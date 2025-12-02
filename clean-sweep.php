@@ -25,6 +25,11 @@ require_once __DIR__ . '/wordpress-api.php'; // WordPress API wrappers
 require_once __DIR__ . '/ui.php';            // User interface components
 require_once __DIR__ . '/display.php';       // Display and rendering functions
 
+// Batch Processing System - Reusable long-running operation framework
+require_once __DIR__ . '/includes/system/batch-processing/CleanSweep_BatchProcessor.php';
+require_once __DIR__ . '/includes/system/batch-processing/CleanSweep_ProgressManager.php';
+require_once __DIR__ . '/includes/system/batch-processing/CleanSweep_BatchProcessingException.php';
+
 // Recovery-Only Mode Classes
 require_once __DIR__ . '/includes/system/CleanSweep_FreshEnvironment.php';
 require_once __DIR__ . '/includes/system/CleanSweep_RecoveryBootstrap.php';
