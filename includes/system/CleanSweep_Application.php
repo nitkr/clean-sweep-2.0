@@ -268,6 +268,9 @@ class CleanSweep_Application {
     }
 
     private function handle_extract_zip() {
+        // Output HTML header for proper page structure
+        clean_sweep_output_html_header();
+
         if (!defined('WP_CLI') || !WP_CLI) {
             echo '<h2>📁 ZIP Extraction Started</h2>';
             echo '<div style="background:#e7f3ff;border:1px solid #b8daff;padding:20px;border-radius:4px;margin:20px 0;">';
@@ -278,6 +281,9 @@ class CleanSweep_Application {
         }
 
         clean_sweep_execute_zip_extraction();
+
+        // Output HTML footer for complete page structure
+        clean_sweep_output_html_footer();
     }
 
     private function handle_scan_malware() {
