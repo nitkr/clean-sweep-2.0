@@ -19,7 +19,6 @@ require_once __DIR__ . '/lib/PluginReinstaller.php';
 require_once __DIR__ . '/plugin-utils.php';
 require_once __DIR__ . '/plugin-backup.php';
 require_once __DIR__ . '/plugin-wordpress.php';
-require_once __DIR__ . '/plugin-wpmudev.php';
 
 /**
  * Analyze and categorize all installed plugins for reinstallation
@@ -539,9 +538,50 @@ function clean_sweep_execute_reinstallation($repo_plugins, $progress_file = null
         clean_sweep_log_message("Checking for WPMU DEV premium plugins to reinstall...");
         $wpmudev_plugins_to_reinstall = get_transient('clean_sweep_wpmudev_plugins');
 
-        if ($wpmudev_plugins_to_reinstall !== false) {
+        if ($wpmudev_plugins_to_reinstall !== false && !empty($wpmudev_plugins_to_reinstall)) {
             clean_sweep_log_message("Found " . count($wpmudev_plugins_to_reinstall) . " WPMU DEV plugins to reinstall from stored analysis");
-            $wpmudev_results = clean_sweep_reinstall_wpmudev_plugins($progress_file, $wpmudev_plugins_to_reinstall);
+
+            // Use OOP architecture instead of old procedural function
+            $manager = new CleanSweep_PluginReinstallationManager();
+            $reinstall_result = $manager->handle_request('start_reinstallation', [
+                'progress_file' => $progress_file,
+                'create_backup' => false, // Already handled above
+                'proceed_without_backup' => true, // Already handled above
+                'wp_org_plugins' => [], // No WordPress.org plugins in this phase
+                'wpmu_dev_plugins' => $wpmudev_plugins_to_reinstall, // Pass WPMU DEV plugins
+                'suspicious_files_to_delete' => [], // No suspicious files in this phase
+                'batch_start' => 0, // Not batching for WPMU DEV
+                'batch_size' => null // Process all at once
+            ]);
+
+            if ($reinstall_result['success']) {
+                // Extract WPMU DEV results from OOP structure
+                $wpmudev_results = $reinstall_result['wpmu_dev'] ?? ['successful' => [], 'failed' => []];
+                clean_sweep_log_message("WPMU DEV plugin processing completed: " . count($wpmudev_results['successful']) . " success, " . count($wpmudev_results['failed']) . " failed");
+
+                // Add successful WPMU DEV plugins to main successful array for proper final display
+                foreach ($wpmudev_results['successful'] as $plugin_data) {
+                    $results['successful'][] = [
+                        'name' => $plugin_data['name'] ?? $plugin_data['slug'] ?? 'Unknown',
+                        'slug' => $plugin_data['slug'] ?? $plugin_data['name'] ?? 'unknown',
+                        'status' => 'Re-installed successfully (WPMU DEV)',
+                        'is_wpmudev' => true
+                    ];
+                }
+
+                // Add failed WPMU DEV plugins to main failed results
+                foreach ($wpmudev_results['failed'] as $plugin_data) {
+                    $results['failed'][] = [
+                        'name' => $plugin_data['name'] ?? $plugin_data['slug'] ?? 'Unknown',
+                        'slug' => $plugin_data['slug'] ?? $plugin_data['name'] ?? 'unknown',
+                        'status' => 'WPMU DEV re-installation failed: ' . ($plugin_data['status'] ?? 'Unknown error'),
+                        'is_wpmudev' => true
+                    ];
+                }
+            } else {
+                $wpmudev_results = ['error' => $reinstall_result['error'] ?? 'WPMU DEV reinstallation failed'];
+                clean_sweep_log_message("WPMU DEV processing failed: {$wpmudev_results['error']}", 'error');
+            }
         } else {
             clean_sweep_log_message("No WPMU DEV plugins list found from analysis phase", 'warning');
             $wpmudev_results = ['error' => 'No WPMU DEV plugins list available'];
@@ -550,30 +590,6 @@ function clean_sweep_execute_reinstallation($repo_plugins, $progress_file = null
         // Merge results
         if (!isset($wpmudev_results['error'])) {
             $results['wpmudev'] = $wpmudev_results;
-            clean_sweep_log_message("WPMU DEV plugin processing completed: {$wpmudev_results['successful']} success, {$wpmudev_results['failed']} failed");
-
-            // Add successful WPMU DEV plugins to main successful array for proper final display
-            if (isset($wpmudev_results['wpmudev_plugins']) && is_array($wpmudev_results['wpmudev_plugins'])) {
-                foreach ($wpmudev_results['wpmudev_plugins'] as $pid_index => $plugin_data) {
-                    if (isset($plugin_data['installed']) && $plugin_data['installed'] && empty($plugin_data['error'])) {
-                        // Add to main successful results for proper final display
-                        $results['successful'][] = [
-                            'name' => $plugin_data['name'] ?? $plugin_data['filename'] ?? $pid_index,
-                            'slug' => $plugin_data['filename'] ?? $plugin_data['name'] ?? $pid_index,
-                            'status' => 'Re-installed successfully (WPMU DEV)',
-                            'is_wpmudev' => true
-                        ];
-                    } elseif (isset($plugin_data['error']) && $plugin_data['error']) {
-                        // Add failed WPMU DEV plugins to main failed results
-                        $results['failed'][] = [
-                            'name' => $plugin_data['name'] ?? $plugin_data['filename'] ?? $pid_index,
-                            'slug' => $plugin_data['filename'] ?? $plugin_data['name'] ?? $pid_index,
-                            'status' => 'WPMU DEV re-installation failed: ' . $plugin_data['error'],
-                            'is_wpmudev' => true
-                        ];
-                    }
-                }
-            }
 
             // Filter out excluded plugins from verification (same as install)
             // Exclude WPMU DEV Dashboard (ID 119)
@@ -619,8 +635,8 @@ function clean_sweep_execute_reinstallation($repo_plugins, $progress_file = null
         // Updated summary now includes WPMU DEV results
         $wp_success = count($results['successful']);
         $wp_failed = count($results['failed']);
-        $wpmudev_success = isset($results['wpmudev']['successful']) ? $results['wpmudev']['successful'] : 0;
-        $wpmudev_failed = isset($results['wpmudev']['failed']) ? $results['wpmudev']['failed'] : 0;
+        $wpmudev_success = count($wpmudev_results['successful'] ?? []);
+        $wpmudev_failed = count($wpmudev_results['failed'] ?? []);
 
         clean_sweep_log_message("Final Summary: WordPress.org ({$wp_success}/{$wp_failed} success/failed) + WPMU DEV ({$wpmudev_success}/{$wpmudev_failed} success/failed)");
         clean_sweep_log_message("=== Complete Plugin Ecosystem Re-installation Completed ===");
