@@ -20,6 +20,7 @@ function clean_sweep_output_html_header() {
         echo '<!DOCTYPE html><html><head><title>Clean Sweep - WordPress Malware Cleanup Toolkit' . $title_suffix . '</title>';
         echo '<link rel="stylesheet" href="assets/css/style.css">';
         echo '<script src="assets/script.js"></script>';
+        echo '<script src="assets/js/core.js"></script>';
         echo '</head><body><h1>🧹 Clean Sweep v ' . CLEAN_SWEEP_VERSION . $badge_html . '</h1>';
 
 
