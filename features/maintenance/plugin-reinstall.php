@@ -23,168 +23,73 @@ require_once __DIR__ . '/plugin-wordpress.php';
 /**
  * Analyze and categorize all installed plugins for reinstallation
  * Returns arrays categorized by whether they should be handled by WPMU DEV or WordPress.org
+ *
+ * LEGACY WRAPPER: Now delegates to the new advanced PluginAnalyzer class
  */
 function clean_sweep_analyze_plugins($progress_file = null) {
-    require_once ABSPATH . 'wp-admin/includes/plugin.php';
+    try {
+        // Use the advanced PluginAnalyzer class
+        $analyzer = new CleanSweep_PluginAnalyzer();
+        $result = $analyzer->analyze($progress_file);
 
-    clean_sweep_log_message("=== WordPress Plugin Analysis Started ===");
-    clean_sweep_log_message("Version: " . CLEAN_SWEEP_VERSION);
-    clean_sweep_log_message("WordPress Version: " . get_bloginfo('version'));
-    clean_sweep_log_message("Site URL: " . get_site_url());
-    clean_sweep_log_message("Progress file: " . ($progress_file ?: 'none'));
-
-    // Initialize categorized plugin arrays
-    $wp_org_plugins = [];    // WordPress.org plugins to reinstall
-    $wpmu_dev_plugins = [];  // WPMU DEV plugins to reinstall
-    $skipped = [];          // Plugins that can't be reinstalled (non-repository)
-
-    // Check if we can write to plugins directory
-    if (!wp_is_writable(ORIGINAL_WP_PLUGIN_DIR)) {
-        clean_sweep_log_message("Error: Plugins directory is not writable. Please check file permissions.", 'error');
-        return compact('wp_org_plugins', 'wpmu_dev_plugins', 'skipped');
-    }
-
-    // Get WPMU DEV cached projects for lookup (refresh cache)
-    $wpmudev_projects = [];
-    if (clean_sweep_is_wpmudev_available()) {
-        WPMUDEV_Dashboard::$site->refresh_local_projects('local');
-        $wpmudev_projects = WPMUDEV_Dashboard::$site->get_cached_projects();
-    }
-
-    $all_plugins = get_plugins();
-    $total_plugins = count($all_plugins);
-    clean_sweep_log_message("Found $total_plugins installed plugins");
-
-    $current_count = 0;
-
-    // Direct one-pass categorization through all plugins
-    foreach ($all_plugins as $plugin_file => $plugin_data) {
-        $current_count++;
-        $plugin_path = ORIGINAL_WP_PLUGIN_DIR . '/' . $plugin_file;
-
-        // Extract slug for WordPress.org operations
-        $plugin_dir = dirname($plugin_file);
-        if ($plugin_dir === '.' || $plugin_dir === '') {
-            $slug = pathinfo($plugin_file, PATHINFO_FILENAME);
-        } else {
-            $slug = basename($plugin_dir);
-        }
-
-        // Special handling for Hello Dolly - remove it entirely
-        if ($slug === 'hello') {
-            $plugin_file_path = ORIGINAL_WP_PLUGIN_DIR . '/' . $plugin_file;
-            if (file_exists($plugin_file_path)) {
-                clean_sweep_log_message("Removing Hello Dolly plugin (demo plugin): {$plugin_data['Name']}");
-
-                global $wp_filesystem;
-                if (!$wp_filesystem) {
-                    require_once ABSPATH . 'wp-admin/includes/file.php';
-                    WP_Filesystem();
-                }
-
-                if ($wp_filesystem->delete($plugin_file_path)) {
-                    clean_sweep_log_message("Successfully removed Hello Dolly plugin", 'info');
-                } else {
-                    clean_sweep_log_message("Failed to remove Hello Dolly plugin", 'warning');
-                }
-            }
-            continue;
-        }
-
-        // CRITICAL: Check WDP ID header first (definitive categorization)
-        $wdp = get_file_data($plugin_path, ['id' => 'WDP ID'])['id'];
-
-        if ($wdp && is_numeric($wdp)) {
-            // Schedule for WPMU DEV reinstallation with full metadata
-            $project_info = clean_sweep_is_wpmudev_available() ?
-                WPMUDEV_Dashboard::$site->get_project_info($wdp) : null;
-
-            $wpmu_dev_plugins[$plugin_file] = [
-                'wdp_id' => $wdp,
-                'name' => $project_info->name ?? $plugin_data['Name'] ?? $plugin_file,
-                'version' => $project_info->version_installed ?? $plugin_data['Version'] ?? 'Unknown',
-                'description' => $project_info->description ?? $plugin_data['Description'] ?? '',
+        if (!$result['success']) {
+            clean_sweep_log_message("Plugin analysis failed: " . ($result['error'] ?? 'Unknown error'), 'error');
+            return [
+                'wp_org_plugins' => [],
+                'wpmu_dev_plugins' => [],
+                'skipped' => []
             ];
-            clean_sweep_log_message("Scheduled {$wpmu_dev_plugins[$plugin_file]['name']} for WPMU DEV reinstallation (WDP ID: {$wdp}, Version: {$wpmu_dev_plugins[$plugin_file]['version']})", 'info');
-            continue;
         }
 
-        // Check if plugin appears in WPMU DEV cached projects (fallback detection)
-        $is_wpmu_dev_plugin = false;
-        foreach ((array) $wpmudev_projects as $pid => $project) {
-            if (isset($project['filename']) && $project['filename'] === $plugin_file) {
-                $is_wpmu_dev_plugin = true;
-                $wpmu_dev_plugins[$plugin_file] = ['wdp_id' => null]; // May get PID from project later
-                clean_sweep_log_message("Scheduled {$plugin_data['Name']} for WPMU DEV reinstallation (cached project)", 'info');
-                break;
-            }
-        }
+        // Extract data for backward compatibility
+        $wp_org_plugins = $result['wp_org_plugins'] ?? [];
+        $wpmu_dev_plugins = $result['wpmu_dev_plugins'] ?? [];
+        $non_repo_plugins = $result['non_repo_plugins'] ?? [];
+        $suspicious_files = $result['suspicious_files'] ?? [];
 
-        if ($is_wpmu_dev_plugin) {
-            continue;
-        }
-
-        // Check if this is a WordPress.org plugin that should be reinstalled
-        $wp_org_info = clean_sweep_fetch_plugin_info($slug);
-
-        if (!empty($wp_org_info) && isset($wp_org_info['version'])) {
-            // Schedule for WordPress.org reinstallation
-            $wp_org_plugins[$plugin_file] = [
-                'name' => $plugin_data['Name'],
-                'version' => $plugin_data['Version'],
-                'slug' => $slug,
-                'last_updated' => $wp_org_info['last_updated'] ?? null,
-                'plugin_url' => $wp_org_info['homepage'] ?? "https://wordpress.org/plugins/{$slug}/",
-            ];
-            clean_sweep_log_message("Scheduled {$plugin_data['Name']} for WordPress.org reinstallation", 'info');
-        } else {
-            // Add to skipped list - plugin not available in WordPress.org repository
+        // Convert non_repo_plugins to skipped format for backward compatibility
+        $skipped = [];
+        foreach ($non_repo_plugins as $plugin_file => $plugin_data) {
+            $slug = $plugin_data['slug'] ?? $plugin_file;
             $skipped[$slug] = [
-                'name' => $plugin_data['Name'],
-                'reason' => 'Not found in WordPress.org repository'
+                'name' => $plugin_data['name'] ?? $plugin_file,
+                'reason' => $plugin_data['reason'] ?? 'Non-repository plugin'
             ];
-            clean_sweep_log_message("Skipping non-repository plugin: {$plugin_data['Name']}", 'warning');
         }
 
-        // Update progress for plugin analysis
-        if ($progress_file) {
-            $progress_data = [
-                'status' => 'analyzing',
-                'progress' => round(($current_count / $total_plugins) * 100),
-                'message' => "Analyzing plugin $current_count of $total_plugins: {$plugin_data['Name']}",
-                'current' => $current_count,
-                'total' => $total_plugins,
-                'step' => 1,
-                'total_steps' => 1
-            ];
-            @clean_sweep_write_progress_file($progress_file, $progress_data);
-        } elseif (!defined('WP_CLI') || !WP_CLI) {
-            echo '<script>updateProgress(' . $current_count . ', ' . $total_plugins . ', "Analyzing Plugins");</script>';
-            ob_flush();
-            flush();
+        // Store WPMU DEV plugins in transient for later use during execution phase (backward compatibility)
+        if (!empty($wpmu_dev_plugins)) {
+            set_transient('clean_sweep_wpmudev_plugins', $wpmu_dev_plugins, 3600); // 1 hour
+            clean_sweep_log_message("Stored " . count($wpmu_dev_plugins) . " WPMU DEV plugins for reinstallation phase");
         }
+
+        // Log analysis summary
+        $wp_org_count = count($wp_org_plugins);
+        $wpmu_dev_count = count($wpmu_dev_plugins);
+        $non_repo_count = count($non_repo_plugins);
+        $suspicious_count = count($suspicious_files);
+
+        clean_sweep_log_message("=== Advanced Plugin Analysis Completed ===");
+        clean_sweep_log_message("WordPress.org: $wp_org_count, WPMU DEV: $wpmu_dev_count, Non-repository: $non_repo_count, Suspicious files: $suspicious_count");
+
+        // Return backward-compatible format with additional advanced data
+        return array_merge(compact('wp_org_plugins', 'wpmu_dev_plugins', 'skipped'), [
+            'non_repo_plugins' => $non_repo_plugins,
+            'suspicious_files' => $suspicious_files,
+            'copy_lists' => $result['copy_lists'] ?? [],
+            'totals' => $result['totals'] ?? []
+        ]);
+
+    } catch (Exception $e) {
+        clean_sweep_log_message("Plugin analysis exception: " . $e->getMessage(), 'error');
+
+        // Fallback to basic arrays on error
+        return [
+            'wp_org_plugins' => [],
+            'wpmu_dev_plugins' => [],
+            'skipped' => []
+        ];
     }
-
-    $wp_org_count = count($wp_org_plugins);
-    $wpmu_dev_count = count($wpmu_dev_plugins);
-    clean_sweep_log_message("Analysis complete: $wp_org_count WordPress.org plugins, $wpmu_dev_count WPMU DEV plugins");
-
-    // Store WPMU DEV plugins in transient for later use during execution phase
-    if (!empty($wpmu_dev_plugins)) {
-        set_transient('clean_sweep_wpmudev_plugins', $wpmu_dev_plugins, 3600); // 1 hour
-        clean_sweep_log_message("Stored " . count($wpmu_dev_plugins) . " WPMU DEV plugins for reinstallation phase");
-    }
-
-    // Update final progress (skip for AJAX requests)
-    if (!$progress_file && (!defined('WP_CLI') || !WP_CLI)) {
-        echo '<script>updateProgress(' . $total_plugins . ', ' . $total_plugins . ', "Analysis Complete");</script>';
-        ob_flush();
-        flush();
-    }
-
-    clean_sweep_log_message("=== WordPress Plugin Analysis Completed ===");
-
-    return compact('wp_org_plugins', 'wpmu_dev_plugins', 'skipped');
 }
 
 /**
