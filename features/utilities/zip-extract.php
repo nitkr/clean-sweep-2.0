@@ -9,18 +9,25 @@
  * Handle WordPress plugin/theme installation using WordPress's built-in upgraders
  */
 function clean_sweep_wordpress_package_install($extract_path) {
+    // Check if WordPress functions are available for plugin/theme installation
+    if (!function_exists('WP_Upgrader') || !function_exists('Plugin_Upgrader')) {
+        clean_sweep_log_message("WordPress upgrader functions not available in recovery mode", 'warning');
+        return ['success' => false, 'message' => 'WordPress upgrader not available in recovery mode'];
+    }
+
     global $wp_filesystem;
 
-    // Initialize filesystem
+    // Initialize filesystem - use fallback if WordPress filesystem not available
     if (empty($wp_filesystem)) {
-        require_once ABSPATH . 'wp-admin/includes/file.php';
-        WP_Filesystem();
+        if (file_exists(ABSPATH . 'wp-admin/includes/file.php')) {
+            require_once ABSPATH . 'wp-admin/includes/file.php';
+            if (function_exists('WP_Filesystem')) {
+                WP_Filesystem();
+            }
+        }
     }
 
-    if (empty($wp_filesystem)) {
-        clean_sweep_log_message("Failed to initialize WP_Filesystem", 'error');
-        return ['success' => false, 'message' => 'Failed to initialize filesystem'];
-    }
+    // If WP_Filesystem still not available, continue without it (some functions will use PHP fallbacks)
 
     $file_count = count($_FILES['zip_files']['name']);
     $results = [
@@ -322,30 +329,21 @@ function clean_sweep_execute_zip_extraction() {
     } else {
         clean_sweep_log_message("Using standard ZIP extraction for $extract_path");
 
-        // Initialize filesystem
-        global $wp_filesystem;
-        if (empty($wp_filesystem)) {
-            require_once ABSPATH . 'wp-admin/includes/file.php';
-            WP_Filesystem();
-        }
-        if (empty($wp_filesystem)) {
-            clean_sweep_log_message("Failed to initialize WP_Filesystem", 'error');
-            return ['success' => false, 'message' => 'Failed to initialize filesystem'];
-        }
+        // Ensure extraction directory exists - use PHP mkdir as fallback
+        if (!is_dir($full_extract_path)) {
+            if (!mkdir($full_extract_path, 0755, true)) {
+                clean_sweep_log_message("Failed to create extraction directory: $full_extract_path", 'error');
 
-        // Ensure extraction directory exists
-        if (!wp_mkdir_p($full_extract_path)) {
-            clean_sweep_log_message("Failed to create extraction directory: $full_extract_path", 'error');
+                if (!defined('WP_CLI') || !WP_CLI) {
+                    echo '<h2>📁 ZIP Extraction Failed</h2>';
+                    echo '<div style="background:#f8d7da;border:1px solid #f5c6cb;padding:20px;border-radius:4px;margin:20px 0;color:#721c24;">';
+                    echo '<h3>❌ Directory Error</h3>';
+                    echo '<p>Failed to create extraction directory.</p>';
+                    echo '</div>';
+                }
 
-            if (!defined('WP_CLI') || !WP_CLI) {
-                echo '<h2>📁 ZIP Extraction Failed</h2>';
-                echo '<div style="background:#f8d7da;border:1px solid #f5c6cb;padding:20px;border-radius:4px;margin:20px 0;color:#721c24;">';
-                echo '<h3>❌ Directory Error</h3>';
-                echo '<p>Failed to create extraction directory.</p>';
-                echo '</div>';
+                return ['success' => false, 'message' => 'Failed to create extraction directory'];
             }
-
-            return ['success' => false, 'message' => 'Failed to create extraction directory'];
         }
 
         $results = [
@@ -463,7 +461,7 @@ function clean_sweep_execute_zip_extraction() {
 
             // Extract the ZIP file
             clean_sweep_log_message("Extracting ZIP file $file_name to $full_extract_path");
-            $result = unzip_file($file_tmp, $full_extract_path);
+            $result = clean_sweep_unzip_file($file_tmp, $full_extract_path);
 
             if (is_wp_error($result)) {
                 $error_msg = "Failed to extract $file_name: " . $result->get_error_message();
@@ -536,221 +534,4 @@ function clean_sweep_execute_zip_extraction() {
             'extract_path' => $full_extract_path
         ];
     }
-
-    // Initialize filesystem
-    global $wp_filesystem;
-    if (empty($wp_filesystem)) {
-        require_once ABSPATH . 'wp-admin/includes/file.php';
-        WP_Filesystem();
-    }
-    if (empty($wp_filesystem)) {
-        clean_sweep_log_message("Failed to initialize WP_Filesystem", 'error');
-        return ['success' => false, 'message' => 'Failed to initialize filesystem'];
-    }
-
-    $results = [
-        'total_files' => $file_count,
-        'successful' => [],
-        'failed' => []
-    ];
-
-    // Handle pre-extraction malware removal if enabled
-    if (isset($_POST['enable_malware_removal']) && isset($_POST['delete_paths']) && !empty($_POST['delete_paths'])) {
-        $delete_paths = array_map('trim', explode("\n", $_POST['delete_paths']));
-
-        clean_sweep_log_message("=== PRE-EXTRACTION MALWARE REMOVAL STARTED ===");
-        clean_sweep_log_message("Processing " . count($delete_paths) . " paths for deletion");
-
-        $deleted_count = 0;
-        $skipped_count = 0;
-
-        foreach ($delete_paths as $path) {
-            if (empty($path)) continue; // Skip empty lines
-
-            $full_path = $full_extract_path . '/' . $path;
-
-            // SECURITY: Ensure path is within extraction directory to prevent directory traversal
-            $real_extract_path = realpath($full_extract_path);
-            $real_full_path = realpath($full_path);
-
-            if ($real_full_path === false) {
-                // Path doesn't exist, try to check if it's within allowed directory
-                $path_parts = explode('/', $path);
-                $allowed_base = basename($full_extract_path);
-
-                if (!empty($path_parts) && $path_parts[0] === $allowed_base) {
-                    // Convert to absolute path for checking
-                    $real_full_path = realpath($full_extract_path . '/' . implode('/', array_slice($path_parts, 1)));
-                }
-            }
-
-            if ($real_full_path && strpos($real_full_path, $real_extract_path) === 0) {
-                // Path is within extraction directory - safe to delete
-                if (file_exists($full_path) || file_exists($real_full_path)) {
-                    $target_path = $real_full_path ?: $full_path;
-
-                    if (is_dir($target_path)) {
-                        // Delete directory recursively
-                        if (clean_sweep_recursive_delete($target_path)) {
-                            clean_sweep_log_message("Deleted directory: $path", 'info');
-                            $deleted_count++;
-                        } else {
-                            clean_sweep_log_message("Failed to delete directory: $path", 'error');
-                        }
-                    } else {
-                        // Delete file
-                        if (unlink($target_path)) {
-                            clean_sweep_log_message("Deleted file: $path", 'info');
-                            $deleted_count++;
-                        } else {
-                            clean_sweep_log_message("Failed to delete file: $path", 'error');
-                        }
-                    }
-                } else {
-                    clean_sweep_log_message("Path does not exist: $path", 'warning');
-                }
-            } else {
-                // Path is outside extraction directory - skip for security
-                clean_sweep_log_message("Skipped dangerous path (outside extraction directory): $path", 'warning');
-                $skipped_count++;
-            }
-        }
-
-        clean_sweep_log_message("Pre-extraction malware removal completed. Deleted: $deleted_count, Skipped: $skipped_count");
-        clean_sweep_log_message("=== PRE-EXTRACTION MALWARE REMOVAL COMPLETED ===");
-    }
-
-    // Process each uploaded file
-    for ($i = 0; $i < $file_count; $i++) {
-        $file_name = $_FILES['zip_files']['name'][$i];
-        $file_tmp = $_FILES['zip_files']['tmp_name'][$i];
-        $file_error = $_FILES['zip_files']['error'][$i];
-
-        if (!defined('WP_CLI') || !WP_CLI) {
-            $progress = round(($i + 1) / $file_count * 100);
-            echo '<script>updateProgress(' . ($i + 1) . ', ' . $file_count . ', "Extracting: ' . addslashes($file_name) . '");</script>';
-            ob_flush();
-            flush();
-        }
-
-        // Check for upload errors
-        if ($file_error !== UPLOAD_ERR_OK) {
-            $error_msg = "Upload error for $file_name: $file_error";
-            clean_sweep_log_message($error_msg, 'error');
-            $results['failed'][] = ['file' => $file_name, 'error' => $error_msg];
-
-            if (!defined('WP_CLI') || !WP_CLI) {
-                echo '<div style="background:#fff3cd;border:1px solid #ffeaa7;padding:10px;border-radius:4px;margin:10px 0;color:#856404;">';
-                echo '<strong>⚠️ Skipped:</strong> ' . htmlspecialchars($file_name) . ' - Upload error';
-                echo '</div>';
-            }
-            continue;
-        }
-
-        // Validate file type
-        if (!preg_match('/\.zip$/i', $file_name)) {
-            $error_msg = "Invalid file type: $file_name";
-            clean_sweep_log_message($error_msg, 'error');
-            $results['failed'][] = ['file' => $file_name, 'error' => $error_msg];
-
-            if (!defined('WP_CLI') || !WP_CLI) {
-                echo '<div style="background:#fff3cd;border:1px solid #ffeaa7;padding:10px;border-radius:4px;margin:10px 0;color:#856404;">';
-                echo '<strong>⚠️ Skipped:</strong> ' . htmlspecialchars($file_name) . ' - Invalid file type';
-                echo '</div>';
-            }
-            continue;
-        }
-
-        // Perform clean replacement: delete target directory first if safe
-        $target_dir_name = pathinfo($file_name, PATHINFO_FILENAME);
-        $target_dir_path = $full_extract_path . '/' . $target_dir_name;
-
-        // Check if this is a clean replacement scenario (directory exists and is safe to delete)
-        if (file_exists($target_dir_path) && is_dir($target_dir_path)) {
-            // Safety check: only delete WordPress-related directories
-            if (clean_sweep_is_safe_zip_replace_directory($extract_path, $target_dir_path)) {
-                clean_sweep_log_message("Performing clean replacement - removing existing directory: $target_dir_path");
-                if (clean_sweep_recursive_delete($target_dir_path)) {
-                    clean_sweep_log_message("Successfully removed directory for clean replacement: $target_dir_path");
-                } else {
-                    clean_sweep_log_message("Failed to remove existing directory for clean replacement: $target_dir_path", 'error');
-                    // Continue with extraction anyway - might still work
-                }
-            } else {
-                clean_sweep_log_message("Directory not safe for clean replacement - extracting on top of existing files: $target_dir_path", 'warning');
-            }
-        }
-
-        // Extract the ZIP file
-        clean_sweep_log_message("Extracting ZIP file $file_name to $full_extract_path");
-        $result = unzip_file($file_tmp, $full_extract_path);
-
-        if (is_wp_error($result)) {
-            $error_msg = "Failed to extract $file_name: " . $result->get_error_message();
-            clean_sweep_log_message($error_msg, 'error');
-            $results['failed'][] = ['file' => $file_name, 'error' => $result->get_error_message()];
-
-            if (!defined('WP_CLI') || !WP_CLI) {
-                echo '<div style="background:#f8d7da;border:1px solid #f5c6cb;padding:10px;border-radius:4px;margin:10px 0;color:#721c24;">';
-                echo '<strong>❌ Failed:</strong> ' . htmlspecialchars($file_name) . ' - ' . htmlspecialchars($result->get_error_message());
-                echo '</div>';
-            }
-        } else {
-            clean_sweep_log_message("Successfully extracted: $file_name");
-            $results['successful'][] = $file_name;
-
-            if (!defined('WP_CLI') || !WP_CLI) {
-                echo '<div style="background:#d4edda;border:1px solid #c3e6cb;padding:10px;border-radius:4px;margin:10px 0;color:#155724;">';
-                echo '<strong>✅ Extracted:</strong> ' . htmlspecialchars($file_name);
-                echo '</div>';
-            }
-        }
-    }
-
-    $success_count = count($results['successful']);
-    $fail_count = count($results['failed']);
-
-    clean_sweep_log_message("ZIP extraction batch completed. Success: $success_count, Failed: $fail_count");
-
-    // Display final results
-    if (!defined('WP_CLI') || !WP_CLI) {
-        echo '<h2>📁 ZIP Extraction Batch Complete</h2>';
-        echo '<div style="background:#e7f3ff;border:1px solid #b8daff;padding:20px;border-radius:4px;margin:20px 0;">';
-        echo '<h3>📊 Batch Results Summary</h3>';
-        echo '<div style="display:flex;gap:20px;margin:15px 0;">';
-        echo '<div style="background:#d4edda;color:#155724;padding:10px;border-radius:4px;text-align:center;min-width:80px;">';
-        echo '<div style="font-size:24px;font-weight:bold;">' . $success_count . '</div>';
-        echo '<div style="font-size:12px;">Successful</div>';
-        echo '</div>';
-        echo '<div style="background:#f8d7da;color:#721c24;padding:10px;border-radius:4px;text-align:center;min-width:80px;">';
-        echo '<div style="font-size:24px;font-weight:bold;">' . $fail_count . '</div>';
-        echo '<div style="font-size:12px;">Failed</div>';
-        echo '</div>';
-        echo '<div style="background:#f8f9fa;color:#666;padding:10px;border-radius:4px;text-align:center;min-width:80px;">';
-        echo '<div style="font-size:24px;font-weight:bold;">' . $file_count . '</div>';
-        echo '<div style="font-size:12px;">Total</div>';
-        echo '</div>';
-        echo '</div>';
-
-        if ($success_count > 0) {
-            echo '<p><strong>Extracted to:</strong> <code>' . htmlspecialchars($full_extract_path) . '</code></p>';
-            echo '<p><strong>Note:</strong> Safe directories were completely replaced for malware removal. Other files were overwritten as usual.</p>';
-        }
-
-        echo '</div>';
-    } else {
-        echo "\n📁 ZIP EXTRACTION BATCH COMPLETE\n";
-        echo str_repeat("=", 50) . "\n";
-        echo "Total files: $file_count\n";
-        echo "Successful: $success_count\n";
-        echo str_repeat("=", 50) . "\n";
-    }
-
-    return [
-        'success' => $fail_count === 0,
-        'total_files' => $file_count,
-        'successful' => $results['successful'],
-        'failed' => $results['failed'],
-        'extract_path' => $full_extract_path
-    ];
 }
