@@ -19,6 +19,7 @@ require_once __DIR__ . '/lib/PluginReinstaller.php';
 require_once __DIR__ . '/plugin-utils.php';
 require_once __DIR__ . '/plugin-backup.php';
 require_once __DIR__ . '/plugin-wordpress.php';
+require_once __DIR__ . '/plugin-wpmudev.php';
 
 /**
  * Analyze and categorize all installed plugins for reinstallation
@@ -393,7 +394,7 @@ function clean_sweep_execute_reinstallation($repo_plugins, $progress_file = null
     // Create backup only for the first batch to avoid multiple backups (if requested)
     if ($batch_start === 0 && $create_backup) {
         clean_sweep_log_message("User requested backup creation - proceeding...");
-        if (!clean_sweep_create_backup()) {
+        if (!clean_sweep_create_backup($progress_file)) {
             clean_sweep_log_message("Backup failed. Aborting re-installation.", 'error');
             return $results;
         }
