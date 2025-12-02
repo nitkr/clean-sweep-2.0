@@ -242,19 +242,24 @@ function clean_sweep_display_plugins_tab_content($plugin_results) {
         $skipped_count = count($skipped);
         $total_to_reinstall = $repo_count + $wpmudev_count;
 
+        echo '<div class="analysis-header">';
         echo '<h3>🔍 Advanced Plugin Analysis Complete</h3>';
+        echo '<p>Comprehensive security analysis with suspicious file detection and detailed categorization</p>';
+        echo '</div>';
 
         // Enhanced Stats overview with all categories
-        echo '<div style="background:#e7f3ff;border:1px solid #b8daff;padding:20px;border-radius:4px;margin:20px 0;">';
-        echo '<h4>📊 Comprehensive Analysis Summary</h4>';
-        echo '<div>';
-        echo '<div class="stats-box" style="background:#d1ecf1;border-color:#bee5eb;"><div class="stats-number" style="color:#0c5460;">' . $repo_count . '</div><div class="stats-label">WordPress.org Plugins</div></div>';
-        echo '<div class="stats-box" style="background:#ffd700;border-color:#ffed4e;"><div class="stats-number" style="color:#000000;">' . $wpmudev_count . '</div><div class="stats-label">WPMU DEV Plugins</div></div>';
-        echo '<div class="stats-box" style="background:#f8d7da;border-color:#f5c6cb;"><div class="stats-number" style="color:#721c24;">' . $non_repo_count . '</div><div class="stats-label">Non-Repository</div></div>';
-        echo '<div class="stats-box" style="background:#dc3545;border-color:#c82333;"><div class="stats-number" style="color:#ffffff;">' . $suspicious_count . '</div><div class="stats-label">Suspicious Files</div></div>';
+        echo '<div class="enhanced-stats-container">';
+        echo '<div class="enhanced-stats-box wordpress-org"><div class="enhanced-stats-number">' . $repo_count . '</div><div class="enhanced-stats-label">WordPress.org Plugins</div></div>';
+        echo '<div class="enhanced-stats-box wpmu-dev"><div class="enhanced-stats-number">' . $wpmudev_count . '</div><div class="enhanced-stats-label">WPMU DEV Plugins</div></div>';
+        echo '<div class="enhanced-stats-box non-repo"><div class="enhanced-stats-number">' . $non_repo_count . '</div><div class="enhanced-stats-label">Non-Repository</div></div>';
+        echo '<div class="enhanced-stats-box suspicious"><div class="enhanced-stats-number">' . $suspicious_count . '</div><div class="enhanced-stats-label">Suspicious Files</div></div>';
         echo '</div>';
-        echo '<p><strong>Security Analysis:</strong> ' . ($suspicious_count > 0 ? '<span style="color:#dc3545;font-weight:bold;">⚠️ ' . $suspicious_count . ' suspicious files detected in plugins directory!</span>' : '<span style="color:#28a745;">✅ No suspicious files found.</span>') . '</p>';
-        echo '<p><strong>What will happen:</strong> ' . $total_to_reinstall . ' plugins will be re-installed (' . $repo_count . ' from WordPress.org repository, ' . $wpmudev_count . ' from WPMU DEV\'s secured network). ' . $non_repo_count . ' non-repository plugins will be preserved.</p>';
+
+        // Security Analysis Summary
+        echo '<div class="security-warning">';
+        echo '<h4>🔒 Security Analysis Results</h4>';
+        echo '<p>' . ($suspicious_count > 0 ? '<strong>⚠️ ALERT:</strong> ' . $suspicious_count . ' suspicious files detected in plugins directory! Review the suspicious files section below before proceeding.' : '<strong>✅ SECURE:</strong> No suspicious files found in plugins directory.') . '</p>';
+        echo '<p><strong>Reinstallation Plan:</strong> ' . $total_to_reinstall . ' plugins will be re-installed (' . $repo_count . ' from WordPress.org, ' . $wpmudev_count . ' from WPMU DEV). ' . $non_repo_count . ' non-repository plugins will be preserved.</p>';
         echo '</div>';
 
         // Plugin lists
