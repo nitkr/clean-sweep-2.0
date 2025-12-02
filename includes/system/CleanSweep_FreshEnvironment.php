@@ -931,6 +931,12 @@ EOT;
         $content .= "require_once ABSPATH . WPINC . '/class-wp-locale.php';\n";
         $content .= "require_once ABSPATH . WPINC . '/class-wp-locale-switcher.php';\n\n";
 
+        // Initialize textdomain registry for translation functions
+        $content .= "// Initialize textdomain registry for translation functions\n";
+        $content .= "if (!isset(\$GLOBALS['wp_textdomain_registry'])) {\n";
+        $content .= "    \$GLOBALS['wp_textdomain_registry'] = new WP_Textdomain_Registry();\n";
+        $content .= "}\n\n";
+
         // Installer check (needs database and cache functions)
         $content .= "wp_not_installed();\n\n";
 
