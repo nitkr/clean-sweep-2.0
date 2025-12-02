@@ -951,9 +951,10 @@ EOT;
         $content .= "    return false;\n";
         $content .= "}\n\n";
 
-        // Continue with standard initialization
-        $content .= "// Load active plugins (but suppress in recovery mode)\n";
-        $content .= "add_filter('option_active_plugins', '__return_empty_array');\n";
+        // Load safe plugins selectively for recovery operations
+        $content .= "// Load safe plugins selectively for recovery operations\n";
+        $safeLoader = new CleanSweep_SafePluginLoader();
+        $content .= $safeLoader->generateSelectivePluginFilter('wpmu_dev_reinstall');
         $content .= "add_filter('option_active_sitewide_plugins', '__return_empty_array');\n\n";
 
         $content .= "foreach (wp_get_active_and_valid_plugins() as \$plugin) {\n";
