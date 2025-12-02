@@ -466,6 +466,7 @@ function clean_sweep_display_plugins_tab_content($plugin_results) {
         echo '<ul style="margin:10px 0;padding-left:20px;">';
         echo '<li>You will be asked whether to create a backup before proceeding</li>';
         echo '<li>Hello Dolly (demo plugin) will be automatically removed if present</li>';
+        echo '<li><strong>WPMU DEV Dashboard:</strong> Will be automatically preserved (core dashboard plugin cannot be reinstalled)</li>';
         echo '<li>This process cannot be undone - review the list above carefully</li>';
         echo '<li>Ensure you have database backups before proceeding</li>';
         echo '</ul>';

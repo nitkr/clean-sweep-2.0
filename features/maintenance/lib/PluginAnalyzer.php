@@ -88,6 +88,18 @@ class CleanSweep_PluginAnalyzer {
             $non_repo_count = count($non_repo_plugins);
             $suspicious_count = count($suspicious_files);
 
+            // Debug WPMU DEV plugins
+            clean_sweep_log_message("WPMU DEV Plugin Analysis Debug:", 'info');
+            clean_sweep_log_message("Total WPMU DEV plugins found: {$wpmu_dev_count}", 'info');
+            foreach ($wpmu_dev_plugins as $slug => $plugin_data) {
+                $wdp_id = $plugin_data['wdp_id'] ?? $plugin_data['pid'] ?? 'unknown';
+                $name = $plugin_data['name'] ?? $slug;
+                clean_sweep_log_message("WPMU DEV plugin: {$name} (slug: {$slug}, ID: {$wdp_id})", 'info');
+                if (($plugin_data['wdp_id'] ?? $plugin_data['pid'] ?? null) === 119) {
+                    clean_sweep_log_message("*** WPMU DEV DASHBOARD DETECTED ***", 'info');
+                }
+            }
+
             // Store FULL analysis data in site_transient keyed by progress_file for AJAX persistence
             if ($progress_file) {
                 $analysis_key = 'clean_sweep_analysis_' . md5($progress_file);
