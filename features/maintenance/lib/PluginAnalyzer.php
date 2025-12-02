@@ -16,6 +16,9 @@ class CleanSweep_PluginAnalyzer {
      * @return array Analysis results
      */
     public function analyze($progress_file = null) {
+        // Load WordPress plugin functions
+        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+
         clean_sweep_log_message("=== WordPress Plugin Analysis Started ===");
         clean_sweep_log_message("Version: " . CLEAN_SWEEP_VERSION);
         clean_sweep_log_message("WordPress Version: " . get_bloginfo('version'));
