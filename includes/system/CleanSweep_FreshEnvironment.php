@@ -216,6 +216,39 @@ class CleanSweep_FreshEnvironment {
     }
 
     /**
+     * Protect fresh environment with .htaccess and permissions
+     */
+    private function protect() {
+        // Create .htaccess
+        $htaccess_content = <<<EOT
+# Clean Sweep - Fresh Environment Protection
+# Deny all web access to recovery environment
+
+<Files "*">
+    <RequireAll>
+        Require all denied
+    </RequireAll>
+</Files>
+
+# Allow access only from Clean Sweep
+<Files "wp-load.php">
+    <RequireAll>
+        Require local
+        Require ip 127.0.0.1
+        Require ip ::1
+    </RequireAll>
+</Files>
+EOT;
+
+        file_put_contents($this->htaccess_file, $htaccess_content);
+
+        // Set permissions (750 for directories, 640 for files)
+        $this->setSecurePermissions($this->fresh_dir);
+
+        clean_sweep_log_message("🔒 Protected fresh environment", 'info');
+    }
+
+    /**
      * Setup fresh environment (download/manual + configuration)
      *
      * @param string $upload_file Optional uploaded file path
@@ -403,39 +436,6 @@ EOT;
     }
 
     /**
-     * Protect fresh environment with .htaccess and permissions
-     */
-    private function protect() {
-        // Create .htaccess
-        $htaccess_content = <<<EOT
-# Clean Sweep - Fresh Environment Protection
-# Deny all web access to recovery environment
-
-<Files "*">
-    <RequireAll>
-        Require all denied
-    </RequireAll>
-</Files>
-
-# Allow access only from Clean Sweep
-<Files "wp-load.php">
-    <RequireAll>
-        Require local
-        Require ip 127.0.0.1
-        Require ip ::1
-    </RequireAll>
-</Files>
-EOT;
-
-        file_put_contents($this->htaccess_file, $htaccess_content);
-
-        // Set permissions (750 for directories, 640 for files)
-        $this->setSecurePermissions($this->fresh_dir);
-
-        clean_sweep_log_message("🔒 Protected fresh environment", 'info');
-    }
-
-    /**
      * Load the fresh WordPress environment safely using dynamic wp-settings.php generation
      * This generates a safe wp-settings.php that uses clean files but points content to real site
      *
@@ -451,7 +451,13 @@ EOT;
             return false;
         }
 
-        // 2. Generate a safe wp-settings.php that uses clean files from fresh but content from real site
+        // 2. Define site paths BEFORE WordPress bootstrap (fixes database/filesystem mismatch)
+        $this->defineSitePaths();
+
+        // 3. Setup path interception BEFORE WordPress bootstrap (fixes textdomain registry null error)
+        $this->setupPathInterception();
+
+        // 4. Generate a safe wp-settings.php that uses clean files from fresh but content to real site
         $safe_settings = $this->generateSafeWpSettings($site_root);
         if (!$safe_settings) {
             clean_sweep_log_message("Failed to generate safe wp-settings.php", 'error');
@@ -460,10 +466,10 @@ EOT;
 
         file_put_contents($this->fresh_dir . '/wp-settings.php', $safe_settings);
 
-        // 3. Regenerate integrity hash to include the new wp-settings.php
+        // 5. Regenerate integrity hash to include the new wp-settings.php
         $this->generateIntegrityHash();
 
-        // 3. Load fresh wp-config.php first (defines database credentials)
+        // 6. Load fresh wp-config.php first (defines database credentials)
         $config_file = $this->fresh_dir . '/wp-config.php';
         if (!file_exists($config_file)) {
             clean_sweep_log_message("wp-config.php not found in fresh environment", 'error');
@@ -473,7 +479,7 @@ EOT;
         clean_sweep_log_message("🔄 Loading fresh wp-config.php...", 'info');
         require_once $config_file;
 
-        // 4. Load our generated safe wp-settings.php (WordPress initializes with clean files + real site paths)
+        // 7. Load our generated safe wp-settings.php (WordPress initializes with clean files + real site paths)
         $settings_file = $this->fresh_dir . '/wp-settings.php';
         clean_sweep_log_message("🔄 Loading generated safe wp-settings.php...", 'info');
         require_once $settings_file;
