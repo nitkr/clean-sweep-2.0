@@ -1,7 +1,8 @@
 // Clean Sweep - Plugin Reinstallation
 // AJAX functionality for plugin reinstallation with progress tracking
 
-// Plugin reinstallation with AJAX progress tracking
+// Global variables for plugin data and progress tracking
+let repoPluginsJson = null;
 let reinstallProgressInterval = null;
 let reinstallProgressFile = null;
 
@@ -179,6 +180,9 @@ function showBackupChoiceDuringProgress(button) {
         return;
     }
 
+    // Store plugin data globally
+    repoPluginsJson = button.getAttribute('data-plugins');
+
     // Start the reinstallation process
     startPluginReinstallationWithBackupChoice(button);
 }
@@ -188,9 +192,6 @@ function startPluginReinstallationWithBackupChoice(buttonElement) {
         console.error('Button element is null');
         return;
     }
-
-    // Get plugin data from the button's data attribute
-    const repoPluginsJson = buttonElement.getAttribute('data-plugins');
 
     // Generate unique progress file name
     reinstallProgressFile = 'reinstall_progress_' + Date.now() + '.progress';
@@ -229,15 +230,15 @@ function startPluginReinstallationWithBackupChoice(buttonElement) {
 
     // Show backup choice dialog after initialization
     setTimeout(() => {
-        showBackupChoiceDialog(buttonElement, repoPluginsJson);
+        showBackupChoiceDialog();
     }, 1500);
 }
 
-function showBackupChoiceDialog(button, pluginsJson) {
+function showBackupChoiceDialog() {
     // Parse plugins to count them
     let plugins = [];
     try {
-        plugins = JSON.parse(pluginsJson) || [];
+        plugins = JSON.parse(repoPluginsJson) || [];
     } catch (e) {
         console.error('Failed to parse plugins JSON');
         plugins = [];
@@ -273,8 +274,8 @@ function showBackupChoiceDialog(button, pluginsJson) {
                 </div>
             </div>
             <div style="display: flex; gap: 10px; justify-content: center;">
-                <button onclick="chooseBackupOption(true, '${pluginsJson.replace(/'/g, "\\'")}')" style="background: #28a745; color: white; border: none; padding: 12px 25px; border-radius: 4px; cursor: pointer; font-weight: 600;">✅ Create Backup & Continue</button>
-                <button onclick="chooseBackupOption(false, '${pluginsJson.replace(/'/g, "\\'")}')" style="background: #ffc107; color: #212529; border: none; padding: 12px 25px; border-radius: 4px; cursor: pointer; font-weight: 600;">⚠️ Skip Backup & Continue</button>
+                <button onclick="chooseBackupOption(true)" style="background: #28a745; color: white; border: none; padding: 12px 25px; border-radius: 4px; cursor: pointer; font-weight: 600;">✅ Create Backup & Continue</button>
+                <button onclick="chooseBackupOption(false)" style="background: #ffc107; color: #212529; border: none; padding: 12px 25px; border-radius: 4px; cursor: pointer; font-weight: 600;">⚠️ Skip Backup & Continue</button>
                 <button onclick="cancelBackupChoice()" style="background: #6c757d; color: white; border: none; padding: 12px 25px; border-radius: 4px; cursor: pointer; font-weight: 600;">❌ Cancel</button>
             </div>
         </div>
@@ -283,7 +284,7 @@ function showBackupChoiceDialog(button, pluginsJson) {
     document.body.appendChild(backupDialog);
 }
 
-function chooseBackupOption(createBackup, pluginsJson) {
+function chooseBackupOption(createBackup) {
     // Remove backup dialog
     const backupDialog = document.getElementById('backup-choice-dialog');
     if (backupDialog) {
@@ -296,8 +297,8 @@ function chooseBackupOption(createBackup, pluginsJson) {
         progressText.textContent = createBackup ? "Creating backup before proceeding..." : "Skipping backup as requested...";
     }
 
-    // Start the actual batch processing
-    processPluginBatch(pluginsJson, 0, 5, createBackup);
+    // Start the actual batch processing (uses global repoPluginsJson)
+    processPluginBatch(repoPluginsJson, 0, 5, createBackup);
 
     // Start progress polling
     setTimeout(() => {
