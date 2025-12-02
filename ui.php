@@ -15,7 +15,7 @@ function clean_sweep_output_html_header() {
     if (!defined('WP_CLI') || !WP_CLI) {
         $recovery_mode = defined('CLEAN_SWEEP_RECOVERY_MODE') && CLEAN_SWEEP_RECOVERY_MODE;
         $title_suffix = $recovery_mode ? ' - Recovery Mode' : '';
-        $badge_html = $recovery_mode ? ' <span style="background:#dc3545;color:white;padding:3px 8px;border-radius:12px;font-size:12px;font-weight:bold;">🔄 RECOVERY</span>' : '';
+        $badge_html = ''; // Remove recovery badge for cleaner UI
 
         echo '<!DOCTYPE html><html><head><title>Clean Sweep - WordPress Malware Cleanup Toolkit' . $title_suffix . '</title>';
         echo '<link rel="stylesheet" href="assets/css/style.css">';
