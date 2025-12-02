@@ -26,6 +26,16 @@ class CleanSweep_PluginReinstaller {
         clean_sweep_log_message("PluginReinstaller: Backup requested: " . ($create_backup ? 'YES' : 'NO') . ", Skip backup: " . ($proceed_without_backup ? 'YES' : 'NO'), 'info');
         clean_sweep_log_message("PluginReinstaller: Suspicious files to delete: " . count($suspicious_files_to_delete), 'info');
 
+        // Debug: Log suspicious files received
+        if (!empty($suspicious_files_to_delete)) {
+            clean_sweep_log_message("PluginReinstaller: Suspicious files details:", 'info');
+            foreach ($suspicious_files_to_delete as $index => $file) {
+                clean_sweep_log_message("PluginReinstaller: Suspicious file #{$index}: {$file['name']} at {$file['path']}", 'info');
+            }
+        } else {
+            clean_sweep_log_message("PluginReinstaller: No suspicious files to delete", 'info');
+        }
+
         // Initialize progress manager for unified tracking
         $progressManager = $progress_file ? new CleanSweep_ProgressManager($progress_file) : null;
 
