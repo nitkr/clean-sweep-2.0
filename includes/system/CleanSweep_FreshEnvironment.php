@@ -953,8 +953,7 @@ EOT;
 
         // Load safe plugins selectively for recovery operations
         $content .= "// Load safe plugins selectively for recovery operations\n";
-        $safeLoader = new CleanSweep_SafePluginLoader();
-        $content .= $safeLoader->generateSelectivePluginFilter('wpmu_dev_reinstall');
+        $content .= $this->generateSelectivePluginLoadingCode('wpmu_dev_reinstall');
         $content .= "add_filter('option_active_sitewide_plugins', '__return_empty_array');\n\n";
 
         $content .= "foreach (wp_get_active_and_valid_plugins() as \$plugin) {\n";
@@ -1002,6 +1001,55 @@ EOT;
         $content .= "// Recovery environment initialized successfully\n";
 
         return $content;
+    }
+
+    /**
+     * Generate selective plugin loading code for wp-settings.php
+     * This creates inline PHP code that loads only safe plugins without requiring class instantiation
+     *
+     * @param string $operation Operation name (e.g., 'wpmu_dev_reinstall')
+     * @return string PHP code for selective plugin loading
+     */
+    private function generateSelectivePluginLoadingCode($operation) {
+        // Define safe plugins inline (avoiding class instantiation)
+        $safe_plugins = [];
+
+        // WPMU DEV Dashboard is required for WPMU DEV operations
+        if ($operation === 'wpmu_dev_reinstall' || $operation === 'premium_plugin_reinstall') {
+            $safe_plugins['wpmudev_dashboard'] = [
+                'file' => 'wpmudev-dashboard/wpmudev-dashboard.php',
+                'name' => 'WPMU DEV Dashboard'
+            ];
+        }
+
+        // Future: Add other premium plugins here as needed
+        // Example: CodeCanyon plugins, Envato plugins, etc.
+
+        if (empty($safe_plugins)) {
+            // No safe plugins needed, suppress all plugins
+            return "add_filter('option_active_plugins', '__return_empty_array');\n";
+        }
+
+        // Generate selective plugin loading code
+        $code = "// Selective plugin loading for operation: {$operation}\n";
+
+        // Create array of safe plugin files
+        $safe_files = array_column($safe_plugins, 'file');
+        $code .= "add_filter('option_active_plugins', function(\$plugins) {\n";
+        $code .= "    \$safe_plugins = " . var_export($safe_files, true) . ";\n";
+        $code .= "    return array_intersect(\$plugins, \$safe_plugins);\n";
+        $code .= "});\n\n";
+
+        // Explicitly load safe plugins
+        $code .= "// Explicitly load required safe plugins\n";
+        foreach ($safe_plugins as $plugin_key => $plugin_config) {
+            $code .= "if (file_exists(WP_PLUGIN_DIR . '/{$plugin_config['file']}')) {\n";
+            $code .= "    include_once WP_PLUGIN_DIR . '/{$plugin_config['file']}';\n";
+            $code .= "    clean_sweep_log_message('Loaded safe plugin: {$plugin_config['name']}', 'debug');\n";
+            $code .= "}\n";
+        }
+
+        return $code;
     }
 
     /**
