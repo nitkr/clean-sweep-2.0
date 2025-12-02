@@ -206,6 +206,64 @@ function copyPluginList(type) {
                 }
             }
         }
+    } else if (type === "nonrepo") {
+        // Find the heading that contains "Non-Repository Plugins"
+        let targetHeading = null;
+        headings.forEach(function(heading) {
+            if (heading.textContent.includes("Non-Repository Plugins")) {
+                targetHeading = heading;
+            }
+        });
+
+        if (targetHeading) {
+            // Find the next div sibling (table container) and get strong elements from table cells
+            const nextDiv = targetHeading.nextElementSibling;
+            if (nextDiv && nextDiv.tagName === "DIV") {
+                const table = nextDiv.querySelector("table");
+                if (table) {
+                    const tableRows = table.querySelectorAll("tbody tr");
+                    tableRows.forEach(function(row) {
+                        const firstTd = row.querySelector("td:first-child");
+                        if (firstTd) {
+                            const strongElement = firstTd.querySelector("strong");
+                            if (strongElement) {
+                                const pluginName = strongElement.textContent.trim();
+                                pluginNames.push(pluginName);
+                            }
+                        }
+                    });
+                }
+            }
+        }
+    } else if (type === "suspicious") {
+        // Find the heading that contains "Suspicious Files Detected"
+        let targetHeading = null;
+        headings.forEach(function(heading) {
+            if (heading.textContent.includes("Suspicious Files Detected")) {
+                targetHeading = heading;
+            }
+        });
+
+        if (targetHeading) {
+            // Find the next div sibling (table container) and extract file names
+            const nextDiv = targetHeading.nextElementSibling;
+            if (nextDiv && nextDiv.tagName === "DIV") {
+                const table = nextDiv.querySelector("table");
+                if (table) {
+                    const tableRows = table.querySelectorAll("tbody tr");
+                    tableRows.forEach(function(row) {
+                        const firstTd = row.querySelector("td:first-child");
+                        if (firstTd) {
+                            const strongElement = firstTd.querySelector("strong");
+                            if (strongElement) {
+                                const fileName = strongElement.textContent.trim();
+                                pluginNames.push(fileName);
+                            }
+                        }
+                    });
+                }
+            }
+        }
     } else if (type === "skipped") {
         // Find the heading that contains "Plugins to be Skipped" (could be h3 or h4)
         let targetHeading = null;
