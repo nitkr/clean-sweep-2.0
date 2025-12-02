@@ -152,21 +152,42 @@ class CleanSweep_Application {
 
         $repo_plugins = $analysis['wp_org_plugins'];  // WordPress.org plugins to reinstall
         $wpmu_dev_plugins = $analysis['wpmu_dev_plugins'];  // WPMU DEV plugins to reinstall
+        $suspicious_files = $analysis['suspicious_files'] ?? [];  // Suspicious files to delete
 
         // Only log analysis details on first batch to avoid spam
         if ($batch_start == 0) {
             $total_categorized = count($repo_plugins) + count($wpmu_dev_plugins);
             clean_sweep_log_message("AJAX Reinstall: Total plugins from analysis: $total_categorized" .
                                   ", WordPress.org: " . count($repo_plugins) .
-                                  ", WPMU DEV: " . count($wpmu_dev_plugins));
+                                  ", WPMU DEV: " . count($wpmu_dev_plugins) .
+                                  ", Suspicious files: " . count($suspicious_files));
         }
 
         if ($progress_file) {
             // AJAX request - return JSON response
             try {
-                // 1. Suppress ALL output during operations
+                // Use the new PluginReinstaller for comprehensive plugin and file management
+                $reinstaller = new CleanSweep_PluginReinstaller();
+                $reinstall_result = $reinstaller->start_reinstallation(
+                    $progress_file,
+                    false, // create_backup - handled separately
+                    true,  // proceed_without_backup
+                    $repo_plugins,
+                    $wpmu_dev_plugins,
+                    $suspicious_files,
+                    $batch_start,
+                    $batch_size
+                );
+
+                // Format result for compatibility with existing code
+                $execution_data = [
+                    'results' => $reinstall_result,
+                    'verification_results' => ['verified' => [], 'missing' => [], 'corrupted' => []]
+                ];
+
+                // Suppress output during operations
                 ob_start();
-                $execution_data = clean_sweep_execute_reinstallation($repo_plugins, $progress_file, $batch_start, $batch_size);
+                // Don't call the old function anymore
                 ob_end_clean(); // Discard any warnings/errors
 
                 // Extract results and verification_results from execution
