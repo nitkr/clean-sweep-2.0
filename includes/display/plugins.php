@@ -21,12 +21,11 @@ function clean_sweep_display_final_results($reinstall_results, $verification_res
         echo 'Reinstallation complete. Below is a combined summary of the process and verification of installed plugins.';
         echo '</p>';
 
-        // Combined stats
+        // Combined stats with simplified verification
         echo '<div>';
-        echo '<div class="stats-box" style="background:#d4edda;border-color:#c3e6cb;"><div class="stats-number" style="color:#155724;">' . $success_count . '</div><div class="stats-label">Reinstalled Successfully</div></div>';
-        echo '<div class="stats-box" style="background:#d1ecf1;border-color:#bee5eb;"><div class="stats-number" style="color:#0c5460;">' . $verified_count . '</div><div class="stats-label">Verified</div></div>';
-        echo '<div class="stats-box" style="background:#f8d7da;border-color:#f5c6cb;"><div class="stats-number" style="color:#721c24;">' . ($fail_count + $missing_count) . '</div><div class="stats-label">Issues (Failed/Missing)</div></div>';
-        echo '<div class="stats-box" style="background:#fff3cd;border-color:#ffeaa7;"><div class="stats-number" style="color:#856404;">' . $corrupted_count . '</div><div class="stats-label">Corrupted</div></div>';
+        echo '<div class="stats-box" style="background:#d4edda;border-color:#c3e6cb;"><div class="stats-number" style="color:#155724;">' . $success_count . '</div><div class="stats-label">Successfully Reinstalled & Verified</div></div>';
+        echo '<div class="stats-box" style="background:#f8d7da;border-color:#f5c6cb;"><div class="stats-number" style="color:#721c24;">' . $fail_count . '</div><div class="stats-label">Failed</div></div>';
+        echo '<div class="stats-box" style="background:#d1ecf1;border-color:#bee5eb;"><div class="stats-number" style="color:#0c5460;">' . (isset($reinstall_results['skipped']) ? count($reinstall_results['skipped']) : 0) . '</div><div class="stats-label">Skipped</div></div>';
         echo '</div>';
 
         // Combined table
@@ -47,18 +46,34 @@ function clean_sweep_display_final_results($reinstall_results, $verification_res
             $reinstall_class = 'plugin-success';
             $details = 'Installed and accessible';
 
+            // Check if this plugin was skipped
+            $skipped = false;
+            if (isset($reinstall_results['skipped'])) {
+                foreach ($reinstall_results['skipped'] as $skipped_plugin) {
+                    if ($skipped_plugin['slug'] === $plugin['slug']) {
+                        $skipped = true;
+                        $reinstall_status = '⏭️ Skipped';
+                        $reinstall_class = 'plugin-info';
+                        $details = $skipped_plugin['reason'] ?? 'Plugin was skipped during reinstallation';
+                        break;
+                    }
+                }
+            }
+
             // Check if in failed WordPress.org results
             $failed_wordpress_org = false;
-            foreach ($reinstall_results['failed'] as $f) {
-                if ($f['slug'] === $plugin['slug']) {
-                    $failed_wordpress_org = true;
-                    break;
+            if (!$skipped) {
+                foreach ($reinstall_results['failed'] as $f) {
+                    if ($f['slug'] === $plugin['slug']) {
+                        $failed_wordpress_org = true;
+                        break;
+                    }
                 }
             }
 
             // Check if this plugin was handled by WPMU DEV instead (successfully)
             $handled_by_wpmudev = false;
-            if (isset($reinstall_results['wpmudev'])) {
+            if (!$skipped && isset($reinstall_results['wpmudev'])) {
                 foreach ($reinstall_results['wpmudev']['wpmudev_plugins'] as $wpmudp) {
                     // WPMU DEV plugins use 'filename' field, not 'slug'
                     $wpmudev_identifier = $wpmudp['filename'] ?? $wpmudp['slug'] ?? '';
@@ -70,7 +85,9 @@ function clean_sweep_display_final_results($reinstall_results, $verification_res
                 }
             }
 
-            if ($handled_by_wpmudev) {
+            if ($skipped) {
+                // Already set above
+            } elseif ($handled_by_wpmudev) {
                 // Show as WPMU DEV success instead of WordPress.org failure
                 $reinstall_status = '✅ WPMU DEV';
                 $reinstall_class = 'plugin-success';
@@ -84,7 +101,7 @@ function clean_sweep_display_final_results($reinstall_results, $verification_res
 
             echo '<tr class="' . $reinstall_class . '">';
             echo '<td>' . htmlspecialchars($plugin['name']) . '</td>';
-            echo '<td><span style="' . ($handled_by_wpmudev ? 'color:#7c3aed;' : 'color:#28a745;') . 'font-weight:bold;">' . $reinstall_status . '</span></td>';
+            echo '<td><span style="' . ($skipped ? 'color:#17a2b8;' : ($handled_by_wpmudev ? 'color:#7c3aed;' : 'color:#28a745;')) . 'font-weight:bold;">' . $reinstall_status . '</span></td>';
             echo '<td><span style="color:#28a745;font-weight:bold;">✅ Verified</span></td>';
             echo '<td>' . htmlspecialchars($details) . '</td>';
             echo '</tr>';
@@ -306,10 +323,33 @@ function clean_sweep_display_plugins_tab_content($plugin_results) {
             echo '</div>';
         }
 
-        // WPMU DEV plugins section
+        // WPMU DEV plugins section - exclude dashboard from count
         if (!empty($plugin_results['wpmu_dev_plugins'])) {
-            echo '<h4>💎 WPMU DEV Premium Plugins to be Re-installed (' . $wpmudev_count . ') <button onclick="copyPluginList(\'wpmudev\')" style="background:#7c3aed;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:12px;">Copy</button></h4>';
+            // Filter out WPMU DEV Dashboard from count (it gets skipped)
+            $filtered_wpmu_plugins = [];
+            foreach ($plugin_results['wpmu_dev_plugins'] as $slug => $plugin_data) {
+                if (($plugin_data['wdp_id'] ?? $plugin_data['pid'] ?? null) !== 119) {
+                    $filtered_wpmu_plugins[$slug] = $plugin_data;
+                }
+            }
+            $actual_wpmu_count = count($filtered_wpmu_plugins);
+            $total_to_reinstall = $repo_count + $actual_wpmu_count;
+
+            echo '<h4>💎 WPMU DEV Premium Plugins to be Re-installed (' . $actual_wpmu_count . ') <button onclick="copyPluginList(\'wpmudev\')" style="background:#7c3aed;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:12px;">Copy</button></h4>';
             echo '<div style="background:#f8f9ff;padding:15px;border-radius:4px;border:1px solid #c3b1e1;margin:10px 0;max-height:400px;overflow-y:auto;">';
+
+            // Show WPMU DEV Dashboard separately if present
+            $dashboard_present = false;
+            foreach ($plugin_results['wpmu_dev_plugins'] as $slug => $plugin_data) {
+                if (($plugin_data['wdp_id'] ?? $plugin_data['pid'] ?? null) === 119) {
+                    $dashboard_present = true;
+                    echo '<div style="background:#fff3cd;border:1px solid #ffeaa7;padding:10px;border-radius:4px;margin-bottom:15px;">';
+                    echo '<strong>WPMU DEV Dashboard</strong> - <em>Will be preserved (core dashboard plugin cannot be reinstalled)</em>';
+                    echo '</div>';
+                    break;
+                }
+            }
+
             echo '<table class="plugin-analysis-table" style="width:100%;border-collapse:collapse;">';
             echo '<thead>';
             echo '<tr style="background:#f0efff;border-bottom:2px solid #c3b1e1;">';
@@ -319,7 +359,7 @@ function clean_sweep_display_plugins_tab_content($plugin_results) {
             echo '</tr>';
             echo '</thead>';
             echo '<tbody>';
-            foreach ($plugin_results['wpmu_dev_plugins'] as $slug => $plugin_data) {
+            foreach ($filtered_wpmu_plugins as $slug => $plugin_data) {
                 $name = $plugin_data['name'] ?? $slug;
                 $version = $plugin_data['version'] ?? 'Unknown';
                 $description = $plugin_data['description'] ?? '';
@@ -432,13 +472,20 @@ function clean_sweep_display_plugins_tab_content($plugin_results) {
 
         // Start button with AJAX and confirmation
         echo '<div style="text-align:center;margin:30px 0;">';
-        // Combine all plugins that will be reinstalled
-        $all_plugins_to_reinstall = array_merge(
-            $plugin_results['wp_org_plugins'] ?? [],
-            $plugin_results['wpmu_dev_plugins'] ?? []
-        );
+        // Combine all plugins that will be reinstalled (excluding WPMU DEV Dashboard)
+        $all_plugins_to_reinstall = $plugin_results['wp_org_plugins'] ?? [];
+        if (!empty($plugin_results['wpmu_dev_plugins'])) {
+            foreach ($plugin_results['wpmu_dev_plugins'] as $slug => $plugin_data) {
+                // Exclude WPMU DEV Dashboard (ID 119) from actual reinstallation
+                if (($plugin_data['wdp_id'] ?? $plugin_data['pid'] ?? null) !== 119) {
+                    $all_plugins_to_reinstall[$slug] = $plugin_data;
+                }
+            }
+        }
+        $actual_reinstall_count = count($all_plugins_to_reinstall);
+
         echo '<button id="reinstall-button" onclick="confirmPluginReinstallation(this)" data-plugins="' . htmlspecialchars(json_encode($all_plugins_to_reinstall)) . '" style="background:#dc3545;color:white;border:none;padding:15px 30px;font-size:18px;font-weight:bold;border-radius:4px;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.2);">';
-        echo '🚀 Start Complete Ecosystem Re-installation (' . $total_to_reinstall . ' plugins)';
+        echo '🚀 Start Complete Ecosystem Re-installation (' . $actual_reinstall_count . ' plugins)';
         echo '</button>';
         echo '<p style="margin-top:10px;color:#666;font-size:14px;">WordPress.org plugins from official repository + WPMU DEV premium plugins from secured network</p>';
         echo '</div>';
