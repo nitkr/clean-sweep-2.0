@@ -540,7 +540,11 @@ class CleanSweep_PluginReinstaller {
             if ($progressManager) {
                 $progressManager->sendError('WPMU DEV not available');
             }
-            return ['error' => 'WPMU DEV not available'];
+            return [
+                'successful' => [],
+                'failed' => [],
+                'error' => 'WPMU DEV not available'
+            ];
         }
 
         // Set unlimited execution time for potentially large operations
@@ -554,7 +558,11 @@ class CleanSweep_PluginReinstaller {
             if ($progressManager) {
                 $progressManager->sendError('No admin user for WPMU DEV');
             }
-            return ['error' => 'No admin user'];
+            return [
+                'successful' => [],
+                'failed' => [],
+                'error' => 'No admin user'
+            ];
         }
 
         wp_set_current_user($admin->ID);
