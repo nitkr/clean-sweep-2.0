@@ -17,17 +17,11 @@ function clean_sweep_wordpress_package_install($extract_path) {
 
     global $wp_filesystem;
 
-    // Initialize filesystem - use fallback if WordPress filesystem not available
+    // Initialize filesystem from clean /core/fresh/ WordPress installation
     if (empty($wp_filesystem)) {
-        if (file_exists(ABSPATH . 'wp-admin/includes/file.php')) {
-            require_once ABSPATH . 'wp-admin/includes/file.php';
-            if (function_exists('WP_Filesystem')) {
-                WP_Filesystem();
-            }
-        }
+        require_once __DIR__ . '/../core/fresh/wp-admin/includes/file.php';
+        WP_Filesystem();
     }
-
-    // If WP_Filesystem still not available, continue without it (some functions will use PHP fallbacks)
 
     $file_count = count($_FILES['zip_files']['name']);
     $results = [
