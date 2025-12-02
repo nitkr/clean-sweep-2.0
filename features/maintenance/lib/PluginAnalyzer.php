@@ -16,8 +16,10 @@ class CleanSweep_PluginAnalyzer {
      * @return array Analysis results
      */
     public function analyze($progress_file = null) {
-        // Load WordPress plugin functions
-        require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        // Load WordPress plugin functions FROM FRESH/CLEAN WordPress installation
+        // Calculate path to fresh wp-admin/includes/plugin.php
+        $fresh_wp_admin = dirname(dirname(dirname(dirname(__DIR__)))) . '/core/fresh/wp-admin/includes/plugin.php';
+        require_once $fresh_wp_admin;
 
         clean_sweep_log_message("=== WordPress Plugin Analysis Started ===");
         clean_sweep_log_message("Version: " . CLEAN_SWEEP_VERSION);
