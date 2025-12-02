@@ -141,7 +141,7 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
     $progress_data['step'] = 2;
     clean_sweep_write_progress_file($progress_file, $progress_data);
 
-    $temp_file = download_url($download_url);
+    $temp_file = clean_sweep_download_url($download_url);
     if (is_wp_error($temp_file)) {
         $progress_data['status'] = 'error';
         $progress_data['message'] = 'Failed to download WordPress';
@@ -180,7 +180,7 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
         return ['success' => false, 'message' => 'Failed to initialize filesystem'];
     }
 
-    $result = unzip_file($temp_file, $extract_dir);
+    $result = clean_sweep_unzip_file($temp_file, $extract_dir);
     if (is_wp_error($result)) {
         clean_sweep_log_message("Failed to extract WordPress: " . $result->get_error_message(), 'error');
         unlink($temp_file);
