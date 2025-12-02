@@ -35,8 +35,8 @@ class CleanSweep_SafePluginRegistry {
      */
     private function initializeRegistry() {
         $this->safe_plugins = [
-            'wpmudev_dashboard' => [
-                'file' => 'wpmudev-dashboard/wpmudev-dashboard.php',
+            'wpmudev_updates' => [
+                'file' => 'wpmudev-updates/update-notifications.php',
                 'name' => 'WPMU DEV Dashboard',
                 'category' => 'premium_api',
                 'description' => 'WPMU DEV API provider for premium plugin management',
@@ -53,8 +53,8 @@ class CleanSweep_SafePluginRegistry {
      */
     private function initializeOperationRequirements() {
         $this->operation_requirements = [
-            'wpmu_dev_reinstall' => ['wpmudev_dashboard'],
-            'premium_plugin_reinstall' => ['wpmudev_dashboard'],
+            'wpmu_dev_reinstall' => ['wpmudev_updates'],
+            'premium_plugin_reinstall' => ['wpmudev_updates'],
             // Future operations can be mapped here
         ];
     }
