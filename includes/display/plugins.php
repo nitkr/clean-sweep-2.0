@@ -44,7 +44,7 @@ function clean_sweep_display_final_results($reinstall_results, $verification_res
         foreach ($verification_results['verified'] as $plugin) {
             $reinstall_status = '✅ Success';
             $reinstall_class = 'plugin-success';
-            $details = 'Installed and accessible';
+            $details = 'Downloaded from WordPress.org official repository';
 
             // Check if this plugin was skipped
             $skipped = false;
@@ -54,7 +54,7 @@ function clean_sweep_display_final_results($reinstall_results, $verification_res
                         $skipped = true;
                         $reinstall_status = '⏭️ Skipped';
                         $reinstall_class = 'plugin-info';
-                        $details = $skipped_plugin['reason'] ?? 'Plugin was skipped during reinstallation';
+                        $details = $skipped_plugin['reason'] ?? 'Preserved (not available for reinstallation)';
                         break;
                     }
                 }
@@ -91,7 +91,7 @@ function clean_sweep_display_final_results($reinstall_results, $verification_res
                 // Show as WPMU DEV success instead of WordPress.org failure
                 $reinstall_status = '✅ WPMU DEV';
                 $reinstall_class = 'plugin-success';
-                $details = 'Successfully reinstalled from WPMU DEV Premium network';
+                $details = 'Downloaded from WPMU DEV Premium secured network';
             } elseif ($failed_wordpress_org) {
                 // Actual WordPress.org failure
                 $reinstall_status = '❌ Failed';
