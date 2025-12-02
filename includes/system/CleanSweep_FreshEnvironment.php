@@ -1051,11 +1051,14 @@ EOT;
 
         // Define WordPress authentication constants needed for user functions
         $code .= "// Define WordPress authentication constants needed for user functions\n";
-        $code .= "if (!defined('LOGGED_IN_COOKIE')) {\n";
-        $code .= "    define('LOGGED_IN_COOKIE', 'wordpress_logged_in_' . md5(site_url()));\n";
+        $code .= "if (!defined('AUTH_COOKIE')) {\n";
+        $code .= "    define('AUTH_COOKIE', 'wordpress_' . md5(site_url()));\n";
         $code .= "}\n";
         $code .= "if (!defined('SECURE_AUTH_COOKIE')) {\n";
         $code .= "    define('SECURE_AUTH_COOKIE', 'wordpress_sec_' . md5(site_url()));\n";
+        $code .= "}\n";
+        $code .= "if (!defined('LOGGED_IN_COOKIE')) {\n";
+        $code .= "    define('LOGGED_IN_COOKIE', 'wordpress_logged_in_' . md5(site_url()));\n";
         $code .= "}\n";
 
         // Explicitly load safe plugins with detailed debugging
