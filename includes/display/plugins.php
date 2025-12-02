@@ -284,8 +284,11 @@ function clean_sweep_display_plugins_tab_content($plugin_results) {
         // Security Analysis Summary
         echo '<div class="security-warning">';
         echo '<h4>🔒 Security Analysis Results</h4>';
-        echo '<p>' . ($suspicious_count > 0 ? '<strong>⚠️ ALERT:</strong> ' . $suspicious_count . ' suspicious files detected in plugins directory! Review the suspicious files section below before proceeding.' : '<strong>✅ SECURE:</strong> No suspicious files found in plugins directory.') . '</p>';
+        echo '<p>' . ($suspicious_count > 0 ? '<strong>⚠️ ALERT:</strong> ' . $suspicious_count . ' suspicious files detected in plugins directory! These will be automatically removed before plugin reinstallation for security.' : '<strong>✅ SECURE:</strong> No suspicious files found in plugins directory.') . '</p>';
         echo '<p><strong>Reinstallation Plan:</strong> ' . $total_to_reinstall . ' plugins will be re-installed (' . $repo_count . ' from WordPress.org, ' . $wpmudev_count . ' from WPMU DEV). ' . $non_repo_count . ' non-repository plugins will be preserved.</p>';
+        if ($suspicious_count > 0) {
+            echo '<p><strong>🛡️ Security Action:</strong> Suspicious files will be automatically removed before installing fresh plugins to prevent reinfection.</p>';
+        }
         echo '</div>';
 
         // Plugin lists
