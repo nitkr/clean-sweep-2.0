@@ -22,12 +22,7 @@ function clean_sweep_output_html_header() {
         echo '<script src="assets/script.js"></script>';
         echo '</head><body><h1>🧹 Clean Sweep v ' . CLEAN_SWEEP_VERSION . $badge_html . '</h1>';
 
-        if ($recovery_mode) {
-            echo '<div style="background:#fff3cd;border:1px solid #ffeaa7;padding:15px;border-radius:6px;margin:15px 0;text-align:center;">';
-            echo '<h3 style="margin:0 0 10px 0;color:#856404;">🔄 Recovery Mode Active</h3>';
-            echo '<p style="margin:0;color:#856404;font-size:14px;">Clean Sweep is running with fresh WordPress core files to ensure a secure recovery environment.</p>';
-            echo '</div>';
-        }
+
     }
 }
 
