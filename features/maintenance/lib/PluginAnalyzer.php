@@ -19,8 +19,11 @@ class CleanSweep_PluginAnalyzer {
         // Load WordPress plugin functions conditionally to avoid redeclaration errors
         // Only load if not already available from selective plugin loading
         if (!function_exists('get_plugins')) {
-            require_once ABSPATH . WPINC . '/wp-admin/includes/plugin.php';
-            clean_sweep_log_message("Loaded WordPress plugin functions from fresh installation", 'debug');
+            // Path from PluginAnalyzer.php: features/maintenance/lib/
+            // Go up 3 levels: ../../../../ then to: core/fresh/wp-admin/includes/plugin.php
+            $fresh_plugin_php = dirname(__DIR__, 3) . '/core/fresh/wp-admin/includes/plugin.php';
+            require_once $fresh_plugin_php;
+            clean_sweep_log_message("Loaded WordPress plugin functions from fresh installation: $fresh_plugin_php", 'debug');
         }
 
         clean_sweep_log_message("=== WordPress Plugin Analysis Started ===");
