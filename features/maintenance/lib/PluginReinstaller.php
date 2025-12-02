@@ -121,6 +121,11 @@ class CleanSweep_PluginReinstaller {
                 }
             }
 
+            // Ensure all parameters are arrays (fix for null values from AJAX)
+            $wp_org_plugins = is_array($wp_org_plugins) ? $wp_org_plugins : [];
+            $wpmu_dev_plugins = is_array($wpmu_dev_plugins) ? $wpmu_dev_plugins : [];
+            $suspicious_files_to_delete = is_array($suspicious_files_to_delete) ? $suspicious_files_to_delete : [];
+
             // Unified batch processing for all plugin types
             if ($is_batch_mode) {
                 // Create unified queue: suspicious files + WordPress.org + WPMU DEV
