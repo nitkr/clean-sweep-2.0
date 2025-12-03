@@ -33,8 +33,8 @@ function clean_sweep_wordpress_package_install($extract_path) {
 
     clean_sweep_log_message("Using WordPress {$results['installer_type']} installer for $extract_path");
 
-    // Include required WordPress files for upgrader
-    require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+    // Include required WordPress files for upgrader from clean /core/fresh/ installation
+    require_once __DIR__ . '/../core/fresh/wp-admin/includes/class-wp-upgrader.php';
 
     /**
      * Custom upgrader skin to redirect WordPress installer messages to Clean Sweep logging
