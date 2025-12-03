@@ -23,6 +23,29 @@ function clean_sweep_wordpress_package_install($extract_path) {
             clean_sweep_log_message("DEBUG: realpath() failed for: $fresh_file_path", 'error');
             clean_sweep_log_message("DEBUG: __DIR__ is: " . __DIR__, 'debug');
             clean_sweep_log_message("DEBUG: getcwd() is: " . getcwd(), 'debug');
+
+            // Additional debugging even when realpath fails
+            if (file_exists($fresh_file_path)) {
+                clean_sweep_log_message("DEBUG: file_exists() TRUE but realpath() FALSE for: $fresh_file_path", 'debug');
+                if (is_readable($fresh_file_path)) {
+                    clean_sweep_log_message("DEBUG: File is readable, trying direct require_once", 'debug');
+                    require_once $fresh_file_path; // Try direct path
+                    clean_sweep_log_message("DEBUG: Direct require_once completed", 'debug');
+                } else {
+                    clean_sweep_log_message("DEBUG: File exists but not readable: $fresh_file_path", 'error');
+                }
+            } else {
+                clean_sweep_log_message("DEBUG: file_exists() also FALSE for: $fresh_file_path", 'error');
+            }
+
+            // Check for symlinks
+            if (is_link($fresh_file_path)) {
+                clean_sweep_log_message("DEBUG: Path is a symlink: $fresh_file_path", 'debug');
+                $link_target = readlink($fresh_file_path);
+                clean_sweep_log_message("DEBUG: Symlink target: $link_target", 'debug');
+            } else {
+                clean_sweep_log_message("DEBUG: Path is not a symlink", 'debug');
+            }
         } elseif (!file_exists($real_path)) {
             clean_sweep_log_message("DEBUG: file_exists() returned false for: $real_path", 'error');
         } elseif (!is_readable($real_path)) {
