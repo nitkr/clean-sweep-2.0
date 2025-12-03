@@ -13,12 +13,50 @@ function clean_sweep_wordpress_package_install($extract_path) {
 
     // Initialize filesystem from clean /core/fresh/ WordPress installation
     if (empty($wp_filesystem)) {
-        require_once __DIR__ . '/../core/fresh/wp-admin/includes/file.php';
-        WP_Filesystem();
+        $fresh_file_path = __DIR__ . '/../core/fresh/wp-admin/includes/file.php';
+        clean_sweep_log_message("DEBUG: Attempting to load fresh file.php from: $fresh_file_path", 'debug');
+
+        $real_path = realpath($fresh_file_path);
+        clean_sweep_log_message("DEBUG: realpath() result: " . ($real_path ?: 'FALSE'), 'debug');
+
+        if (!$real_path) {
+            clean_sweep_log_message("DEBUG: realpath() failed for: $fresh_file_path", 'error');
+            clean_sweep_log_message("DEBUG: __DIR__ is: " . __DIR__, 'debug');
+            clean_sweep_log_message("DEBUG: getcwd() is: " . getcwd(), 'debug');
+        } elseif (!file_exists($real_path)) {
+            clean_sweep_log_message("DEBUG: file_exists() returned false for: $real_path", 'error');
+        } elseif (!is_readable($real_path)) {
+            clean_sweep_log_message("DEBUG: is_readable() returned false for: $real_path", 'error');
+        } else {
+            clean_sweep_log_message("DEBUG: File exists and is readable: $real_path", 'debug');
+            require_once $real_path;
+            if (function_exists('WP_Filesystem')) {
+                WP_Filesystem();
+                clean_sweep_log_message("DEBUG: WP_Filesystem() initialized successfully", 'debug');
+            } else {
+                clean_sweep_log_message("DEBUG: WP_Filesystem() function not available after require_once", 'error');
+            }
+        }
     }
 
     // Include required WordPress files for upgrader from clean /core/fresh/ installation
-    require_once __DIR__ . '/../core/fresh/wp-admin/includes/class-wp-upgrader.php';
+    $fresh_upgrader_path = __DIR__ . '/../core/fresh/wp-admin/includes/class-wp-upgrader.php';
+    clean_sweep_log_message("DEBUG: Attempting to load fresh upgrader from: $fresh_upgrader_path", 'debug');
+
+    $real_upgrader_path = realpath($fresh_upgrader_path);
+    clean_sweep_log_message("DEBUG: upgrader realpath() result: " . ($real_upgrader_path ?: 'FALSE'), 'debug');
+
+    if (!$real_upgrader_path) {
+        clean_sweep_log_message("DEBUG: realpath() failed for upgrader: $fresh_upgrader_path", 'error');
+    } elseif (!file_exists($real_upgrader_path)) {
+        clean_sweep_log_message("DEBUG: upgrader file_exists() returned false for: $real_upgrader_path", 'error');
+    } elseif (!is_readable($real_upgrader_path)) {
+        clean_sweep_log_message("DEBUG: upgrader is_readable() returned false for: $real_upgrader_path", 'error');
+    } else {
+        clean_sweep_log_message("DEBUG: Upgrader file exists and is readable: $real_upgrader_path", 'debug');
+        require_once $real_upgrader_path;
+        clean_sweep_log_message("DEBUG: Upgrader class loaded, checking functions...", 'debug');
+    }
 
     // Check if WordPress functions are available for plugin/theme installation AFTER loading classes
     if (!function_exists('WP_Upgrader') || !function_exists('Plugin_Upgrader')) {
