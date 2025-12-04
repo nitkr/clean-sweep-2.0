@@ -350,6 +350,72 @@ function updateCoreProgress(data) {
     }
 }
 
+// Manual refresh of plugin analysis
+function refreshPluginAnalysis() {
+    if (!confirm("This will force a fresh analysis of all plugins, ignoring any cached results. Continue?")) {
+        return;
+    }
+
+    // Generate unique progress file name for refresh
+    const refreshProgressFile = 'plugin_refresh_' + Date.now() + '.progress';
+
+    // Show loading state on the refresh button
+    const refreshButton = event.target;
+    const originalText = refreshButton.textContent;
+    refreshButton.textContent = '🔄 Refreshing...';
+    refreshButton.disabled = true;
+
+    // Submit the refresh request
+    const formData = new FormData();
+    formData.append('action', 'analyze_plugins');
+    formData.append('progress_file', refreshProgressFile);
+
+    // Force refresh by adding a parameter
+    fetch(window.location.href + '?force_refresh=1&t=' + Date.now(), {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => {
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.indexOf("application/json") !== -1) {
+            return response.json();
+        } else {
+            return response.text().then(text => {
+                const preview = text.substring(0, 500).replace(/\s+/g, ' ').trim();
+                throw new Error('Server returned HTML instead of JSON. Error content: ' + preview + (text.length > 500 ? '...' : ''));
+            });
+        }
+    })
+    .then(data => {
+        if (data.success && data.html) {
+            // Update the plugins tab content with fresh analysis
+            const pluginsTab = document.getElementById('plugins-tab');
+            if (pluginsTab) {
+                pluginsTab.innerHTML = data.html;
+            }
+
+            // Show success message briefly
+            refreshButton.textContent = '✅ Refreshed!';
+            setTimeout(() => {
+                refreshButton.textContent = originalText;
+                refreshButton.disabled = false;
+            }, 2000);
+        } else {
+            throw new Error(data.error || 'Refresh failed');
+        }
+    })
+    .catch(error => {
+        refreshButton.textContent = '❌ Error';
+        refreshButton.disabled = false;
+        setTimeout(() => {
+            refreshButton.textContent = originalText;
+            refreshButton.disabled = false;
+        }, 3000);
+        console.error('Refresh error:', error);
+        alert('Refresh failed: ' + error.message);
+    });
+}
+
 // Legacy core reinstallation function (kept for compatibility)
 function reinstallCore() {
     const version = document.getElementById("wp-version").value;

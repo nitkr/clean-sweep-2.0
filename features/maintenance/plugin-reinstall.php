@@ -31,13 +31,55 @@ function clean_sweep_analyze_plugins($progress_file = null, $force_refresh = fal
     try {
         // Check for cached analysis results first (unless force refresh is requested)
         $cache_key = 'clean_sweep_plugin_analysis_cache';
-        $cache_expiry = 1800; // 30 minutes
+        $cache_expiry = 300; // 5 minutes (reduced from 30 minutes)
 
         if (!$force_refresh) {
             $cached_result = get_transient($cache_key);
             if ($cached_result !== false && is_array($cached_result)) {
-                clean_sweep_log_message("Using cached plugin analysis results (expires in " . round(($cache_expiry - (time() - get_option('_transient_timeout_' . $cache_key, 0))) / 60) . " minutes)");
-                return $cached_result;
+                // Smart cache invalidation: Check if plugins have changed
+                $current_plugins = get_plugins();
+                $current_plugin_count = count($current_plugins);
+                $cached_plugin_count = $cached_result['total_plugins'] ?? 0;
+
+                // Check plugin count
+                $plugins_changed = ($current_plugin_count !== $cached_plugin_count);
+
+                // Check plugin file modification times (detect new/changed plugins)
+                if (!$plugins_changed && isset($cached_result['plugin_mtimes'])) {
+                    foreach ($current_plugins as $plugin_file => $plugin_data) {
+                        $plugin_path = WP_PLUGIN_DIR . '/' . $plugin_file;
+                        if (file_exists($plugin_path)) {
+                            $current_mtime = filemtime($plugin_path);
+                            $cached_mtime = $cached_result['plugin_mtimes'][$plugin_file] ?? 0;
+                            if ($current_mtime !== $cached_mtime) {
+                                $plugins_changed = true;
+                                clean_sweep_log_message("Plugin file changed: {$plugin_file} (mtime: {$cached_mtime} → {$current_mtime})");
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // Check for missing plugins in cache
+                if (!$plugins_changed && isset($cached_result['plugin_mtimes'])) {
+                    foreach ($cached_result['plugin_mtimes'] as $cached_file => $cached_mtime) {
+                        if (!isset($current_plugins[$cached_file])) {
+                            $plugins_changed = true;
+                            clean_sweep_log_message("Plugin removed: {$cached_file}");
+                            break;
+                        }
+                    }
+                }
+
+                if ($plugins_changed) {
+                    clean_sweep_log_message("Plugin changes detected, invalidating cache (count: {$cached_plugin_count} → {$current_plugin_count})");
+                    delete_transient($cache_key);
+                    $cached_result = false;
+                } else {
+                    $minutes_left = round(($cache_expiry - (time() - get_option('_transient_timeout_' . $cache_key, 0))) / 60);
+                    clean_sweep_log_message("Using cached plugin analysis results ({$minutes_left} minutes remaining)");
+                    return $cached_result;
+                }
             }
         }
 
@@ -87,12 +129,23 @@ function clean_sweep_analyze_plugins($progress_file = null, $force_refresh = fal
         clean_sweep_log_message("=== Advanced Plugin Analysis Completed ===");
         clean_sweep_log_message("WordPress.org: $wp_org_count, WPMU DEV: $wpmu_dev_count, Non-repository: $non_repo_count, Suspicious files: $suspicious_count");
 
+        // Store plugin file modification times for cache invalidation
+        $plugin_mtimes = [];
+        $current_plugins = get_plugins();
+        foreach ($current_plugins as $plugin_file => $plugin_data) {
+            $plugin_path = WP_PLUGIN_DIR . '/' . $plugin_file;
+            if (file_exists($plugin_path)) {
+                $plugin_mtimes[$plugin_file] = filemtime($plugin_path);
+            }
+        }
+
         // Prepare the complete result set for caching
         $complete_result = array_merge(compact('wp_org_plugins', 'wpmu_dev_plugins', 'skipped'), [
             'non_repo_plugins' => $non_repo_plugins,
             'suspicious_files' => $suspicious_files,
             'copy_lists' => $result['copy_lists'] ?? [],
             'totals' => $result['totals'] ?? [],
+            'plugin_mtimes' => $plugin_mtimes,
             'cached_at' => time(),
             'cache_expires' => time() + $cache_expiry
         ]);
@@ -127,8 +180,12 @@ function clean_sweep_verify_installations($expected_plugins) {
         'corrupted' => []
     ];
 
-    // Get current plugins from WordPress
+    // Clear plugin cache to ensure we see newly installed plugins
+    wp_cache_flush();
+    wp_clean_plugins_cache();
     $current_plugins = get_plugins();
+
+    clean_sweep_log_message("Verification: Found " . count($current_plugins) . " plugins in WordPress");
 
     foreach ($expected_plugins as $plugin_key => $plugin_data) {
         // For WPMU DEV plugins, $plugin_key is the filename like "google-analytics-async/google-analytics-async.php"
@@ -216,8 +273,12 @@ function clean_sweep_verify_wpmudev_installations($wpmudev_plugins) {
         'corrupted' => []
     ];
 
-    // Get current plugins from WordPress
+    // Clear plugin cache to ensure we see newly installed plugins
+    wp_cache_flush();
+    wp_clean_plugins_cache();
     $current_plugins = get_plugins();
+
+    clean_sweep_log_message("WPMU DEV verification: Found " . count($current_plugins) . " plugins in WordPress");
 
     foreach ($wpmudev_plugins as $plugin_file => $plugin_data) {
         $plugin_name = $plugin_data['name'] ?? $plugin_file;

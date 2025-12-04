@@ -42,6 +42,7 @@ class CleanSweep_PluginAnalyzer {
             $wp_org_plugins = [];
             $wpmu_dev_plugins = [];
             $non_repo_plugins = [];
+            $skipped_plugins = [];
 
             // Get WPMU DEV cached projects for lookup
             $wpmudev_projects = [];
@@ -65,6 +66,8 @@ class CleanSweep_PluginAnalyzer {
                     $wpmu_dev_plugins[$plugin_file] = $result['data'];
                 } elseif ($result['type'] === 'wordpress_org') {
                     $wp_org_plugins[$plugin_file] = $result['data'];
+                } elseif ($result['type'] === 'skipped') {
+                    $skipped_plugins[$plugin_file] = $result['data'];
                 } else {
                     $non_repo_plugins[$plugin_file] = $result['data'];
                 }
@@ -85,7 +88,7 @@ class CleanSweep_PluginAnalyzer {
             }
 
             // Detect suspicious files/folders
-            $suspicious_files = $this->detect_suspicious_files($wp_org_plugins, $wpmu_dev_plugins, $non_repo_plugins);
+            $suspicious_files = $this->detect_suspicious_files($wp_org_plugins, $wpmu_dev_plugins, $non_repo_plugins, $skipped_plugins);
 
             // Generate copy lists for UI
             $copy_lists = $this->generate_copy_lists($wp_org_plugins, $wpmu_dev_plugins, $non_repo_plugins, $suspicious_files);
@@ -93,6 +96,7 @@ class CleanSweep_PluginAnalyzer {
             $wp_org_count = count($wp_org_plugins);
             $wpmu_dev_count = count($wpmu_dev_plugins);
             $non_repo_count = count($non_repo_plugins);
+            $skipped_count = count($skipped_plugins);
             $suspicious_count = count($suspicious_files);
 
             // Debug WPMU DEV plugins
@@ -102,9 +106,6 @@ class CleanSweep_PluginAnalyzer {
                 $wdp_id = $plugin_data['wdp_id'] ?? $plugin_data['pid'] ?? 'unknown';
                 $name = $plugin_data['name'] ?? $slug;
                 clean_sweep_log_message("WPMU DEV plugin: {$name} (slug: {$slug}, ID: {$wdp_id})", 'info');
-                if (($plugin_data['wdp_id'] ?? $plugin_data['pid'] ?? null) === 119) {
-                    clean_sweep_log_message("*** WPMU DEV DASHBOARD DETECTED ***", 'info');
-                }
             }
 
             // Store FULL analysis data in site_transient keyed by progress_file for AJAX persistence
@@ -134,12 +135,14 @@ class CleanSweep_PluginAnalyzer {
                 'wp_org_plugins' => $wp_org_plugins,
                 'wpmu_dev_plugins' => $wpmu_dev_plugins,
                 'non_repo_plugins' => $non_repo_plugins,
+                'skipped_plugins' => $skipped_plugins,
                 'suspicious_files' => $suspicious_files,
                 'copy_lists' => $copy_lists,
                 'totals' => [
                     'wordpress_org' => $wp_org_count,
                     'wpmu_dev' => $wpmu_dev_count,
                     'non_repository' => $non_repo_count,
+                    'skipped' => $skipped_count,
                     'suspicious' => $suspicious_count,
                     'total' => $total_plugins
                 ]
@@ -175,6 +178,15 @@ class CleanSweep_PluginAnalyzer {
         // Check WDP ID header first (definitive WPMU DEV detection)
         $wdp = get_file_data($plugin_path, ['id' => 'WDP ID'])['id'];
         if ($wdp && is_numeric($wdp)) {
+            // Skip WPMU DEV Dashboard (ID 119) - cannot be reinstalled
+            if ((int) $wdp === 119) {
+                clean_sweep_log_message("Skipping WPMU DEV Dashboard (ID 119) - cannot be reinstalled", 'info');
+                return ['type' => 'skipped', 'data' => [
+                    'name' => $plugin_data['Name'] ?? $plugin_file,
+                    'reason' => 'WPMU DEV Dashboard cannot be reinstalled'
+                ]];
+            }
+
             $project_info = clean_sweep_is_wpmudev_available() ?
                 WPMUDEV_Dashboard::$site->get_project_info($wdp) : null;
 
@@ -271,14 +283,15 @@ class CleanSweep_PluginAnalyzer {
      * @param array $non_repo_plugins
      * @return array
      */
-    private function detect_suspicious_files($wp_org_plugins, $wpmu_dev_plugins, $non_repo_plugins) {
+    private function detect_suspicious_files($wp_org_plugins, $wpmu_dev_plugins, $non_repo_plugins, $skipped_plugins = []) {
         clean_sweep_log_message("Detecting suspicious files in plugins directory", 'info');
 
-        // Get all recognized plugin directories/files
+        // Get all recognized plugin directories/files (including skipped plugins like WPMU DEV Dashboard)
         $recognized_plugins = array_merge(
             array_keys($wp_org_plugins),
             array_keys($wpmu_dev_plugins),
-            array_keys($non_repo_plugins)
+            array_keys($non_repo_plugins),
+            array_keys($skipped_plugins)
         );
 
         // Convert to directory names for comparison

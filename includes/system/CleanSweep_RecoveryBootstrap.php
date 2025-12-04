@@ -16,6 +16,15 @@ class CleanSweep_RecoveryBootstrap {
     public function __construct($is_ajax = false) {
         $this->fresh_env = new CleanSweep_FreshEnvironment();
         $this->is_ajax = $is_ajax;
+
+        // DEBUG: Check REAL SITE ROOT core files after recovery completion
+        // Use site root detection instead of relative paths
+        $site_root = $this->detectSiteRoot();
+        $file_php = $site_root . 'wp-admin/includes/file.php';
+        $upgrader_php = $site_root . 'wp-admin/includes/class-wp-upgrader.php';
+        clean_sweep_log_message("DEBUG: After recovery completion - real site root exists: " . (is_dir($site_root) ? 'YES' : 'NO'), 'debug');
+        clean_sweep_log_message("DEBUG: After recovery completion - real file.php exists: " . (file_exists($file_php) ? 'YES' : 'NO'), 'debug');
+        clean_sweep_log_message("DEBUG: After recovery completion - real class-wp-upgrader.php exists: " . (file_exists($upgrader_php) ? 'YES' : 'NO'), 'debug');
     }
 
     /**
@@ -62,6 +71,15 @@ class CleanSweep_RecoveryBootstrap {
 
         if ($this->fresh_env->load()) {
             clean_sweep_log_message("🎉 Clean Sweep ready!", 'info');
+
+            // DEBUG: Check /core/fresh state after recovery completion
+            $fresh_dir = __DIR__ . '/../core/fresh';
+            $file_php = $fresh_dir . '/wp-admin/includes/file.php';
+            $upgrader_php = $fresh_dir . '/wp-admin/includes/class-wp-upgrader.php';
+            clean_sweep_log_message("DEBUG: After recovery completion - /core/fresh exists: " . (is_dir($fresh_dir) ? 'YES' : 'NO'), 'debug');
+            clean_sweep_log_message("DEBUG: After recovery completion - file.php exists: " . (file_exists($file_php) ? 'YES' : 'NO'), 'debug');
+            clean_sweep_log_message("DEBUG: After recovery completion - class-wp-upgrader.php exists: " . (file_exists($upgrader_php) ? 'YES' : 'NO'), 'debug');
+
             return true;
         } else {
             clean_sweep_log_message("❌ Failed to load fresh environment", 'error');
@@ -370,6 +388,29 @@ class CleanSweep_RecoveryBootstrap {
         } else {
             $this->sendJsonResponse(false, 'Upload processing failed');
         }
+    }
+
+    /**
+     * Detect the real WordPress site root directory
+     *
+     * @return string Site root path with trailing slash
+     */
+    private function detectSiteRoot() {
+        // Try to find wp-config.php by walking up from current directory
+        $current_dir = dirname(__DIR__); // system/ directory
+        $max_levels = 5;
+
+        for ($i = 0; $i < $max_levels; $i++) {
+            $config_path = $current_dir . '/wp-config.php';
+            if (file_exists($config_path)) {
+                return rtrim($current_dir, '/') . '/';
+            }
+            $current_dir = dirname($current_dir);
+        }
+
+        // Fallback: assume we're in wp-content/plugins/ structure
+        $current_dir = dirname(dirname(dirname(__DIR__))); // Go up 3 levels from system/
+        return rtrim($current_dir, '/') . '/';
     }
 
     /**

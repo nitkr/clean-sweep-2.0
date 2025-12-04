@@ -1,91 +1,45 @@
 <?php
 /**
- * Clean Sweep - ZIP Extraction Feature
- *
- * Contains file upload and ZIP extraction functionality
- */
-
-/**
  * Handle WordPress plugin/theme installation using WordPress's built-in upgraders
+ * Option B: WordPress is already loaded in recovery mode, just use it!
  */
 function clean_sweep_wordpress_package_install($extract_path) {
-    global $wp_filesystem;
+    clean_sweep_log_message("🎯 Using WordPress package installer (Option B architecture)", 'info');
+    clean_sweep_log_message("   → WordPress is already loaded from: " . (defined('ABSPATH') ? ABSPATH : 'N/A'), 'info');
+    clean_sweep_log_message("   → Extraction target: $extract_path", 'info');
 
-    // Initialize filesystem from clean /core/fresh/ WordPress installation
-    if (empty($wp_filesystem)) {
-        $fresh_file_path = __DIR__ . '/../core/fresh/wp-admin/includes/file.php';
-        clean_sweep_log_message("DEBUG: Attempting to load fresh file.php from: $fresh_file_path", 'debug');
+global $wp_filesystem;
 
-        $real_path = realpath($fresh_file_path);
-        clean_sweep_log_message("DEBUG: realpath() result: " . ($real_path ?: 'FALSE'), 'debug');
-
-        if (!$real_path) {
-            clean_sweep_log_message("DEBUG: realpath() failed for: $fresh_file_path", 'error');
-            clean_sweep_log_message("DEBUG: __DIR__ is: " . __DIR__, 'debug');
-            clean_sweep_log_message("DEBUG: getcwd() is: " . getcwd(), 'debug');
-
-            // Additional debugging even when realpath fails
-            if (file_exists($fresh_file_path)) {
-                clean_sweep_log_message("DEBUG: file_exists() TRUE but realpath() FALSE for: $fresh_file_path", 'debug');
-                if (is_readable($fresh_file_path)) {
-                    clean_sweep_log_message("DEBUG: File is readable, trying direct require_once", 'debug');
-                    require_once $fresh_file_path; // Try direct path
-                    clean_sweep_log_message("DEBUG: Direct require_once completed", 'debug');
-                } else {
-                    clean_sweep_log_message("DEBUG: File exists but not readable: $fresh_file_path", 'error');
-                }
-            } else {
-                clean_sweep_log_message("DEBUG: file_exists() also FALSE for: $fresh_file_path", 'error');
-            }
-
-            // Check for symlinks
-            if (is_link($fresh_file_path)) {
-                clean_sweep_log_message("DEBUG: Path is a symlink: $fresh_file_path", 'debug');
-                $link_target = readlink($fresh_file_path);
-                clean_sweep_log_message("DEBUG: Symlink target: $link_target", 'debug');
-            } else {
-                clean_sweep_log_message("DEBUG: Path is not a symlink", 'debug');
-            }
-        } elseif (!file_exists($real_path)) {
-            clean_sweep_log_message("DEBUG: file_exists() returned false for: $real_path", 'error');
-        } elseif (!is_readable($real_path)) {
-            clean_sweep_log_message("DEBUG: is_readable() returned false for: $real_path", 'error');
-        } else {
-            clean_sweep_log_message("DEBUG: File exists and is readable: $real_path", 'debug');
-            require_once $real_path;
-            if (function_exists('WP_Filesystem')) {
-                WP_Filesystem();
-                clean_sweep_log_message("DEBUG: WP_Filesystem() initialized successfully", 'debug');
-            } else {
-                clean_sweep_log_message("DEBUG: WP_Filesystem() function not available after require_once", 'error');
-            }
-        }
+// Initialize WP_Filesystem (load required file if not already included)
+if (empty($wp_filesystem)) {
+    // Load file.php if not loaded
+    if (!function_exists('request_filesystem_credentials')) {
+        require_once ABSPATH . 'wp-admin/includes/file.php';
     }
 
-    // Include required WordPress files for upgrader from clean /core/fresh/ installation
-    $fresh_upgrader_path = __DIR__ . '/../core/fresh/wp-admin/includes/class-wp-upgrader.php';
-    clean_sweep_log_message("DEBUG: Attempting to load fresh upgrader from: $fresh_upgrader_path", 'debug');
-
-    $real_upgrader_path = realpath($fresh_upgrader_path);
-    clean_sweep_log_message("DEBUG: upgrader realpath() result: " . ($real_upgrader_path ?: 'FALSE'), 'debug');
-
-    if (!$real_upgrader_path) {
-        clean_sweep_log_message("DEBUG: realpath() failed for upgrader: $fresh_upgrader_path", 'error');
-    } elseif (!file_exists($real_upgrader_path)) {
-        clean_sweep_log_message("DEBUG: upgrader file_exists() returned false for: $real_upgrader_path", 'error');
-    } elseif (!is_readable($real_upgrader_path)) {
-        clean_sweep_log_message("DEBUG: upgrader is_readable() returned false for: $real_upgrader_path", 'error');
-    } else {
-        clean_sweep_log_message("DEBUG: Upgrader file exists and is readable: $real_upgrader_path", 'debug');
-        require_once $real_upgrader_path;
-        clean_sweep_log_message("DEBUG: Upgrader class loaded, checking functions...", 'debug');
+    WP_Filesystem();
+    clean_sweep_log_message("✅ WP_Filesystem initialized", 'info');
+}
+    // Verify upgrader classes are available (should be loaded from wp-settings.php in recovery mode)
+    if (!class_exists('Plugin_Upgrader')) {
+        clean_sweep_log_message("⚠️ Plugin_Upgrader not loaded, loading now...", 'warning');
+        require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+        require_once ABSPATH . 'wp-admin/includes/class-plugin-upgrader.php';
     }
 
-    // Check if WordPress functions are available for plugin/theme installation AFTER loading classes
-    if (!function_exists('WP_Upgrader') || !function_exists('Plugin_Upgrader')) {
-        clean_sweep_log_message("WordPress upgrader functions not available in recovery mode", 'warning');
-        return ['success' => false, 'message' => 'WordPress upgrader not available in recovery mode'];
+    if (!class_exists('Theme_Upgrader')) {
+        clean_sweep_log_message("⚠️ Theme_Upgrader not loaded, loading now...", 'warning');
+        require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
+        require_once ABSPATH . 'wp-admin/includes/class-theme-upgrader.php';
     }
+
+    clean_sweep_log_message("✅ WordPress upgrader classes available", 'info');
+
+    // Check if WordPress classes are available for plugin/theme installation AFTER loading classes
+if (!class_exists('WP_Upgrader') || !class_exists('Plugin_Upgrader') || !class_exists('Theme_Upgrader')) {
+    clean_sweep_log_message("WordPress upgrader classes not available in recovery mode", 'warning');
+    return ['success' => false, 'message' => 'WordPress upgrader not available in recovery mode'];
+}
 
     $file_count = count($_FILES['zip_files']['name']);
     $results = [
@@ -282,6 +236,8 @@ function clean_sweep_wordpress_package_install($extract_path) {
         echo '<p><strong>Installation Method:</strong> WordPress ' . $results['installer_type'] . ' Upgrader (proper activation and management)</p>';
         echo '<p><strong>Benefits:</strong> Automatic directory naming, dependency checking, and activation</p>';
 
+        echo '<button class="back-to-menu-btn visible" onclick="window.location.href = window.location.pathname">⬅️ Back to Main Menu</button>';
+
         echo '</div>';
     } else {
         echo "\n⚙️ WORDPRESS " . strtoupper($results['installer_type']) . " INSTALLATION COMPLETE\n";
@@ -343,9 +299,41 @@ function clean_sweep_is_safe_zip_replace_directory($extract_path, $target_dir) {
 }
 
 /**
+ * Detect the real WordPress site root directory for Option B architecture
+ * Used when ABSPATH points to /core/fresh/ but operations need to target real site
+ *
+ * @return string Real WordPress site root path with trailing slash
+ */
+function clean_sweep_detect_real_site_root() {
+    // Try to find wp-config.php by walking up from current directory
+    $current_dir = dirname(__DIR__); // utilities/ directory
+    $max_levels = 5;
+
+    for ($i = 0; $i < $max_levels; $i++) {
+        $config_path = $current_dir . '/wp-config.php';
+        if (file_exists($config_path)) {
+            return rtrim($current_dir, '/') . '/';
+        }
+        $current_dir = dirname($current_dir);
+    }
+
+    // Fallback: assume we're in wp-content/plugins/ structure
+    $current_dir = dirname(dirname(dirname(__DIR__))); // Go up 3 levels from utilities/
+    return rtrim($current_dir, '/') . '/';
+}
+
+/**
  * Execute ZIP file extraction for multiple files with clean replacement
  */
 function clean_sweep_execute_zip_extraction() {
+    // DEBUG: Check /core/fresh state before any processing
+    // Use absolute path from FRESH_DIR_ABSOLUTE constant (set before WordPress loads)
+    $fresh_dir_entry = defined('FRESH_DIR_ABSOLUTE') ? FRESH_DIR_ABSOLUTE : __DIR__ . '/../core/fresh';
+    $file_php_entry = $fresh_dir_entry . '/wp-admin/includes/file.php';
+    clean_sweep_log_message("DEBUG: At execute_zip_extraction start - /core/fresh exists: " . (is_dir($fresh_dir_entry) ? 'YES' : 'NO'), 'debug');
+    clean_sweep_log_message("DEBUG: At execute_zip_extraction start - file.php exists: " . (file_exists($file_php_entry) ? 'YES' : 'NO'), 'debug');
+    clean_sweep_log_message("DEBUG: Using FRESH_DIR_ABSOLUTE in execute_zip_extraction: " . (defined('FRESH_DIR_ABSOLUTE') ? 'YES' : 'NO'), 'debug');
+
     clean_sweep_log_message("=== ZIP File Extraction Started ===");
 
     // Check if files were uploaded
@@ -368,8 +356,10 @@ function clean_sweep_execute_zip_extraction() {
 
     // Get extraction path
     $extract_path = isset($_POST['extract_path']) ? $_POST['extract_path'] : 'wp-content';
-    // Use original site paths in recovery mode
-    $base_path = defined('ORIGINAL_ABSPATH') ? ORIGINAL_ABSPATH : ABSPATH;
+    // Remove leading slash to ensure relative path from WordPress root
+    $extract_path = ltrim($extract_path, '/');
+    // Use real site root detection for Option B architecture compatibility
+    $base_path = clean_sweep_detect_real_site_root();
     $full_extract_path = $base_path . $extract_path;
 
     clean_sweep_log_message("Extracting files to: $full_extract_path");
@@ -569,6 +559,8 @@ function clean_sweep_execute_zip_extraction() {
                 echo '<p><strong>Extracted to:</strong> <code>' . htmlspecialchars($full_extract_path) . '</code></p>';
                 echo '<p><strong>Note:</strong> Standard ZIP extraction - existing files overwritten but external files preserved.</p>';
             }
+
+            echo '<button class="back-to-menu-btn visible" onclick="window.location.reload()">⬅️ Back to Main Menu</button>';
 
             echo '</div>';
         } else {

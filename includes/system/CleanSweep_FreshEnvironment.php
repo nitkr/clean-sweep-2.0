@@ -266,15 +266,14 @@ EOT;
             return false;
         }
 
-        // Generate wp-config.php
+        // Generate wp-config.php (Option B: defines ABSPATH and content paths)
         if (!$this->generateConfig()) {
             return false;
         }
 
-        // Replace wp-settings.php with recovery version
-        if (!$this->installRecoverySettings()) {
-            return false;
-        }
+        // Option B: Use WordPress's NATIVE wp-settings.php (no custom replacement needed!)
+        // WordPress will load all files automatically from ABSPATH (/core/fresh/)
+        clean_sweep_log_message("✅ Using WordPress native wp-settings.php (Option B architecture)", 'info');
 
         // Protect environment
         $this->protect();
@@ -283,7 +282,8 @@ EOT;
         $marker_data = [
             'created' => time(),
             'method' => $upload_file ? 'manual' : 'auto',
-            'wordpress_version' => 'latest'
+            'wordpress_version' => 'latest',
+            'architecture' => 'option_b'
         ];
 
         file_put_contents($this->marker_file, json_encode($marker_data, JSON_PRETTY_PRINT));
@@ -291,12 +291,13 @@ EOT;
         // Generate integrity hash
         $this->generateIntegrityHash();
 
-        clean_sweep_log_message("✅ Fresh environment setup complete", 'info');
+        clean_sweep_log_message("✅ Fresh environment setup complete with Option B architecture", 'info');
         return true;
     }
 
     /**
      * Generate wp-config.php with site's database credentials
+     * Option B Architecture: ABSPATH points to /core/fresh/, content dirs point to real site
      *
      * @return bool True on success
      */
@@ -309,9 +310,11 @@ EOT;
         ];
 
         $site_config = null;
+        $site_root = null;
         foreach ($site_config_paths as $path) {
             if (file_exists($path)) {
                 $site_config = $path;
+                $site_root = dirname($path) . '/';
                 break;
             }
         }
@@ -320,6 +323,9 @@ EOT;
             clean_sweep_log_message("❌ Could not find site's wp-config.php", 'error');
             return false;
         }
+
+        clean_sweep_log_message("✅ Found site's wp-config.php at: $site_config", 'info');
+        clean_sweep_log_message("✅ Site root detected as: $site_root", 'info');
 
         // Read and parse site config
         $config_content = file_get_contents($site_config);
@@ -346,17 +352,29 @@ EOT;
             }
         }
 
-        // Generate fresh wp-config.php
+        // Generate unique salts using PHP native functions
+        $salts = [];
+        for ($i = 0; $i < 8; $i++) {
+            $salts[] = $this->generateSecurePassword(64);
+        }
+
+        // Generate fresh wp-config.php with Option B architecture
         $config_template = <<<EOT
 <?php
 /**
- * Clean Sweep - Fresh Environment Configuration
+ * Clean Sweep - Fresh Environment Configuration (Option B Architecture)
  *
  * Auto-generated wp-config.php for isolated recovery environment.
- * Uses site's database credentials with clean WordPress core.
+ * Uses clean WordPress core from /core/fresh/ with real site's database and content.
+ *
+ * Key Architecture:
+ * - ABSPATH → /core/fresh/ (clean WordPress core for execution)
+ * - WP_CONTENT_DIR → Real site's wp-content (for scanning and operations)
+ * - WP_PLUGIN_DIR → Real site's plugins (for operations)
+ * - Database → Real site's database (for data access)
  */
 
-// Database configuration from site
+// Database configuration from real site
 define( 'DB_NAME', '%s' );
 define( 'DB_USER', '%s' );
 define( 'DB_PASSWORD', '%s' );
@@ -374,20 +392,39 @@ define( 'SECURE_AUTH_SALT', '%s' );
 define( 'LOGGED_IN_SALT',   '%s' );
 define( 'NONCE_SALT',       '%s' );
 
-// Table prefix
+// Table prefix from real site
 \$table_prefix = '%s';
 
-// Recovery mode constants
+// CRITICAL: Set ABSPATH to clean WordPress location (not site root!)
+// This ensures WordPress loads ONLY clean files from /core/fresh/
+if ( ! defined( 'ABSPATH' ) ) {
+    define( 'ABSPATH', '%s' );
+}
+
+// Override content directories to point to REAL site (for operations)
+define( 'WP_CONTENT_DIR', '%swp-content' );
+define( 'WP_PLUGIN_DIR', WP_CONTENT_DIR . '/plugins' );
+define( 'WPMU_PLUGIN_DIR', WP_CONTENT_DIR . '/mu-plugins' );
+
+// Define constants needed for plugin operations
+if ( ! defined( 'ORIGINAL_WP_PLUGIN_DIR' ) ) {
+    define( 'ORIGINAL_WP_PLUGIN_DIR', WP_PLUGIN_DIR );
+}
+if ( ! defined( 'ORIGINAL_WP_CONTENT_DIR' ) ) {
+    define( 'ORIGINAL_WP_CONTENT_DIR', WP_CONTENT_DIR );
+}
+
+// Recovery mode marker
 define( 'CLEAN_SWEEP_RECOVERY_MODE', true );
 define( 'WP_DEBUG', false );
 define( 'WP_DEBUG_LOG', false );
-EOT;
 
-        // Generate unique salts using PHP native functions
-        $salts = [];
-        for ($i = 0; $i < 8; $i++) {
-            $salts[] = $this->generateSecurePassword(64);
-        }
+// Disable file modifications for safety
+define( 'DISALLOW_FILE_MODS', true );
+define( 'DISALLOW_FILE_EDIT', true );
+
+/* That's all, stop editing! Happy publishing. */
+EOT;
 
         $config_content = sprintf(
             $config_template,
@@ -399,7 +436,9 @@ EOT;
             $db_constants['DB_COLLATE'] ?? '',
             $salts[0], $salts[1], $salts[2], $salts[3],
             $salts[4], $salts[5], $salts[6], $salts[7],
-            $db_constants['table_prefix'] ?? 'wp_'
+            $db_constants['table_prefix'] ?? 'wp_',
+            rtrim($this->fresh_dir, '/') . '/', // ABSPATH to /core/fresh/
+            $site_root // Real site root for content directories
         );
 
         $config_path = $this->fresh_dir . '/wp-config.php';
@@ -408,7 +447,11 @@ EOT;
             return false;
         }
 
-        clean_sweep_log_message("✅ Generated wp-config.php for fresh environment", 'info');
+        clean_sweep_log_message("✅ Generated wp-config.php with Option B architecture", 'info');
+        clean_sweep_log_message("   → ABSPATH: {$this->fresh_dir}/", 'info');
+        clean_sweep_log_message("   → WP_CONTENT_DIR: {$site_root}wp-content", 'info');
+        clean_sweep_log_message("   → Database: {$db_constants['DB_NAME']}", 'info');
+        
         return true;
     }
 
@@ -436,53 +479,51 @@ EOT;
     }
 
     /**
-     * Load the fresh WordPress environment safely using dynamic wp-settings.php generation
-     * This generates a safe wp-settings.php that uses clean files but points content to real site
+     * Load the fresh WordPress environment using Option B architecture
+     * 
+     * Option B: ABSPATH points to /core/fresh/ (clean code execution)
+     * Content directories point to real site (operation targets)
+     * WordPress loads everything automatically from clean location
      *
      * @return bool True on success
      */
     public function load() {
-        clean_sweep_log_message("Starting safe recovery environment load...", 'info');
+        clean_sweep_log_message("🚀 Loading fresh WordPress environment with Option B architecture...", 'info');
 
-        // 1. Detect the real infected site's root
-        $site_root = $this->detectSiteRoot();
-        if (!$site_root || !is_dir($site_root)) {
-            clean_sweep_log_message("Could not detect real site root", 'error');
-            return false;
-        }
-
-        // 2. Define site paths BEFORE WordPress bootstrap (fixes database/filesystem mismatch)
-        $this->defineSitePaths();
-
-        // 4. Generate a safe wp-settings.php that uses clean files from fresh but content to real site
-        $safe_settings = $this->generateSafeWpSettings($site_root);
-        if (!$safe_settings) {
-            clean_sweep_log_message("Failed to generate safe wp-settings.php", 'error');
-            return false;
-        }
-
-        file_put_contents($this->fresh_dir . '/wp-settings.php', $safe_settings);
-
-        // 5. Regenerate integrity hash to include the new wp-settings.php
-        $this->generateIntegrityHash();
-
-        // 6. Load fresh wp-config.php first (defines database credentials)
+        // Check that wp-config.php exists (it defines ABSPATH and content paths)
         $config_file = $this->fresh_dir . '/wp-config.php';
         if (!file_exists($config_file)) {
-            clean_sweep_log_message("wp-config.php not found in fresh environment", 'error');
+            clean_sweep_log_message("❌ wp-config.php not found in fresh environment", 'error');
             return false;
         }
 
-        clean_sweep_log_message("🔄 Loading fresh wp-config.php...", 'info');
+        // Check that wp-settings.php exists (native WordPress bootstrap)
+        $settings_file = $this->fresh_dir . '/wp-settings.php';
+        if (!file_exists($settings_file)) {
+            clean_sweep_log_message("❌ wp-settings.php not found in fresh environment", 'error');
+            return false;
+        }
+
+        clean_sweep_log_message("📋 Loading wp-config.php from /core/fresh/...", 'info');
+        
+        // Load wp-config.php (defines ABSPATH, database credentials, content paths)
         require_once $config_file;
 
-        // 7. Load our generated safe wp-settings.php (WordPress initializes with clean files + real site paths)
-        $settings_file = $this->fresh_dir . '/wp-settings.php';
-        clean_sweep_log_message("🔄 Loading generated safe wp-settings.php...", 'info');
+        clean_sweep_log_message("📋 Configuration loaded:", 'info');
+        clean_sweep_log_message("   → ABSPATH: " . (defined('ABSPATH') ? ABSPATH : 'NOT DEFINED'), 'info');
+        clean_sweep_log_message("   → WP_CONTENT_DIR: " . (defined('WP_CONTENT_DIR') ? WP_CONTENT_DIR : 'NOT DEFINED'), 'info');
+        clean_sweep_log_message("   → WP_PLUGIN_DIR: " . (defined('WP_PLUGIN_DIR') ? WP_PLUGIN_DIR : 'NOT DEFINED'), 'info');
+        clean_sweep_log_message("   → DB_NAME: " . (defined('DB_NAME') ? DB_NAME : 'NOT DEFINED'), 'info');
+
+        clean_sweep_log_message("🔄 Loading WordPress from clean /core/fresh/ location...", 'info');
+        
+        // Load WordPress settings (WordPress loads all core files automatically from ABSPATH)
         require_once $settings_file;
 
-        clean_sweep_log_message("Safe recovery environment loaded successfully!", 'info');
-        clean_sweep_log_message("Real site root: " . $site_root, 'info');
+        clean_sweep_log_message("✅ WordPress loaded successfully!", 'info');
+        clean_sweep_log_message("   → WordPress executes from: " . ABSPATH, 'info');
+        clean_sweep_log_message("   → Operations target: " . WP_CONTENT_DIR, 'info');
+        clean_sweep_log_message("🎉 Recovery mode ready!", 'info');
 
         return true;
     }
@@ -558,13 +599,123 @@ EOT;
 
         // 3. Define essential constants
         $content .= "// Define essential constants\n";
-        $relative_wpinc = str_replace(rtrim($site_root, '/'), '', rtrim($fresh_dir, '/')) . '/wp-includes';
+        // WPINC must point to fresh wp-includes directory for clean core files
+        $fresh_wpinc = rtrim($fresh_dir, '/') . '/wp-includes';
+        $relative_wpinc = str_replace(rtrim($site_root, '/'), '', $fresh_wpinc);
         $content .= "if (!defined('WPINC')) define('WPINC', '" . ltrim($relative_wpinc, '/') . "');\n";
         $content .= "if (!defined('WP_DEBUG')) define('WP_DEBUG', false);\n\n";
 
-        // 4. Include clean WordPress core files from fresh directory
+        // 4. Load essential core functions FIRST (needed by admin files)
+        $essential_core_files = [
+            'version.php',
+            'compat.php',
+            'load.php',
+
+            // POMO classes (needed by l10n.php for NOOP_Translations)
+            'pomo/mo.php',
+            'l10n/class-wp-translation-controller.php',
+            'l10n/class-wp-translations.php',
+            'l10n/class-wp-translation-file.php',
+            'l10n/class-wp-translation-file-mo.php',
+            'l10n/class-wp-translation-file-php.php',
+
+            'l10n.php',              // ← Defines __() function (now POMO classes available)
+            'functions.php',         // ← Essential functions
+            'plugin.php',           // ← Plugin functions
+            'default-constants.php',
+            'class-wp-list-util.php',
+            'class-wp-token-map.php',
+            'formatting.php',
+            'meta.php',
+        ];
+
+        $content .= "// Load essential core functions first (needed by admin files)\n";
+        foreach ($essential_core_files as $file) {
+            $content .= "require_once '{$fresh_dir}/wp-includes/{$file}';\n";
+        }
+        $content .= "\n";
+
+        // 5. Preload essential admin files directly from fresh directory to avoid conflicts
+        $content .= "// Preload essential admin files directly from fresh directory to avoid conflicts\n";
+        $content .= "require_once '{$fresh_dir}/wp-admin/includes/class-wp-upgrader-skin.php';\n";
+        $content .= "require_once '{$fresh_dir}/wp-admin/includes/class-automatic-upgrader-skin.php';\n";
+        $content .= "require_once '{$fresh_dir}/wp-admin/includes/class-bulk-upgrader-skin.php';\n";
+        $content .= "require_once '{$fresh_dir}/wp-admin/includes/class-plugin-upgrader-skin.php';\n";
+        $content .= "require_once '{$fresh_dir}/wp-admin/includes/class-theme-upgrader-skin.php';\n";
+        $content .= "require_once '{$fresh_dir}/wp-admin/includes/class-wp-ajax-upgrader-skin.php';\n";
+        $content .= "require_once '{$fresh_dir}/wp-admin/includes/class-wp-upgrader.php';\n";
+        $content .= "require_once '{$fresh_dir}/wp-admin/includes/class-plugin-upgrader.php';\n";
+        $content .= "require_once '{$fresh_dir}/wp-admin/includes/class-theme-upgrader.php';\n";
+        $content .= "require_once '{$fresh_dir}/wp-admin/includes/class-wp-automatic-updater.php';\n";
+        $content .= "require_once '{$fresh_dir}/wp-admin/includes/file.php';\n";
+        $content .= "require_once '{$fresh_dir}/wp-admin/includes/class-wp-filesystem-base.php';\n";
+        $content .= "require_once '{$fresh_dir}/wp-admin/includes/class-wp-filesystem-direct.php';\n";
+        $content .= "\n";
+
+        // 6. Include remaining clean WordPress admin files from fresh directory (now essentials are loaded)
+        $admin_files = [
+            // Filesystem API (required by file.php)
+            'file.php',
+            'class-wp-filesystem-base.php',
+            'class-wp-filesystem-direct.php',
+
+            // Upgrader system (dependencies first)
+            'class-wp-upgrader-skin.php',       // ← Base class
+            'class-automatic-upgrader-skin.php', // ← Automatic updates (extends base)
+            'class-bulk-upgrader-skin.php',     // ← Bulk operations (extends base)
+            'class-wp-ajax-upgrader-skin.php',  // ← AJAX operations (extends automatic)
+            'class-wp-upgrader.php',            // ← Main upgrader (now all skins loaded)
+            'class-plugin-upgrader.php',       // ← Plugin upgrader
+            'class-theme-upgrader.php',        // ← Theme upgrader
+
+            // Plugin API
+            'plugin.php',
+            'plugin-install.php',
+
+            // Theme API
+            'theme.php',
+            'theme-install.php',
+
+            // Update API
+            'update.php',
+
+            // HTTP API
+            'http.php',
+            'class-http.php',
+
+            // Misc utilities
+            'class-wp-ajax-upgrader-skin.php',
+            'class-wp-automatic-updater.php',
+            'class-wp-customize-manager.php',
+            'class-wp-editor.php',
+            'class-wp-importer.php',
+            'class-wp-site-health.php',
+            'deprecated.php',
+            'edit-form-advanced.php',
+            'media.php',
+            'misc.php',
+            'ms.php',
+            'nav-menu.php',
+            'options.php',
+            'post.php',
+            'taxonomy.php',
+            'template.php',
+            'update-core.php',
+            'user.php',
+            'widgets.php',
+        ];
+
+        $content .= "// Include clean WordPress admin files from fresh directory\n";
+        foreach ($admin_files as $file) {
+            $content .= "if (file_exists('{$fresh_dir}/wp-admin/includes/{$file}')) {\n";
+            $content .= "    require_once '{$fresh_dir}/wp-admin/includes/{$file}';\n";
+            $content .= "}\n";
+        }
+        $content .= "\n";
+
+        // 6. Include remaining clean WordPress core files from fresh directory
         // Load core files in dependency order (base classes before subclasses)
-        $core_files = [
+        $remaining_core_files = [
             // Base infrastructure
             'version.php',
             'compat.php',
@@ -875,7 +1026,7 @@ EOT;
         ];
 
         $content .= "// Include clean WordPress core files from fresh directory\n";
-        foreach ($core_files as $file) {
+        foreach ($remaining_core_files as $file) {
             $content .= "require_once '{$fresh_dir}/wp-includes/{$file}';\n";
         }
         $content .= "\n";
@@ -1085,7 +1236,7 @@ EOT;
         }
 
         // Add final check after all plugins loaded
-        $code .= "\n// Final check after all safe plugins loaded\n";
+        $code .= "\n// Final check after all plugins loaded\n";
         $code .= "clean_sweep_log_message('🔍 DEBUG: Final WPMU DEV availability check after plugin loading', 'error');\n";
         $code .= "if (function_exists('clean_sweep_is_wpmudev_available')) {\n";
         $code .= "    \$available = clean_sweep_is_wpmudev_available() ? 'YES' : 'NO';\n";

@@ -133,10 +133,23 @@ class CleanSweep_Application {
         $batch_start = isset($_POST['batch_start']) ? intval($_POST['batch_start']) : 0;
         $batch_size = isset($_POST['batch_size']) ? intval($_POST['batch_size']) : 5;
 
-        // OPTIMIZATION: Analyze plugins once, reuse for all batches
+        // OPTIMIZATION: Use existing analysis data from UI instead of re-analyzing
         if ($batch_start == 0) {
-            // FIRST BATCH: Perform analysis and store for reuse
-            $analysis = clean_sweep_analyze_plugins($progress_file);
+            // FIRST BATCH: Check for existing analysis data from UI
+            $existing_analysis = isset($_POST['existing_analysis']) ?
+                json_decode(stripslashes($_POST['existing_analysis']), true) : null;
+
+            if ($existing_analysis && is_array($existing_analysis)) {
+                // Use the existing analysis data from the UI
+                $analysis = $existing_analysis;
+                clean_sweep_log_message("Using existing analysis data from UI - skipping redundant analysis", 'info');
+            } else {
+                // Fallback: Perform fresh analysis if no existing data
+                clean_sweep_log_message("No existing analysis data found, performing fresh analysis", 'info');
+                $analysis = clean_sweep_analyze_plugins($progress_file);
+            }
+
+            // Store for reuse across batches
             set_transient('clean_sweep_batch_analysis', $analysis, 3600); // 1 hour expiry
             clean_sweep_log_message("Plugin analysis stored for optimized batch processing");
         } else {
@@ -170,8 +183,8 @@ class CleanSweep_Application {
                 $reinstaller = new CleanSweep_PluginReinstaller();
                 $reinstall_result = $reinstaller->start_reinstallation(
                     $progress_file,
-                    false, // create_backup - handled separately
-                    true,  // proceed_without_backup
+                    isset($_POST['create_backup']) ? filter_var($_POST['create_backup'], FILTER_VALIDATE_BOOLEAN) : false,
+                    isset($_POST['proceed_without_backup']) ? filter_var($_POST['proceed_without_backup'], FILTER_VALIDATE_BOOLEAN) : false,
                     $repo_plugins,
                     $wpmu_dev_plugins,
                     $suspicious_files,
@@ -179,10 +192,57 @@ class CleanSweep_Application {
                     $batch_size
                 );
 
+                // Perform actual verification of installed plugins
+                $wp_org_verification = clean_sweep_verify_installations($repo_plugins);
+                $wpmu_dev_verification = clean_sweep_verify_wpmudev_installations($wpmu_dev_plugins);
+
+                // Merge verification results
+                $verification_results = [
+                    'verified' => array_merge($wp_org_verification['verified'], $wpmu_dev_verification['verified']),
+                    'missing' => array_merge($wp_org_verification['missing'], $wpmu_dev_verification['missing']),
+                    'corrupted' => array_merge($wp_org_verification['corrupted'], $wpmu_dev_verification['corrupted'])
+                ];
+
+                // Filter out WPMU DEV Dashboard from verification results (it was skipped, not reinstalled)
+                $verification_results['verified'] = array_filter($verification_results['verified'], function($plugin) {
+                    // Remove WPMU DEV Dashboard - it appears as verified but was never reinstalled
+                    if (isset($plugin['name']) && strpos($plugin['name'], 'WPMU DEV Dashboard') !== false) {
+                        return false;
+                    }
+                    if (isset($plugin['slug']) && strpos($plugin['slug'], 'wpmudev-updates') !== false) {
+                        return false;
+                    }
+                    return true;
+                });
+
+                // Build skipped list from both non-repo plugins and explicitly skipped plugins
+                $non_repo_plugins = $analysis['non_repo_plugins'] ?? [];
+                $skipped_plugins = $analysis['skipped_plugins'] ?? [];
+
+                $reinstall_result['skipped'] = [];
+
+                // Add non-repository plugins to skipped list
+                foreach ($non_repo_plugins as $plugin_file => $plugin_data) {
+                    $reinstall_result['skipped'][] = [
+                        'name' => $plugin_data['name'] ?? $plugin_file,
+                        'slug' => $plugin_data['slug'] ?? $plugin_file,
+                        'reason' => $plugin_data['reason'] ?? 'Non-repository plugin'
+                    ];
+                }
+
+                // Add explicitly skipped plugins (like WPMU DEV Dashboard)
+                foreach ($skipped_plugins as $plugin_file => $plugin_data) {
+                    $reinstall_result['skipped'][] = [
+                        'name' => $plugin_data['name'] ?? $plugin_file,
+                        'slug' => $plugin_data['slug'] ?? $plugin_file,
+                        'reason' => $plugin_data['reason'] ?? 'Plugin cannot be reinstalled'
+                    ];
+                }
+
                 // Format result for compatibility with existing code
                 $execution_data = [
                     'results' => $reinstall_result,
-                    'verification_results' => ['verified' => [], 'missing' => [], 'corrupted' => []]
+                    'verification_results' => $verification_results
                 ];
 
                 // Suppress output during operations
@@ -268,6 +328,13 @@ class CleanSweep_Application {
     }
 
     private function handle_extract_zip() {
+        // DEBUG: Check /core/fresh state before processing
+        // CleanSweep_Application.php is in /includes/system/, so go up 3 levels to project root, then down to /core/fresh
+        $fresh_dir_before = __DIR__ . '/../../../core/fresh';
+        $file_php_before = $fresh_dir_before . '/wp-admin/includes/file.php';
+        clean_sweep_log_message("DEBUG: At handle_extract_zip start - /core/fresh exists: " . (is_dir($fresh_dir_before) ? 'YES' : 'NO'), 'debug');
+        clean_sweep_log_message("DEBUG: At handle_extract_zip start - file.php exists: " . (file_exists($file_php_before) ? 'YES' : 'NO'), 'debug');
+
         // Output HTML header for proper page structure
         clean_sweep_output_html_header();
 

@@ -16,7 +16,8 @@ class CleanSweep_Cleanup {
     public function execute_cleanup() {
         // Note: Cleanup operations are not logged to avoid creating log files during cleanup
 
-        $clean_sweep_dir = CLEAN_SWEEP_ROOT;
+        // Calculate Clean Sweep root directory dynamically (compatible with all architectures)
+        $clean_sweep_dir = dirname(__DIR__, 2); // From includes/system/ up 2 levels to project root
         $files_deleted = 0;
         $dirs_deleted = 0;
 
