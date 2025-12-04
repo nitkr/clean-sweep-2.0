@@ -1,11 +1,11 @@
 <?php
 /**
- * Clean Sweep Dependent Bootstrap
+ * Clean Sweep Independent Bootstrap
  *
- * Loads site's WordPress environment for full functionality and performance.
- * Falls back to Recovery mode if site files are corrupted.
+ * Provides WordPress-compatible environment without loading WordPress core files.
+ * Completely independent of site's wp-settings.php or wp-admin dependencies.
  *
- * @version 1.0
+ * @version 2.0
  */
 
 // ============================================================================
@@ -14,34 +14,69 @@
 
 if (!defined('ABSPATH')) {
     // When loaded from Clean Sweep, ABSPATH should point to WordPress root
-    define('ABSPATH', dirname(dirname(__DIR__)) . '/');
-}
+    // Find WordPress root by looking for wp-config.php
+    $current_dir = CLEAN_SWEEP_ROOT;
+    $wordpress_root = null;
 
-// ============================================================================
-// LOAD WORDPRESS ENVIRONMENT (DEPENDENT MODE)
-// ============================================================================
-
-// Load site's wp-config.php and wp-settings.php for full WordPress functionality
-// This gives us access to the real wpdb class and all WordPress functions
-$wp_config_paths = [
-    ABSPATH . 'wp-config.php',
-    dirname(ABSPATH) . '/wp-config.php'
-];
-
-$wp_config_found = false;
-foreach ($wp_config_paths as $config_path) {
-    if (file_exists($config_path)) {
-        require_once $config_path;
-        $wp_config_found = true;
-        break;
+    // Look for wp-config.php by walking up from Clean Sweep root
+    for ($i = 0; $i < 5; $i++) { // Max 5 levels up
+        if (file_exists($current_dir . 'wp-config.php')) {
+            $wordpress_root = $current_dir;
+            break;
+        }
+        $parent_dir = dirname(rtrim($current_dir, '/')) . '/';
+        if ($parent_dir === $current_dir) {
+            break; // Reached filesystem root
+        }
+        $current_dir = $parent_dir;
     }
+
+    // Fallback to relative calculation if wp-config.php not found
+    if (!$wordpress_root) {
+        $wordpress_root = dirname(CLEAN_SWEEP_ROOT) . '/';
+    }
+
+    define('ABSPATH', $wordpress_root);
 }
 
-if (!$wp_config_found) {
-    die('Clean Sweep: Could not find wp-config.php. Please ensure Clean Sweep is placed in your WordPress root directory.');
+if (!defined('CLEAN_SWEEP_ROOT')) {
+    // Find Clean Sweep root by locating the directory containing clean-sweep.php
+    $current_dir = __DIR__;
+    $clean_sweep_root = null;
+
+    // Try to find clean-sweep.php by walking up directories
+    for ($i = 0; $i < 5; $i++) { // Max 5 levels up to prevent infinite loop
+        if (file_exists($current_dir . '/clean-sweep.php')) {
+            $clean_sweep_root = $current_dir . '/';
+            break;
+        }
+        $parent_dir = dirname($current_dir);
+        if ($parent_dir === $current_dir) {
+            break; // Reached filesystem root
+        }
+        $current_dir = $parent_dir;
+    }
+
+    // Fallback to relative path calculation if clean-sweep.php not found
+    if (!$clean_sweep_root) {
+        $clean_sweep_root = dirname(dirname(__DIR__)) . '/';
+    }
+
+    define('CLEAN_SWEEP_ROOT', $clean_sweep_root);
 }
 
-require_once ABSPATH . 'wp-settings.php';
+// ============================================================================
+// INDEPENDENT WORDPRESS ENVIRONMENT
+// ============================================================================
+
+// Load Clean Sweep classes
+require_once CLEAN_SWEEP_ROOT . 'includes/system/CleanSweep_DB.php';
+require_once CLEAN_SWEEP_ROOT . 'includes/system/CleanSweep_Functions.php';
+
+// Initialize database connection and functions
+global $clean_sweep_db;
+$clean_sweep_db = new CleanSweep_DB();
+$clean_sweep_functions = new CleanSweep_Functions($clean_sweep_db);
 
 // ============================================================================
 // CLEAN SWEEP SPECIFIC FUNCTIONS

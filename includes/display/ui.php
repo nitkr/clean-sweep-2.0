@@ -439,6 +439,9 @@ twentytwentyfour-child/suspicious-admin.php" style="width:100%;height:120px;font
 
         echo '</div>';
 
+        // Load required CSS file (JS already loaded by assets/script.js in header)
+        echo '<link rel="stylesheet" href="assets/css/style.css">';
+
         // Add CSS for tab interface
         echo '<style>
             .tab-container { margin: 20px 0; }

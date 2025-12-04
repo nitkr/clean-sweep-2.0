@@ -8,6 +8,28 @@
 
 
 /**
+ * Detect the real WordPress site root directory
+ * This is where wp-config.php lives, not necessarily ABSPATH
+ */
+function clean_sweep_detect_site_root() {
+    // Try to find wp-config.php by walking up from current directory
+    $current_dir = dirname(__DIR__); // features/ directory
+    $max_levels = 5;
+
+    for ($i = 0; $i < $max_levels; $i++) {
+        $config_path = $current_dir . '/wp-config.php';
+        if (file_exists($config_path)) {
+            return rtrim($current_dir, '/') . '/';
+        }
+        $current_dir = dirname($current_dir);
+    }
+
+    // Fallback: assume we're in wp-content/plugins/ structure
+    $current_dir = dirname(dirname(dirname(__DIR__))); // Go up 3 levels from features/
+    return rtrim($current_dir, '/') . '/';
+}
+
+/**
  * Fallback function for deleting core directories
  * Uses PHP functions when WP_Filesystem is not available
  */
@@ -44,6 +66,10 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
     clean_sweep_log_message("Target Version: $wp_version");
     clean_sweep_log_message("Progress file: " . ($progress_file ?: 'none'));
     clean_sweep_log_message("Current WordPress Version: " . get_bloginfo('version'));
+
+    // DETECT REAL SITE ROOT (where wp-config.php lives, not ABSPATH)
+    $site_root = clean_sweep_detect_site_root();
+    clean_sweep_log_message("Detected site root: $site_root");
 
     // Initialize progress tracking
     $progress_data = [
@@ -84,7 +110,7 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
         return ['success' => false, 'message' => 'Failed to create backup directory'];
     }
 
-    // Files to preserve
+    // Files to preserve (backup from REAL SITE ROOT)
     $preserve_files = [
         'wp-config.php',
         'wp-content',
@@ -92,9 +118,9 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
         'robots.txt'
     ];
 
-    // Backup preserve files
+    // Backup preserve files FROM REAL SITE ROOT
     foreach ($preserve_files as $file) {
-        $full_path = ABSPATH . $file;
+        $full_path = $site_root . $file;
         if (file_exists($full_path)) {
             $backup_path = $core_backup_dir . '/' . $file;
             $backup_dir = dirname($backup_path);
@@ -141,7 +167,7 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
     $progress_data['step'] = 2;
     clean_sweep_write_progress_file($progress_file, $progress_data);
 
-    $temp_file = download_url($download_url);
+    $temp_file = clean_sweep_download_url($download_url);
     if (is_wp_error($temp_file)) {
         $progress_data['status'] = 'error';
         $progress_data['message'] = 'Failed to download WordPress';
@@ -180,22 +206,22 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
         return ['success' => false, 'message' => 'Failed to initialize filesystem'];
     }
 
-    $result = unzip_file($temp_file, $extract_dir);
+    $result = clean_sweep_unzip_file($temp_file, $extract_dir);
     if (is_wp_error($result)) {
         clean_sweep_log_message("Failed to extract WordPress: " . $result->get_error_message(), 'error');
         unlink($temp_file);
         return ['success' => false, 'message' => 'Failed to extract WordPress'];
     }
 
-    // SECURITY ENHANCEMENT: Delete entire wp-admin and wp-includes directories to remove potential malware
+    // SECURITY ENHANCEMENT: Delete entire wp-admin and wp-includes directories from REAL SITE ROOT
     $directories_to_clean = ['wp-admin', 'wp-includes'];
 
-    clean_sweep_log_message("Security: Completely removing wp-admin and wp-includes directories for fresh install");
+    clean_sweep_log_message("Security: Completely removing wp-admin and wp-includes directories from real site for fresh install");
 
     foreach ($directories_to_clean as $dir) {
-        $full_dir_path = ABSPATH . $dir;
+        $full_dir_path = $site_root . $dir;
         if (is_dir($full_dir_path)) {
-            clean_sweep_log_message("Removing directory: $full_dir_path");
+            clean_sweep_log_message("Removing directory from real site: $full_dir_path");
 
             // Use WP_Filesystem for better compatibility
             if (!empty($wp_filesystem) && $wp_filesystem->rmdir($full_dir_path, true)) {
@@ -237,7 +263,7 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
 
         foreach ($iterator as $item) {
             $relative_path = str_replace($wordpress_dir . '/', '', $item->getPathname());
-            $target_path = ABSPATH . $relative_path;
+            $target_path = $site_root . $relative_path;  // INSTALL TO REAL SITE ROOT
 
             // Skip preserve files - for wp-admin/wp-includes, no longer needed since directories are fresh
             $skip = false;
@@ -313,7 +339,7 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
     ];
 
     foreach ($clean_core_files as $file) {
-        $file_path = ABSPATH . $file;
+        $file_path = $site_root . $file;  // HASH FILES FROM REAL SITE ROOT
         if (file_exists($file_path)) {
             $clean_hashes['files'][$file_path] = hash_file('sha256', $file_path);
         }

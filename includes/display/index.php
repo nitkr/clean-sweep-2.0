@@ -68,7 +68,9 @@ function clean_sweep_display_malware_scan_results_real($scan_results) {
         echo '<div class="stats-box" style="background:#d1ecf1;border-color:#bee5eb;flex:1;min-width:120px;"><div class="stats-number" style="color:#0c5460;">' . ($summary['total_scanned'] ?? 0) . '</div><div class="stats-label">Records Scanned</div></div>';
         echo '<div class="stats-box" style="background:#d1ecf1;border-color:#bee5eb;flex:1;min-width:120px;"><div class="stats-number" style="color:#0c5460;">' . ($scan_results['files']['total_files_scanned'] ?? 0) . '</div><div class="stats-label">Files Scanned</div></div>';
         if (isset($scan_results['files']['scan_path'])) {
-            $scan_path_display = str_replace(ABSPATH, '', $scan_results['files']['scan_path']);
+            // Use ORIGINAL_ABSPATH in recovery mode for correct path display
+            $base_path = defined('ORIGINAL_ABSPATH') ? ORIGINAL_ABSPATH : ABSPATH;
+            $scan_path_display = str_replace($base_path, '', $scan_results['files']['scan_path']);
             echo '<div style="background:#fff3cd;border:1px solid #ffeaa7;padding:10px;border-radius:4px;margin:15px 0;font-size:14px;">';
             echo '<strong>🔍 Scanned Directory:</strong> <code style="background:#f8f9fa;padding:2px 6px;border-radius:3px;">' . htmlspecialchars($scan_path_display) . '</code>';
             echo '</div>';

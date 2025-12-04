@@ -390,7 +390,9 @@ class Clean_Sweep_Core_Malware_Scanner {
      * Scan wp-config.php file
      */
     private function scan_wp_config() {
-        $wp_config_path = ABSPATH . 'wp-config.php';
+        // Use original site path in recovery mode, otherwise use current ABSPATH
+        $base_path = defined('ORIGINAL_ABSPATH') ? ORIGINAL_ABSPATH : ABSPATH;
+        $wp_config_path = $base_path . 'wp-config.php';
         $threats = [];
 
         if (!file_exists($wp_config_path)) {
@@ -435,7 +437,8 @@ class Clean_Sweep_Core_Malware_Scanner {
      * Scan wp-content directory recursively with memory optimization
      */
     private function scan_wp_content_directory($progress_callback = null) {
-        $wp_content_path = WP_CONTENT_DIR;
+        // In recovery mode, scan the original site's wp-content directory
+        $wp_content_path = ORIGINAL_WP_CONTENT_DIR;
         $results = [
             'threats' => [],
             'files_scanned' => 0
@@ -589,10 +592,13 @@ class Clean_Sweep_Core_Malware_Scanner {
         // Remove leading/trailing slashes and normalize
         $path = trim($input_path, '/');
 
+        // Use original site ABSPATH in recovery mode for path validation
+        $wordpress_root = defined('ORIGINAL_ABSPATH') ? ORIGINAL_ABSPATH : ABSPATH;
+
         // Convert relative paths to absolute paths within WordPress root
-        if (!str_starts_with($path, ABSPATH)) {
+        if (!str_starts_with($path, $wordpress_root)) {
             // Allow ANY relative path within WordPress root (much more flexible)
-            $full_path = ABSPATH . $path;
+            $full_path = $wordpress_root . $path;
         } else {
             $full_path = $path;
         }
@@ -605,7 +611,7 @@ class Clean_Sweep_Core_Malware_Scanner {
         }
 
         // CRITICAL Security: Ensure path is within WordPress root
-        if (!str_starts_with($full_path, ABSPATH)) {
+        if (!str_starts_with($full_path, $wordpress_root)) {
             clean_sweep_log_message("Rejected scan path: {$full_path} - outside WordPress root", 'warning');
             return false;
         }

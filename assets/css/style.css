@@ -341,3 +341,390 @@ pre {
 .remove-file:hover {
     background: #c82333;
 }
+
+/* Plugin Analysis Styles */
+.plugin-analysis-table {
+    width: 100%;
+    border-collapse: collapse;
+    background: white;
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    margin: 15px 0;
+}
+
+.plugin-analysis-table th {
+    background: linear-gradient(135deg, #007bff, #0056b3);
+    color: white;
+    padding: 12px 15px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 14px;
+    border: none;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.plugin-analysis-table td {
+    padding: 12px 15px;
+    border-bottom: 1px solid #e9ecef;
+    vertical-align: top;
+    transition: background-color 0.2s ease;
+}
+
+.plugin-analysis-table tr:nth-child(even) {
+    background: #f8f9fa;
+}
+
+.plugin-analysis-table tr:hover {
+    background: #e3f2fd;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.plugin-analysis-table .plugin-name {
+    font-weight: 600;
+    color: #2c3e50;
+    margin-bottom: 4px;
+}
+
+.plugin-analysis-table .plugin-slug {
+    font-size: 12px;
+    color: #6c757d;
+    font-style: italic;
+}
+
+.plugin-analysis-table .version-badge {
+    background: #28a745;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 500;
+    display: inline-block;
+}
+
+.plugin-analysis-table .last-updated {
+    color: #17a2b8;
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.plugin-analysis-table .plugin-link {
+    color: #007bff;
+    text-decoration: none;
+    font-weight: 500;
+    transition: color 0.2s ease;
+}
+
+.plugin-analysis-table .plugin-link:hover {
+    color: #0056b3;
+    text-decoration: underline;
+}
+
+/* Suspicious Files Table Special Styling */
+.suspicious-files-table {
+    border: 2px solid #dc3545;
+    background: #f8d7da;
+}
+
+.suspicious-files-table th {
+    background: linear-gradient(135deg, #dc3545, #c82333);
+}
+
+.suspicious-files-table tr {
+    background: #f8d7da;
+}
+
+.suspicious-files-table tr:nth-child(even) {
+    background: #f5c6cb;
+}
+
+.suspicious-files-table tr:hover {
+    background: #f1aeb5;
+}
+
+/* Enhanced Stats Boxes */
+.enhanced-stats-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 15px;
+    margin: 20px 0;
+    justify-content: center;
+}
+
+.enhanced-stats-box {
+    flex: 1;
+    min-width: 200px;
+    max-width: 250px;
+    background: linear-gradient(135deg, #ffffff, #f8f9fa);
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 20px;
+    text-align: center;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.enhanced-stats-box::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, #007bff, #28a745, #ffc107, #dc3545);
+}
+
+.enhanced-stats-box:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+}
+
+.enhanced-stats-number {
+    font-size: 32px;
+    font-weight: 700;
+    color: #2c3e50;
+    margin-bottom: 8px;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.enhanced-stats-label {
+    font-size: 14px;
+    color: #6c757d;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-weight: 600;
+}
+
+.enhanced-stats-box.wordpress-org {
+    border-color: #007bff;
+}
+
+.enhanced-stats-box.wpmu-dev {
+    border-color: #7c3aed;
+}
+
+.enhanced-stats-box.non-repo {
+    border-color: #f39c12;
+}
+
+.enhanced-stats-box.suspicious {
+    border-color: #e74c3c;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0% { box-shadow: 0 4px 12px rgba(231, 76, 60, 0.3); }
+    50% { box-shadow: 0 4px 20px rgba(231, 76, 60, 0.6); }
+    100% { box-shadow: 0 4px 12px rgba(231, 76, 60, 0.3); }
+}
+
+/* Security Warning Styles */
+.security-warning {
+    background: linear-gradient(135deg, #ffeaa7, #fab1a0);
+    border: 2px solid #d63031;
+    border-radius: 8px;
+    padding: 20px;
+    margin: 20px 0;
+    position: relative;
+    overflow: hidden;
+}
+
+.security-warning::before {
+    content: '⚠️';
+    position: absolute;
+    top: 10px;
+    right: 15px;
+    font-size: 24px;
+    opacity: 0.7;
+}
+
+.security-warning h4 {
+    color: #d63031;
+    margin: 0 0 10px 0;
+    font-weight: 700;
+}
+
+.security-warning p {
+    color: #2d3436;
+    margin: 0;
+    font-weight: 500;
+}
+
+/* Copy Button Enhancements */
+.copy-btn {
+    background: linear-gradient(135deg, #00b894, #00cec9);
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 4px rgba(0, 187, 148, 0.3);
+}
+
+.copy-btn:hover {
+    background: linear-gradient(135deg, #00cec9, #55a3ff);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 187, 148, 0.4);
+}
+
+.copy-btn:active {
+    transform: translateY(0);
+}
+
+/* Plugin Section Containers */
+.plugin-section {
+    background: white;
+    border-radius: 8px;
+    padding: 20px;
+    margin: 15px 0;
+    border: 1px solid #e9ecef;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+    transition: box-shadow 0.2s ease;
+}
+
+.plugin-section:hover {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
+.plugin-section h4 {
+    margin: 0 0 15px 0;
+    color: #2c3e50;
+    font-size: 18px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.plugin-section.wordpress-org h4::before {
+    content: '📦';
+}
+
+.plugin-section.wpmu-dev h4::before {
+    content: '💎';
+}
+
+.plugin-section.non-repo h4::before {
+    content: '📋';
+}
+
+.plugin-section.suspicious h4::before {
+    content: '🚨';
+}
+
+/* Analysis Header */
+.analysis-header {
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color: white;
+    padding: 25px;
+    border-radius: 8px;
+    margin: 20px 0;
+    text-align: center;
+    box-shadow: 0 4px 16px rgba(102, 126, 234, 0.3);
+}
+
+.analysis-header h3 {
+    margin: 0 0 10px 0;
+    font-size: 24px;
+    font-weight: 700;
+}
+
+.analysis-header p {
+    margin: 0;
+    font-size: 16px;
+    opacity: 0.9;
+}
+
+/* Start Button Enhancement */
+.start-reinstall-btn {
+    background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+    color: white;
+    border: none;
+    padding: 18px 40px;
+    font-size: 20px;
+    font-weight: 700;
+    border-radius: 8px;
+    cursor: pointer;
+    box-shadow: 0 6px 20px rgba(255, 107, 107, 0.4);
+    transition: all 0.3s ease;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    position: relative;
+    overflow: hidden;
+}
+
+.start-reinstall-btn::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: -100%;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+    transition: left 0.5s ease;
+}
+
+.start-reinstall-btn:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 30px rgba(255, 107, 107, 0.6);
+}
+
+.start-reinstall-btn:hover::before {
+    left: 100%;
+}
+
+.start-reinstall-btn:active {
+    transform: translateY(0);
+}
+
+/* Progress Container Enhancements */
+.progress-container-enhanced {
+    background: white;
+    border-radius: 8px;
+    padding: 20px;
+    border: 1px solid #e9ecef;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    margin: 20px 0;
+}
+
+.progress-container-enhanced h3 {
+    margin: 0 0 15px 0;
+    color: #2c3e50;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .enhanced-stats-container {
+        flex-direction: column;
+        align-items: center;
+    }
+
+    .enhanced-stats-box {
+        min-width: 280px;
+        max-width: 100%;
+    }
+
+    .plugin-analysis-table {
+        font-size: 14px;
+    }
+
+    .plugin-analysis-table th,
+    .plugin-analysis-table td {
+        padding: 8px 10px;
+    }
+
+    .start-reinstall-btn {
+        padding: 15px 30px;
+        font-size: 18px;
+    }
+}

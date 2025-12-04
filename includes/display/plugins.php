@@ -21,12 +21,11 @@ function clean_sweep_display_final_results($reinstall_results, $verification_res
         echo 'Reinstallation complete. Below is a combined summary of the process and verification of installed plugins.';
         echo '</p>';
 
-        // Combined stats
+        // Combined stats with simplified verification
         echo '<div>';
-        echo '<div class="stats-box" style="background:#d4edda;border-color:#c3e6cb;"><div class="stats-number" style="color:#155724;">' . $success_count . '</div><div class="stats-label">Reinstalled Successfully</div></div>';
-        echo '<div class="stats-box" style="background:#d1ecf1;border-color:#bee5eb;"><div class="stats-number" style="color:#0c5460;">' . $verified_count . '</div><div class="stats-label">Verified</div></div>';
-        echo '<div class="stats-box" style="background:#f8d7da;border-color:#f5c6cb;"><div class="stats-number" style="color:#721c24;">' . ($fail_count + $missing_count) . '</div><div class="stats-label">Issues (Failed/Missing)</div></div>';
-        echo '<div class="stats-box" style="background:#fff3cd;border-color:#ffeaa7;"><div class="stats-number" style="color:#856404;">' . $corrupted_count . '</div><div class="stats-label">Corrupted</div></div>';
+        echo '<div class="stats-box" style="background:#d4edda;border-color:#c3e6cb;"><div class="stats-number" style="color:#155724;">' . $success_count . '</div><div class="stats-label">Successfully Reinstalled & Verified</div></div>';
+        echo '<div class="stats-box" style="background:#f8d7da;border-color:#f5c6cb;"><div class="stats-number" style="color:#721c24;">' . $fail_count . '</div><div class="stats-label">Failed</div></div>';
+        echo '<div class="stats-box" style="background:#d1ecf1;border-color:#bee5eb;"><div class="stats-number" style="color:#0c5460;">' . (isset($reinstall_results['skipped']) ? count($reinstall_results['skipped']) : 0) . '</div><div class="stats-label">Skipped</div></div>';
         echo '</div>';
 
         // Combined table
@@ -45,20 +44,36 @@ function clean_sweep_display_final_results($reinstall_results, $verification_res
         foreach ($verification_results['verified'] as $plugin) {
             $reinstall_status = '✅ Success';
             $reinstall_class = 'plugin-success';
-            $details = 'Installed and accessible';
+            $details = 'Downloaded from WordPress.org official repository';
+
+            // Check if this plugin was skipped
+            $skipped = false;
+            if (isset($reinstall_results['skipped'])) {
+                foreach ($reinstall_results['skipped'] as $skipped_plugin) {
+                    if ($skipped_plugin['slug'] === $plugin['slug']) {
+                        $skipped = true;
+                        $reinstall_status = '⏭️ Skipped';
+                        $reinstall_class = 'plugin-info';
+                        $details = $skipped_plugin['reason'] ?? 'Preserved (not available for reinstallation)';
+                        break;
+                    }
+                }
+            }
 
             // Check if in failed WordPress.org results
             $failed_wordpress_org = false;
-            foreach ($reinstall_results['failed'] as $f) {
-                if ($f['slug'] === $plugin['slug']) {
-                    $failed_wordpress_org = true;
-                    break;
+            if (!$skipped) {
+                foreach ($reinstall_results['failed'] as $f) {
+                    if ($f['slug'] === $plugin['slug']) {
+                        $failed_wordpress_org = true;
+                        break;
+                    }
                 }
             }
 
             // Check if this plugin was handled by WPMU DEV instead (successfully)
             $handled_by_wpmudev = false;
-            if (isset($reinstall_results['wpmudev'])) {
+            if (!$skipped && isset($reinstall_results['wpmudev'])) {
                 foreach ($reinstall_results['wpmudev']['wpmudev_plugins'] as $wpmudp) {
                     // WPMU DEV plugins use 'filename' field, not 'slug'
                     $wpmudev_identifier = $wpmudp['filename'] ?? $wpmudp['slug'] ?? '';
@@ -70,11 +85,16 @@ function clean_sweep_display_final_results($reinstall_results, $verification_res
                 }
             }
 
-            if ($handled_by_wpmudev) {
-                // Show as WPMU DEV success instead of WordPress.org failure
+            // Check if this is a WPMU DEV plugin based on verification status
+            $is_wpmu_dev_plugin = isset($plugin['status']) && strpos($plugin['status'], 'WPMU DEV') !== false;
+
+            if ($skipped) {
+                // Already set above
+            } elseif ($handled_by_wpmudev || $is_wpmu_dev_plugin) {
+                // Show as WPMU DEV success
                 $reinstall_status = '✅ WPMU DEV';
                 $reinstall_class = 'plugin-success';
-                $details = 'Successfully reinstalled from WPMU DEV Premium network';
+                $details = 'Downloaded from WPMU DEV Premium secured network';
             } elseif ($failed_wordpress_org) {
                 // Actual WordPress.org failure
                 $reinstall_status = '❌ Failed';
@@ -84,7 +104,7 @@ function clean_sweep_display_final_results($reinstall_results, $verification_res
 
             echo '<tr class="' . $reinstall_class . '">';
             echo '<td>' . htmlspecialchars($plugin['name']) . '</td>';
-            echo '<td><span style="' . ($handled_by_wpmudev ? 'color:#7c3aed;' : 'color:#28a745;') . 'font-weight:bold;">' . $reinstall_status . '</span></td>';
+            echo '<td><span style="' . ($skipped ? 'color:#17a2b8;' : ($handled_by_wpmudev || $is_wpmu_dev_plugin ? 'color:#7c3aed;' : 'color:#28a745;')) . 'font-weight:bold;">' . $reinstall_status . '</span></td>';
             echo '<td><span style="color:#28a745;font-weight:bold;">✅ Verified</span></td>';
             echo '<td>' . htmlspecialchars($details) . '</td>';
             echo '</tr>';
@@ -214,22 +234,67 @@ function clean_sweep_display_final_results($reinstall_results, $verification_res
  */
 function clean_sweep_display_plugins_tab_content($plugin_results) {
     if ($plugin_results) {
-        $repo_count = count($plugin_results['wp_org_plugins']);
-        $wpmudev_count = count($plugin_results['wpmu_dev_plugins'] ?? []);
-        $skipped_count = count($plugin_results['skipped'] ?? []);
+        // Extract all available data from advanced analysis
+        $wp_org_plugins = $plugin_results['wp_org_plugins'] ?? [];
+        $wpmu_dev_plugins = $plugin_results['wpmu_dev_plugins'] ?? [];
+        $non_repo_plugins = $plugin_results['non_repo_plugins'] ?? [];
+        $suspicious_files = $plugin_results['suspicious_files'] ?? [];
+        $copy_lists = $plugin_results['copy_lists'] ?? [];
+        $totals = $plugin_results['totals'] ?? [];
+
+        // Backward compatibility for old 'skipped' format
+        $skipped = $plugin_results['skipped'] ?? [];
+        if (empty($skipped) && !empty($non_repo_plugins)) {
+            // Convert new format to old format for compatibility
+            foreach ($non_repo_plugins as $plugin_file => $plugin_data) {
+                $slug = $plugin_data['slug'] ?? $plugin_file;
+                $skipped[$slug] = [
+                    'name' => $plugin_data['name'] ?? $plugin_file,
+                    'reason' => $plugin_data['reason'] ?? 'Non-repository plugin'
+                ];
+            }
+        }
+
+        $repo_count = count($wp_org_plugins);
+        $wpmudev_count = count($wpmu_dev_plugins);
+        $non_repo_count = count($non_repo_plugins);
+        $suspicious_count = count($suspicious_files);
+        $skipped_count = count($skipped);
         $total_to_reinstall = $repo_count + $wpmudev_count;
 
-        echo '<h3>📦 Plugin Analysis Complete</h3>';
+        $cached_indicator = '';
+        if (isset($plugin_results['cached_at']) && isset($plugin_results['cache_expires'])) {
+            $time_remaining = $plugin_results['cache_expires'] - time();
+            if ($time_remaining > 0) {
+                $minutes_remaining = round($time_remaining / 60);
+                $cached_indicator = " <span style='background:#17a2b8;color:white;padding:2px 6px;border-radius:10px;font-size:11px;font-weight:normal;'>CACHED ({$minutes_remaining}min left)</span>";
+            }
+        }
 
-        // Stats overview
-        echo '<div style="background:#e7f3ff;border:1px solid #b8daff;padding:20px;border-radius:4px;margin:20px 0;">';
-        echo '<h4>📊 Analysis Summary</h4>';
-        echo '<div>';
-        echo '<div class="stats-box" style="background:#d1ecf1;border-color:#bee5eb;"><div class="stats-number" style="color:#0c5460;">' . $repo_count . '</div><div class="stats-label">WordPress.org Plugins</div></div>';
-        echo '<div class="stats-box" style="background:#ffd700;border-color:#ffed4e;"><div class="stats-number" style="color:#000000;">' . $wpmudev_count . '</div><div class="stats-label">WPMU DEV Plugins</div></div>';
-        echo '<div class="stats-box" style="background:#f8d7da;border-color:#f5c6cb;"><div class="stats-number" style="color:#721c24;">' . $skipped_count . '</div><div class="stats-label">Non-Repository (Skipped)</div></div>';
+        echo '<div class="analysis-header">';
+        echo '<h3>🔍 Advanced Plugin Analysis Complete' . $cached_indicator . '</h3>';
+        echo '<div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">';
+        echo '<p style="margin:0; text-align:center; flex:1;">Comprehensive security analysis with suspicious file detection and detailed categorization</p>';
+        echo '<button onclick="refreshPluginAnalysis()" style="background:#17a2b8;color:white;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:12px; flex-shrink:0;">🔄 Refresh Analysis</button>';
         echo '</div>';
-        echo '<p><strong>What will happen:</strong> ' . $total_to_reinstall . ' plugins will be re-installed (' . $repo_count . ' from WordPress.org repository, ' . $wpmudev_count . ' from WPMU DEV\'s secured network). ' . $skipped_count . ' non-repository plugins will be preserved.</p>';
+        echo '</div>';
+
+        // Enhanced Stats overview with all categories
+        echo '<div class="enhanced-stats-container">';
+        echo '<div class="enhanced-stats-box wordpress-org"><div class="enhanced-stats-number">' . $repo_count . '</div><div class="enhanced-stats-label">WordPress.org Plugins</div></div>';
+        echo '<div class="enhanced-stats-box wpmu-dev"><div class="enhanced-stats-number">' . $wpmudev_count . '</div><div class="enhanced-stats-label">WPMU DEV Plugins</div></div>';
+        echo '<div class="enhanced-stats-box non-repo"><div class="enhanced-stats-number">' . $non_repo_count . '</div><div class="enhanced-stats-label">Non-Repository</div></div>';
+        echo '<div class="enhanced-stats-box suspicious"><div class="enhanced-stats-number">' . $suspicious_count . '</div><div class="enhanced-stats-label">Suspicious Files</div></div>';
+        echo '</div>';
+
+        // Security Analysis Summary
+        echo '<div class="security-warning">';
+        echo '<h4>🔒 Security Analysis Results</h4>';
+        echo '<p>' . ($suspicious_count > 0 ? '<strong>⚠️ ALERT:</strong> ' . $suspicious_count . ' suspicious files detected in plugins directory! These will be automatically removed before plugin reinstallation for security.' : '<strong>✅ SECURE:</strong> No suspicious files found in plugins directory.') . '</p>';
+        echo '<p><strong>Reinstallation Plan:</strong> ' . $total_to_reinstall . ' plugins will be re-installed (' . $repo_count . ' from WordPress.org, ' . $wpmudev_count . ' from WPMU DEV). ' . $non_repo_count . ' non-repository plugins will be preserved.</p>';
+        if ($suspicious_count > 0) {
+            echo '<p><strong>🛡️ Security Action:</strong> Suspicious files will be automatically removed before installing fresh plugins to prevent reinfection.</p>';
+        }
         echo '</div>';
 
         // Plugin lists
@@ -267,10 +332,14 @@ function clean_sweep_display_plugins_tab_content($plugin_results) {
             echo '</div>';
         }
 
-        // WPMU DEV plugins section
+        // WPMU DEV plugins section (WPMU DEV Dashboard already filtered out during analysis)
         if (!empty($plugin_results['wpmu_dev_plugins'])) {
-            echo '<h4>💎 WPMU DEV Premium Plugins to be Re-installed (' . $wpmudev_count . ') <button onclick="copyPluginList(\'wpmudev\')" style="background:#7c3aed;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:12px;">Copy</button></h4>';
+            $wpmu_count = count($plugin_results['wpmu_dev_plugins']);
+            $total_to_reinstall = $repo_count + $wpmu_count;
+
+            echo '<h4>💎 WPMU DEV Premium Plugins to be Re-installed (' . $wpmu_count . ') <button onclick="copyPluginList(\'wpmudev\')" style="background:#7c3aed;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:12px;">Copy</button></h4>';
             echo '<div style="background:#f8f9ff;padding:15px;border-radius:4px;border:1px solid #c3b1e1;margin:10px 0;max-height:400px;overflow-y:auto;">';
+
             echo '<table class="plugin-analysis-table" style="width:100%;border-collapse:collapse;">';
             echo '<thead>';
             echo '<tr style="background:#f0efff;border-bottom:2px solid #c3b1e1;">';
@@ -299,7 +368,75 @@ function clean_sweep_display_plugins_tab_content($plugin_results) {
             echo '</div>';
         }
 
-        if (!empty($plugin_results['skipped'])) {
+        // Non-repository plugins section
+        if (!empty($non_repo_plugins)) {
+            echo '<h4>📋 Non-Repository Plugins (' . $non_repo_count . ') <button onclick="copyPluginList(\'nonrepo\')" style="background:#17a2b8;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:12px;">Copy</button></h4>';
+            echo '<div style="background:#d1ecf1;padding:15px;border-radius:4px;border:1px solid #bee5eb;margin:10px 0;max-height:200px;overflow-y:auto;">';
+            echo '<table class="plugin-analysis-table" style="width:100%;border-collapse:collapse;">';
+            echo '<thead>';
+            echo '<tr style="background:#bee5eb;border-bottom:1px solid #17a2b8;">';
+            echo '<th style="padding:8px;text-align:left;">Plugin Name</th>';
+            echo '<th style="padding:8px;text-align:left;">Reason</th>';
+            echo '</tr>';
+            echo '</thead>';
+            echo '<tbody>';
+            foreach ($non_repo_plugins as $plugin_file => $plugin_data) {
+                $name = $plugin_data['name'] ?? $plugin_file;
+                $reason = $plugin_data['reason'] ?? 'Not found in repositories';
+                echo '<tr style="border-bottom:1px solid #bee5eb;">';
+                echo '<td style="padding:8px;"><strong>' . htmlspecialchars($name) . '</strong></td>';
+                echo '<td style="padding:8px;">' . htmlspecialchars($reason) . '</td>';
+                echo '</tr>';
+            }
+            echo '</tbody>';
+            echo '</table>';
+            echo '<div style="margin-top:10px;padding:8px;background:#bee5eb;border-radius:4px;font-size:12px;color:#0c5460;">';
+            echo '<strong>Note:</strong> These plugins are not available in WordPress.org or WPMU DEV repositories and will be preserved as-is.';
+            echo '</div>';
+            echo '</div>';
+        }
+
+        // Suspicious files section - SECURITY FEATURE
+        if (!empty($suspicious_files)) {
+            echo '<h4>🚨 Suspicious Files Detected (' . $suspicious_count . ') <button onclick="copyPluginList(\'suspicious\')" style="background:#dc3545;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:12px;">Copy</button></h4>';
+            echo '<div style="background:#f8d7da;border:2px solid #dc3545;padding:15px;border-radius:4px;margin:10px 0;max-height:300px;overflow-y:auto;">';
+            echo '<div style="margin-bottom:10px;padding:10px;background:#f5c6cb;border-radius:4px;color:#721c24;font-weight:bold;">';
+            echo '⚠️ SECURITY WARNING: Suspicious files detected in plugins directory! These may be malware or unauthorized modifications.';
+            echo '</div>';
+            echo '<table class="plugin-analysis-table" style="width:100%;border-collapse:collapse;">';
+            echo '<thead>';
+            echo '<tr style="background:#dc3545;color:white;border-bottom:2px solid #bd2130;">';
+            echo '<th style="padding:10px;text-align:left;border-right:1px solid #bd2130;">File/Folder Name</th>';
+            echo '<th style="padding:10px;text-align:left;border-right:1px solid #bd2130;">Type</th>';
+            echo '<th style="padding:10px;text-align:left;border-right:1px solid #bd2130;">Size</th>';
+            echo '<th style="padding:10px;text-align:left;">Last Modified</th>';
+            echo '</tr>';
+            echo '</thead>';
+            echo '<tbody>';
+            foreach ($suspicious_files as $file) {
+                $type = $file['is_directory'] ? 'Directory' : 'File';
+                $size_display = $file['is_directory'] ?
+                    ($file['file_count'] . ' files') :
+                    $file['size_mb'] . ' MB';
+                $last_modified = date('Y-m-d H:i', $file['last_modified']);
+
+                echo '<tr style="border-bottom:1px solid #dc3545;background:#f8d7da;">';
+                echo '<td style="padding:10px;border-right:1px solid #dc3545;"><strong>' . htmlspecialchars($file['name']) . '</strong></td>';
+                echo '<td style="padding:10px;border-right:1px solid #dc3545;">' . $type . '</td>';
+                echo '<td style="padding:10px;border-right:1px solid #dc3545;">' . $size_display . '</td>';
+                echo '<td style="padding:10px;">' . $last_modified . '</td>';
+                echo '</tr>';
+            }
+            echo '</tbody>';
+            echo '</table>';
+            echo '<div style="margin-top:10px;padding:10px;background:#f5c6cb;border-radius:4px;font-size:12px;color:#721c24;">';
+            echo '<strong>Recommendation:</strong> Review these suspicious files before proceeding. They may contain malware or unauthorized code. Consider backing up your site and consulting security experts if unsure.';
+            echo '</div>';
+            echo '</div>';
+        }
+
+        // Legacy skipped section (for backward compatibility)
+        if (!empty($plugin_results['skipped']) && empty($non_repo_plugins)) {
             echo '<h4>⏭️ Plugins to be Skipped (' . $skipped_count . ') <button onclick="copyPluginList(\'skipped\')" style="background:#6c757d;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:12px;">Copy</button></h4>';
             echo '<div style="background:#fff3cd;padding:15px;border-radius:4px;border:1px solid #ffeaa7;margin:10px 0;max-height:150px;overflow-y:auto;">';
             echo '<ul style="margin:0;padding-left:20px;">';
@@ -310,29 +447,41 @@ function clean_sweep_display_plugins_tab_content($plugin_results) {
             echo '</div>';
         }
 
-        // Safety warnings
+        // Safety warnings (backup choice now handled during progress)
         echo '<div style="background:#f8d7da;border:1px solid #f5c6cb;padding:15px;border-radius:4px;margin:20px 0;">';
         echo '<h4>⚠️ Important Safety Information</h4>';
         echo '<ul style="margin:10px 0;padding-left:20px;">';
-        echo '<li>A complete backup of your current plugins will be created automatically</li>';
+        echo '<li>You will be asked whether to create a backup before proceeding</li>';
         echo '<li>Hello Dolly (demo plugin) will be automatically removed if present</li>';
+        echo '<li><strong>WPMU DEV Dashboard:</strong> Will be automatically preserved (core dashboard plugin cannot be reinstalled)</li>';
         echo '<li>This process cannot be undone - review the list above carefully</li>';
         echo '<li>Ensure you have database backups before proceeding</li>';
         echo '</ul>';
         echo '</div>';
 
-        // Start button with AJAX
+
+
+        // Start button with AJAX and confirmation
         echo '<div style="text-align:center;margin:30px 0;">';
-        // Combine all plugins that will be reinstalled
+        // Combine all plugins that will be reinstalled (WPMU DEV Dashboard already filtered out during analysis)
         $all_plugins_to_reinstall = array_merge(
             $plugin_results['wp_org_plugins'] ?? [],
             $plugin_results['wpmu_dev_plugins'] ?? []
         );
-        echo '<button onclick="confirmPluginReinstallation(this)" data-plugins="' . htmlspecialchars(json_encode($all_plugins_to_reinstall)) . '" style="background:#dc3545;color:white;border:none;padding:15px 30px;font-size:18px;font-weight:bold;border-radius:4px;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.2);">';
-        echo '🚀 Start Complete Ecosystem Re-installation (' . $total_to_reinstall . ' plugins)';
+        $actual_reinstall_count = count($all_plugins_to_reinstall);
+
+        echo '<button id="reinstall-button" onclick="confirmPluginReinstallation(this)" data-plugins="' . htmlspecialchars(json_encode($all_plugins_to_reinstall)) . '" data-analysis="' . htmlspecialchars(json_encode($plugin_results)) . '" style="background:#dc3545;color:white;border:none;padding:15px 30px;font-size:18px;font-weight:bold;border-radius:4px;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.2);">';
+        echo '🚀 Start Complete Ecosystem Re-installation (' . $actual_reinstall_count . ' plugins)';
         echo '</button>';
         echo '<p style="margin-top:10px;color:#666;font-size:14px;">WordPress.org plugins from official repository + WPMU DEV premium plugins from secured network</p>';
         echo '</div>';
+
+
+
+        // Store analysis data for JavaScript to use during reinstall
+        echo '<script>';
+        echo 'window.currentPluginAnalysis = ' . json_encode($plugin_results) . ';';
+        echo '</script>';
 
         // Progress display area (always present for AJAX operations)
         echo '<div id="plugin-progress-container" style="display:none;margin:20px 0;">';

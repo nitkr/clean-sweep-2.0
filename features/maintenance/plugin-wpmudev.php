@@ -193,7 +193,7 @@ function clean_sweep_reinstall_wpmudev_plugins($progress_file = null, $wpmudev_p
 
         // Install the downloaded ZIP using WordPress filesystem
         $upload_dir = wp_upload_dir();
-        $target_dir = WP_PLUGIN_DIR . '/' . dirname($plugin_filename);
+        $target_dir = ORIGINAL_WP_PLUGIN_DIR . '/' . dirname($plugin_filename);
 
         if (!wp_mkdir_p($target_dir)) {
             @unlink($temp_file);
@@ -205,7 +205,7 @@ function clean_sweep_reinstall_wpmudev_plugins($progress_file = null, $wpmudev_p
             continue;
         }
 
-        $result = unzip_file($temp_file, WP_PLUGIN_DIR);
+        $result = unzip_file($temp_file, ORIGINAL_WP_PLUGIN_DIR);
         @unlink($temp_file); // Clean up temporary file
 
         if (is_wp_error($result)) {
