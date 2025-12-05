@@ -163,17 +163,51 @@ class CleanSweep_Application {
             }
         }
 
-        $repo_plugins = $analysis['wp_org_plugins'];  // WordPress.org plugins to reinstall
-        $wpmu_dev_plugins = $analysis['wpmu_dev_plugins'];  // WPMU DEV plugins to reinstall
-        $suspicious_files = $analysis['suspicious_files'] ?? [];  // Suspicious files to delete
+        // Check if selective plugin filtering was requested via AJAX
+        $selective_repo_plugins = isset($_POST['repo_plugins']) ?
+            json_decode(stripslashes($_POST['repo_plugins']), true) : null;
 
-        // Only log analysis details on first batch to avoid spam
-        if ($batch_start == 0) {
-            $total_categorized = count($repo_plugins) + count($wpmu_dev_plugins);
-            clean_sweep_log_message("AJAX Reinstall: Total plugins from analysis: $total_categorized" .
-                                  ", WordPress.org: " . count($repo_plugins) .
-                                  ", WPMU DEV: " . count($wpmu_dev_plugins) .
-                                  ", Suspicious files: " . count($suspicious_files));
+        if ($selective_repo_plugins !== null && is_array($selective_repo_plugins)) {
+            // Use selectively filtered plugins from AJAX request
+            clean_sweep_log_message("Using selective plugin filtering: " . count($selective_repo_plugins) . " plugins selected");
+
+            // Separate filtered plugins into WP.org and WPMU DEV
+            $repo_plugins = [];
+            $wpmu_dev_plugins = [];
+
+            foreach ($selective_repo_plugins as $slug => $plugin_data) {
+                // Check if this is a WPMU DEV plugin by looking at analysis data
+                $is_wpmu_dev = isset($analysis['wpmu_dev_plugins'][$slug]);
+
+                if ($is_wpmu_dev) {
+                    $wpmu_dev_plugins[$slug] = $plugin_data;
+                } else {
+                    $repo_plugins[$slug] = $plugin_data;
+                }
+            }
+
+            $suspicious_files = []; // No suspicious files in selective mode
+
+            // Log selective mode details
+            if ($batch_start == 0) {
+                clean_sweep_log_message("Selective AJAX Reinstall: " . count($selective_repo_plugins) . " total selected" .
+                                      ", WordPress.org: " . count($repo_plugins) .
+                                      ", WPMU DEV: " . count($wpmu_dev_plugins));
+            }
+        } else {
+            // Fallback to full analysis (legacy behavior)
+            $repo_plugins = $analysis['wp_org_plugins'];  // WordPress.org plugins to reinstall
+            $wpmu_dev_plugins = $analysis['wpmu_dev_plugins'];  // WPMU DEV plugins to reinstall
+            $suspicious_files = $analysis['suspicious_files'] ?? [];  // Suspicious files to delete
+
+            // Only log analysis details on first batch to avoid spam
+            if ($batch_start == 0) {
+                $total_categorized = count($repo_plugins) + count($wpmu_dev_plugins);
+                clean_sweep_log_message("Full AJAX Reinstall: Total plugins from analysis: $total_categorized" .
+                                      ", WordPress.org: " . count($repo_plugins) .
+                                      ", WPMU DEV: " . count($wpmu_dev_plugins) .
+                                      ", Suspicious files: " . count($suspicious_files));
+            }
         }
 
         if ($progress_file) {

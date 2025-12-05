@@ -334,14 +334,15 @@ function clean_sweep_verify_wpmudev_installations($wpmudev_plugins) {
 function clean_sweep_execute_reinstallation($repo_plugins, $progress_file = null, $batch_start = 0, $batch_size = null, $create_backup = true) {
     clean_sweep_log_message("=== WordPress Plugin Re-installation Started ===");
 
-    // CRITICAL FIX: Filter out any WPMU DEV plugins that might have slipped through
-    // This prevents them from showing in the WordPress.org reinstallation progress
-    $filtered_repo_plugins = [];
+    // Handle selective plugin reinstallation: separate WP.org and WPMU DEV plugins
+    $selective_mode = false;
+    $wp_org_plugins = [];
+    $wpmu_dev_plugins = [];
+
     foreach ($repo_plugins as $slug => $plugin_data) {
-        // Double-check this is not a WPMU DEV plugin
-        // Check if there's a corresponding plugin file
+        // Check if this is a WPMU DEV plugin
         $plugin_dir = ORIGINAL_WP_PLUGIN_DIR . '/' . $slug;
-        $skip_plugin = false;
+        $is_wpmu_dev = false;
 
         if (is_dir($plugin_dir)) {
             // Find the main plugin file
@@ -349,21 +350,55 @@ function clean_sweep_execute_reinstallation($repo_plugins, $progress_file = null
             foreach ($files as $file) {
                 $file_data = get_file_data($file, array('id' => 'WDP ID'));
                 if (!empty($file_data['id']) && is_numeric($file_data['id'])) {
-                    clean_sweep_log_message("Filtering out WPMU DEV plugin from WordPress.org batch: {$plugin_data['name']} (slug: {$slug})", 'info');
-                    $skip_plugin = true;
+                    $is_wpmu_dev = true;
                     break;
                 }
             }
         }
 
-        if (!$skip_plugin) {
-            $filtered_repo_plugins[$slug] = $plugin_data;
+        if ($is_wpmu_dev) {
+            $wpmu_dev_plugins[$slug] = $plugin_data;
+            $selective_mode = true;
+            clean_sweep_log_message("Detected WPMU DEV plugin in selective mode: {$plugin_data['name']} (slug: {$slug})", 'info');
+        } else {
+            $wp_org_plugins[$slug] = $plugin_data;
+            $selective_mode = true;
+            clean_sweep_log_message("Detected WordPress.org plugin in selective mode: {$plugin_data['name']} (slug: {$slug})", 'info');
         }
     }
 
-    // Update repo_plugins to use filtered list
-    $repo_plugins = $filtered_repo_plugins;
-    $repo_count = count($repo_plugins);
+    // In selective mode, use the separated arrays; otherwise fall back to legacy behavior
+    if ($selective_mode) {
+        $repo_plugins = $wp_org_plugins;
+        $repo_count = count($repo_plugins);
+        clean_sweep_log_message("Selective mode: {$repo_count} WordPress.org, " . count($wpmu_dev_plugins) . " WPMU DEV plugins selected");
+    } else {
+        // Legacy behavior: filter out WPMU DEV plugins for backward compatibility
+        $filtered_repo_plugins = [];
+        foreach ($repo_plugins as $slug => $plugin_data) {
+            $plugin_dir = ORIGINAL_WP_PLUGIN_DIR . '/' . $slug;
+            $skip_plugin = false;
+
+            if (is_dir($plugin_dir)) {
+                $files = glob($plugin_dir . '/*.php');
+                foreach ($files as $file) {
+                    $file_data = get_file_data($file, array('id' => 'WDP ID'));
+                    if (!empty($file_data['id']) && is_numeric($file_data['id'])) {
+                        clean_sweep_log_message("Filtering out WPMU DEV plugin from WordPress.org batch: {$plugin_data['name']} (slug: {$slug})", 'info');
+                        $skip_plugin = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!$skip_plugin) {
+                $filtered_repo_plugins[$slug] = $plugin_data;
+            }
+        }
+
+        $repo_plugins = $filtered_repo_plugins;
+        $repo_count = count($repo_plugins);
+    }
 
     clean_sweep_log_message("After filtering WPMU DEV plugins: {$repo_count} WordPress.org plugins to reinstall");
 
@@ -594,22 +629,18 @@ function clean_sweep_execute_reinstallation($repo_plugins, $progress_file = null
     if ($is_final_batch) {
         clean_sweep_log_message("Final batch detected - performing verification and WPMU DEV processing...");
 
-        // Handle WPMU DEV plugins only after ALL WordPress.org batches are complete
-        // Retrieve stored WPMU DEV plugins list from analysis phase
-        clean_sweep_log_message("Checking for WPMU DEV premium plugins to reinstall...");
-        $wpmudev_plugins_to_reinstall = get_transient('clean_sweep_wpmudev_plugins');
+        // Handle WPMU DEV plugins processing
+        if ($selective_mode && !empty($wpmu_dev_plugins)) {
+            // In selective mode, process the selected WPMU DEV plugins directly
+            clean_sweep_log_message("Processing selected WPMU DEV plugins: " . count($wpmu_dev_plugins) . " plugins");
 
-        if ($wpmudev_plugins_to_reinstall !== false && !empty($wpmudev_plugins_to_reinstall)) {
-            clean_sweep_log_message("Found " . count($wpmudev_plugins_to_reinstall) . " WPMU DEV plugins to reinstall from stored analysis");
-
-            // Use OOP architecture instead of old procedural function
             $manager = new CleanSweep_PluginReinstallationManager();
             $reinstall_result = $manager->handle_request('start_reinstallation', [
                 'progress_file' => $progress_file,
                 'create_backup' => false, // Already handled above
                 'proceed_without_backup' => true, // Already handled above
                 'wp_org_plugins' => [], // No WordPress.org plugins in this phase
-                'wpmu_dev_plugins' => $wpmudev_plugins_to_reinstall, // Pass WPMU DEV plugins
+                'wpmu_dev_plugins' => $wpmu_dev_plugins, // Pass selected WPMU DEV plugins
                 'suspicious_files_to_delete' => [], // No suspicious files in this phase
                 'batch_start' => 0, // Not batching for WPMU DEV
                 'batch_size' => null // Process all at once
@@ -618,7 +649,7 @@ function clean_sweep_execute_reinstallation($repo_plugins, $progress_file = null
             if ($reinstall_result['success']) {
                 // Extract WPMU DEV results from OOP structure
                 $wpmudev_results = $reinstall_result['wpmu_dev'] ?? ['successful' => [], 'failed' => []];
-                clean_sweep_log_message("WPMU DEV plugin processing completed: " . count($wpmudev_results['successful']) . " success, " . count($wpmudev_results['failed']) . " failed");
+                clean_sweep_log_message("Selected WPMU DEV plugin processing completed: " . count($wpmudev_results['successful']) . " success, " . count($wpmudev_results['failed']) . " failed");
 
                 // Add successful WPMU DEV plugins to main successful array for proper final display
                 foreach ($wpmudev_results['successful'] as $plugin_data) {
@@ -641,21 +672,75 @@ function clean_sweep_execute_reinstallation($repo_plugins, $progress_file = null
                 }
             } else {
                 $wpmudev_results = ['error' => $reinstall_result['error'] ?? 'WPMU DEV reinstallation failed'];
-                clean_sweep_log_message("WPMU DEV processing failed: {$wpmudev_results['error']}", 'error');
+                clean_sweep_log_message("Selected WPMU DEV processing failed: {$wpmudev_results['error']}", 'error');
             }
-        } else {
-            clean_sweep_log_message("No WPMU DEV plugins list found from analysis phase", 'warning');
-            $wpmudev_results = ['error' => 'No WPMU DEV plugins list available'];
+        } elseif (!$selective_mode) {
+            // Legacy behavior: Handle WPMU DEV plugins only after ALL WordPress.org batches are complete
+            // Retrieve stored WPMU DEV plugins list from analysis phase
+            clean_sweep_log_message("Checking for WPMU DEV premium plugins to reinstall...");
+            $wpmudev_plugins_to_reinstall = get_transient('clean_sweep_wpmudev_plugins');
+
+            if ($wpmudev_plugins_to_reinstall !== false && !empty($wpmudev_plugins_to_reinstall)) {
+                clean_sweep_log_message("Found " . count($wpmudev_plugins_to_reinstall) . " WPMU DEV plugins to reinstall from stored analysis");
+
+                // Use OOP architecture instead of old procedural function
+                $manager = new CleanSweep_PluginReinstallationManager();
+                $reinstall_result = $manager->handle_request('start_reinstallation', [
+                    'progress_file' => $progress_file,
+                    'create_backup' => false, // Already handled above
+                    'proceed_without_backup' => true, // Already handled above
+                    'wp_org_plugins' => [], // No WordPress.org plugins in this phase
+                    'wpmu_dev_plugins' => $wpmudev_plugins_to_reinstall, // Pass WPMU DEV plugins
+                    'suspicious_files_to_delete' => [], // No suspicious files in this phase
+                    'batch_start' => 0, // Not batching for WPMU DEV
+                    'batch_size' => null // Process all at once
+                ]);
+
+                if ($reinstall_result['success']) {
+                    // Extract WPMU DEV results from OOP structure
+                    $wpmudev_results = $reinstall_result['wpmu_dev'] ?? ['successful' => [], 'failed' => []];
+                    clean_sweep_log_message("WPMU DEV plugin processing completed: " . count($wpmudev_results['successful']) . " success, " . count($wpmudev_results['failed']) . " failed");
+
+                    // Add successful WPMU DEV plugins to main successful array for proper final display
+                    foreach ($wpmudev_results['successful'] as $plugin_data) {
+                        $results['successful'][] = [
+                            'name' => $plugin_data['name'] ?? $plugin_data['slug'] ?? 'Unknown',
+                            'slug' => $plugin_data['slug'] ?? $plugin_data['name'] ?? 'unknown',
+                            'status' => 'Re-installed successfully (WPMU DEV)',
+                            'is_wpmudev' => true
+                        ];
+                    }
+
+                    // Add failed WPMU DEV plugins to main failed results
+                    foreach ($wpmudev_results['failed'] as $plugin_data) {
+                        $results['failed'][] = [
+                            'name' => $plugin_data['name'] ?? $plugin_data['slug'] ?? 'Unknown',
+                            'slug' => $plugin_data['slug'] ?? $plugin_data['name'] ?? 'unknown',
+                            'status' => 'WPMU DEV re-installation failed: ' . ($plugin_data['status'] ?? 'Unknown error'),
+                            'is_wpmudev' => true
+                        ];
+                    }
+                } else {
+                    $wpmudev_results = ['error' => $reinstall_result['error'] ?? 'WPMU DEV reinstallation failed'];
+                    clean_sweep_log_message("WPMU DEV processing failed: {$wpmudev_results['error']}", 'error');
+                }
+            } else {
+                clean_sweep_log_message("No WPMU DEV plugins list found from analysis phase", 'warning');
+                $wpmudev_results = ['error' => 'No WPMU DEV plugins list available'];
+            }
         }
 
-        // Merge results
+        // Merge results and perform verification
         if (!isset($wpmudev_results['error'])) {
             $results['wpmudev'] = $wpmudev_results;
+
+            // Determine which WPMU DEV plugins to verify based on mode
+            $wpmu_dev_plugins_to_verify = $selective_mode ? $wpmu_dev_plugins : $wpmudev_plugins_to_reinstall;
 
             // Filter out excluded plugins from verification (same as install)
             // Exclude WPMU DEV Dashboard (ID 119)
             $filtered_wpmudev_plugins_for_verification = [];
-            foreach ($wpmudev_plugins_to_reinstall as $plugin_file => $plugin_data) {
+            foreach ($wpmu_dev_plugins_to_verify as $plugin_file => $plugin_data) {
                 if (($plugin_data['wdp_id'] ?? $plugin_data['pid'] ?? null) !== 119) {
                     $filtered_wpmudev_plugins_for_verification[$plugin_file] = $plugin_data;
                 }

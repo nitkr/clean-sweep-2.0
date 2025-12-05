@@ -6,10 +6,122 @@ let repoPluginsJson = null;
 let reinstallProgressInterval = null;
 let reinstallProgressFile = null;
 
+// Selective plugin reinstallation functions
+function selectAllWpOrg() {
+    const checkboxes = document.querySelectorAll('.wp-org-plugin-checkbox');
+    checkboxes.forEach(cb => cb.checked = true);
+    updateSelectedCount();
+}
+
+function selectNoneWpOrg() {
+    const checkboxes = document.querySelectorAll('.wp-org-plugin-checkbox');
+    checkboxes.forEach(cb => cb.checked = false);
+    updateSelectedCount();
+}
+
+function toggleAllWpOrg(checked) {
+    const checkboxes = document.querySelectorAll('.wp-org-plugin-checkbox');
+    checkboxes.forEach(cb => cb.checked = checked);
+    updateSelectedCount();
+}
+
+function selectAllWpmuDev() {
+    const checkboxes = document.querySelectorAll('.wpmu-dev-plugin-checkbox');
+    checkboxes.forEach(cb => cb.checked = true);
+    updateSelectedCount();
+}
+
+function selectNoneWpmuDev() {
+    const checkboxes = document.querySelectorAll('.wpmu-dev-plugin-checkbox');
+    checkboxes.forEach(cb => cb.checked = false);
+    updateSelectedCount();
+}
+
+function toggleAllWpmuDev(checked) {
+    const checkboxes = document.querySelectorAll('.wpmu-dev-plugin-checkbox');
+    checkboxes.forEach(cb => cb.checked = checked);
+    updateSelectedCount();
+}
+
+function updateSelectedCount() {
+    const wpOrgChecked = document.querySelectorAll('.wp-org-plugin-checkbox:checked').length;
+    const wpmuDevChecked = document.querySelectorAll('.wpmu-dev-plugin-checkbox:checked').length;
+    const totalSelected = wpOrgChecked + wpmuDevChecked;
+
+    const countElement = document.getElementById('selected-count');
+    if (countElement) {
+        countElement.textContent = totalSelected;
+    }
+
+    // Update master checkboxes based on individual selections
+    const wpOrgMaster = document.getElementById('wp-org-select-all');
+    const wpmuDevMaster = document.getElementById('wpmu-dev-select-all');
+
+    if (wpOrgMaster) {
+        const totalWpOrg = document.querySelectorAll('.wp-org-plugin-checkbox').length;
+        wpOrgMaster.checked = (wpOrgChecked === totalWpOrg && totalWpOrg > 0);
+        wpOrgMaster.indeterminate = (wpOrgChecked > 0 && wpOrgChecked < totalWpOrg);
+    }
+
+    if (wpmuDevMaster) {
+        const totalWpmuDev = document.querySelectorAll('.wpmu-dev-plugin-checkbox').length;
+        wpmuDevMaster.checked = (wpmuDevChecked === totalWpmuDev && totalWpmuDev > 0);
+        wpmuDevMaster.indeterminate = (wpmuDevChecked > 0 && wpmuDevChecked < totalWpmuDev);
+    }
+}
+
 // Helper function to handle confirm dialog and button passing
 function confirmPluginReinstallation(button) {
-    // Show backup choice dialog during progress (after confirmation)
-    showBackupChoiceDuringProgress(button);
+    // Collect selected plugins before showing backup choice
+    const selectedPlugins = collectSelectedPlugins(button);
+
+    if (Object.keys(selectedPlugins).length === 0) {
+        alert('Please select at least one plugin to reinstall.');
+        return;
+    }
+
+    // Show backup choice dialog during progress (after confirmation), passing selectedPlugins directly
+    showBackupChoiceDuringProgress(button, selectedPlugins);
+}
+
+// Collect selected plugins from checkboxes using button's data-analysis attribute
+function collectSelectedPlugins(button) {
+    const selectedPlugins = {};
+
+    // Get analysis data from button's data-analysis attribute
+    const analysisDataJson = button.getAttribute('data-analysis');
+    if (!analysisDataJson) {
+        console.error('No analysis data found in button');
+        return selectedPlugins;
+    }
+
+    let analysisData;
+    try {
+        analysisData = JSON.parse(analysisDataJson);
+    } catch (e) {
+        console.error('Failed to parse analysis data:', e);
+        return selectedPlugins;
+    }
+
+    // Collect WordPress.org plugins
+    const wpOrgCheckboxes = document.querySelectorAll('.wp-org-plugin-checkbox:checked');
+    wpOrgCheckboxes.forEach(cb => {
+        const slug = cb.getAttribute('data-slug');
+        if (slug && analysisData.wp_org_plugins && analysisData.wp_org_plugins[slug]) {
+            selectedPlugins[slug] = analysisData.wp_org_plugins[slug];
+        }
+    });
+
+    // Collect WPMU DEV plugins
+    const wpmuDevCheckboxes = document.querySelectorAll('.wpmu-dev-plugin-checkbox:checked');
+    wpmuDevCheckboxes.forEach(cb => {
+        const slug = cb.getAttribute('data-slug');
+        if (slug && analysisData.wpmu_dev_plugins && analysisData.wpmu_dev_plugins[slug]) {
+            selectedPlugins[slug] = analysisData.wpmu_dev_plugins[slug];
+        }
+    });
+
+    return selectedPlugins;
 }
 
 // Enhanced version that passes existing analysis data to avoid re-analysis
@@ -20,8 +132,8 @@ function startPluginReinstallationWithAnalysis(buttonElement) {
     }
 
     // Store analysis data globally for backup choice functions
+    // Note: window.currentRepoPluginsJson is already set correctly by showBackupChoiceDuringProgress()
     window.currentAnalysisDataJson = buttonElement.getAttribute('data-analysis');
-    window.currentRepoPluginsJson = buttonElement.getAttribute('data-plugins');
 
     // Generate unique progress file name
     reinstallProgressFile = 'reinstall_progress_' + Date.now() + '.progress';
@@ -333,9 +445,10 @@ function pollReinstallProgress() {
         });
 }
 
-function showBackupChoiceDuringProgress(button) {
-    // Store plugin data globally
-    repoPluginsJson = button.getAttribute('data-plugins');
+function showBackupChoiceDuringProgress(button, selectedPlugins) {
+    // Store selected plugins globally and as JSON
+    const selectedPluginsJson = JSON.stringify(selectedPlugins);
+    window.currentRepoPluginsJson = selectedPluginsJson;
 
     // Start the reinstallation process with analysis data to avoid re-analysis
     startPluginReinstallationWithAnalysis(button);

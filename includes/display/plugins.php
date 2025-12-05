@@ -301,9 +301,11 @@ function clean_sweep_display_plugins_tab_content($plugin_results) {
         if (!empty($plugin_results['wp_org_plugins'])) {
             echo '<h4>📦 WordPress.org Plugins to be Re-installed (' . $repo_count . ') <button onclick="copyPluginList(\'reinstall\')" style="background:#007bff;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:12px;">Copy</button></h4>';
             echo '<div style="background:white;padding:15px;border-radius:4px;border:1px solid #dee2e6;margin:10px 0;max-height:400px;overflow-y:auto;">';
+            echo '<div style="margin-bottom:10px;"><button onclick="selectAllWpOrg()" style="background:#28a745;color:white;border:none;padding:6px 12px;border-radius:3px;cursor:pointer;font-size:12px;margin-right:5px;">Select All</button><button onclick="selectNoneWpOrg()" style="background:#dc3545;color:white;border:none;padding:6px 12px;border-radius:3px;cursor:pointer;font-size:12px;">Select None</button></div>';
             echo '<table class="plugin-analysis-table" style="width:100%;border-collapse:collapse;">';
             echo '<thead>';
             echo '<tr style="background:#f8f9fa;border-bottom:2px solid #dee2e6;">';
+            echo '<th style="padding:10px;text-align:left;border-right:1px solid #dee2e6;width:40px;"><input type="checkbox" id="wp-org-select-all" onchange="toggleAllWpOrg(this.checked)"></th>';
             echo '<th style="padding:10px;text-align:left;border-right:1px solid #dee2e6;">Plugin Name</th>';
             echo '<th style="padding:10px;text-align:left;border-right:1px solid #dee2e6;">Current Version</th>';
             echo '<th style="padding:10px;text-align:left;border-right:1px solid #dee2e6;">Last Updated</th>';
@@ -321,6 +323,7 @@ function clean_sweep_display_plugins_tab_content($plugin_results) {
                 $relative_time = clean_sweep_format_relative_time($last_updated);
 
                 echo '<tr style="border-bottom:1px solid #dee2e6;">';
+                echo '<td style="padding:10px;border-right:1px solid #dee2e6;text-align:center;"><input type="checkbox" class="wp-org-plugin-checkbox" data-slug="' . htmlspecialchars($slug) . '" checked onchange="updateSelectedCount()"></td>';
                 echo '<td style="padding:10px;border-right:1px solid #dee2e6;"><strong>' . htmlspecialchars($name) . '</strong><br><small style="color:#666;">(' . $slug . ')</small></td>';
                 echo '<td style="padding:10px;border-right:1px solid #dee2e6;">' . htmlspecialchars($version) . '</td>';
                 echo '<td style="padding:10px;border-right:1px solid #dee2e6;">' . htmlspecialchars($relative_time) . '</td>';
@@ -339,10 +342,12 @@ function clean_sweep_display_plugins_tab_content($plugin_results) {
 
             echo '<h4>💎 WPMU DEV Premium Plugins to be Re-installed (' . $wpmu_count . ') <button onclick="copyPluginList(\'wpmudev\')" style="background:#7c3aed;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:12px;">Copy</button></h4>';
             echo '<div style="background:#f8f9ff;padding:15px;border-radius:4px;border:1px solid #c3b1e1;margin:10px 0;max-height:400px;overflow-y:auto;">';
+            echo '<div style="margin-bottom:10px;"><button onclick="selectAllWpmuDev()" style="background:#28a745;color:white;border:none;padding:6px 12px;border-radius:3px;cursor:pointer;font-size:12px;margin-right:5px;">Select All</button><button onclick="selectNoneWpmuDev()" style="background:#dc3545;color:white;border:none;padding:6px 12px;border-radius:3px;cursor:pointer;font-size:12px;">Select None</button></div>';
 
             echo '<table class="plugin-analysis-table" style="width:100%;border-collapse:collapse;">';
             echo '<thead>';
             echo '<tr style="background:#f0efff;border-bottom:2px solid #c3b1e1;">';
+            echo '<th style="padding:10px;text-align:left;border-right:1px solid #c3b1e1;width:40px;"><input type="checkbox" id="wpmu-dev-select-all" onchange="toggleAllWpmuDev(this.checked)"></th>';
             echo '<th style="padding:10px;text-align:left;border-right:1px solid #c3b1e1;">Plugin Name</th>';
             echo '<th style="padding:10px;text-align:left;border-right:1px solid #c3b1e1;">Current Version</th>';
             echo '<th style="padding:10px;text-align:left;">Description</th>';
@@ -355,6 +360,7 @@ function clean_sweep_display_plugins_tab_content($plugin_results) {
                 $description = $plugin_data['description'] ?? '';
 
                 echo '<tr style="border-bottom:1px solid #c3b1e1;">';
+                echo '<td style="padding:10px;border-right:1px solid #c3b1e1;text-align:center;"><input type="checkbox" class="wpmu-dev-plugin-checkbox" data-slug="' . htmlspecialchars($slug) . '" checked onchange="updateSelectedCount()"></td>';
                 echo '<td style="padding:10px;border-right:1px solid #c3b1e1;"><strong>' . htmlspecialchars($name) . '</strong><br><small style="color:#666;">(' . $slug . ')</small></td>';
                 echo '<td style="padding:10px;border-right:1px solid #c3b1e1;">' . htmlspecialchars($version) . '</td>';
                 echo '<td style="padding:10px;">' . htmlspecialchars(substr($description, 0, 150)) . (strlen($description) > 150 ? '...' : '') . '</td>';
@@ -471,9 +477,9 @@ function clean_sweep_display_plugins_tab_content($plugin_results) {
         $actual_reinstall_count = count($all_plugins_to_reinstall);
 
         echo '<button id="reinstall-button" onclick="confirmPluginReinstallation(this)" data-plugins="' . htmlspecialchars(json_encode($all_plugins_to_reinstall)) . '" data-analysis="' . htmlspecialchars(json_encode($plugin_results)) . '" style="background:#dc3545;color:white;border:none;padding:15px 30px;font-size:18px;font-weight:bold;border-radius:4px;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.2);">';
-        echo '🚀 Start Complete Ecosystem Re-installation (' . $actual_reinstall_count . ' plugins)';
+        echo '🚀 Start Selective Plugin Re-installation (<span id="selected-count">' . $actual_reinstall_count . '</span> selected)';
         echo '</button>';
-        echo '<p style="margin-top:10px;color:#666;font-size:14px;">WordPress.org plugins from official repository + WPMU DEV premium plugins from secured network</p>';
+        echo '<p style="margin-top:10px;color:#666;font-size:14px;">Select which plugins to reinstall from the lists above. WordPress.org plugins from official repository + WPMU DEV premium plugins from secured network</p>';
         echo '</div>';
 
 

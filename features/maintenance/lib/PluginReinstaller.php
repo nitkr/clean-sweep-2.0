@@ -24,8 +24,14 @@ class CleanSweep_PluginReinstaller {
     public function start_reinstallation($progress_file = null, $create_backup = false, $proceed_without_backup = false, $wp_org_plugins = [], $wpmu_dev_plugins = [], $suspicious_files_to_delete = [], $batch_start = 0, $batch_size = null) {
         clean_sweep_log_message("PluginReinstaller: Starting reinstallation process with separate processing phases", 'info');
 
-        // Reset WPMU DEV batch counter for fresh reinstallation runs
-        delete_transient('clean_sweep_wpmu_batch_number');
+        // Use progress-file-specific transient key to prevent multi-tab interference
+        $wpmu_batch_key = 'clean_sweep_wpmu_batch_' . md5($progress_file ?? 'default');
+
+        // Reset WPMU DEV batch counter ONLY at the true start of the process (when starting WordPress.org plugins)
+        if ($batch_start === 0 && !empty($wp_org_plugins)) {
+            delete_transient($wpmu_batch_key);
+            clean_sweep_log_message("PluginReinstaller: Reset WPMU DEV batch counter for fresh process start", 'info');
+        }
 
         // Initialize progress manager
         $progressManager = $progress_file ? new CleanSweep_ProgressManager($progress_file) : null;
@@ -168,8 +174,7 @@ class CleanSweep_PluginReinstaller {
                     clean_sweep_log_message("PluginReinstaller: DEBUG - WPMU DEV plugin: $key => " . json_encode($data), 'info');
                 }
 
-                // Use separate transient storage to track WPMU DEV batch progress across requests
-                $wpmu_batch_key = 'clean_sweep_wpmu_batch_number';
+                // Use progress-file-specific transient storage to track WPMU DEV batch progress across requests
                 $wpmu_batch_number = get_transient($wpmu_batch_key) ?: 0;
 
                 $wpmu_batch_start = $wpmu_batch_number * $batch_size;
@@ -265,6 +270,10 @@ class CleanSweep_PluginReinstaller {
             ];
 
             clean_sweep_log_message("PluginReinstaller: Reinstallation completed - Total successful: $total_successful, Total failed: $total_failed", 'info');
+
+            // Clean up WPMU DEV batch transient on successful completion
+            delete_transient($wpmu_batch_key);
+            clean_sweep_log_message("PluginReinstaller: Cleaned up WPMU DEV batch transient on completion", 'info');
 
             // Send completion
             if ($progressManager) {
