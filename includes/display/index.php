@@ -148,6 +148,52 @@ function clean_sweep_display_malware_scan_results_real($scan_results) {
             echo '</div>';
         }
 
+        // INTEGRITY BASELINE MANAGEMENT SECTION
+        echo '<div class="integrity-baseline-section" style="background:#f8f9fa;border:1px solid #dee2e6;padding:25px;border-radius:8px;margin:30px 0;">';
+        echo '<h3 style="margin:0 0 20px 0;color:#495057;">🔐 Integrity Baseline Management</h3>';
+
+        // Baseline status
+        $baseline_exists = clean_sweep_get_core_baseline() !== null;
+        echo '<div style="margin-bottom:20px;padding:15px;border-radius:6px;background:white;border:1px solid #dee2e6;">';
+        echo '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">';
+        echo '<div style="width:12px;height:12px;border-radius:50%;background:' . ($baseline_exists ? '#28a745' : '#dc3545') . ';"></div>';
+        echo '<strong>Baseline Status:</strong> ' . ($baseline_exists ? 'Established' : 'Not Established');
+        echo '</div>';
+
+        if ($baseline_exists) {
+            $baseline = clean_sweep_get_core_baseline();
+            $established = isset($baseline['established_at']) ? date('Y-m-d H:i:s', $baseline['established_at']) : 'Unknown';
+            $wp_version = $baseline['wp_version'] ?? 'Unknown';
+            echo '<div style="font-size:14px;color:#6c757d;">';
+            echo '<strong>Established:</strong> ' . $established . ' • ';
+            echo '<strong>WordPress Version:</strong> ' . $wp_version;
+            echo '</div>';
+        }
+        echo '</div>';
+
+        // Baseline actions
+        echo '<div style="display:flex;flex-wrap:wrap;gap:15px;">';
+        echo '<button onclick="establishBaseline()" style="background:#28a745;color:white;border:none;padding:12px 20px;border-radius:6px;cursor:pointer;font-weight:500;min-width:160px;">';
+        echo '📋 Establish Baseline';
+        echo '</button>';
+
+        echo '<button onclick="exportBaseline()" style="background:#007bff;color:white;border:none;padding:12px 20px;border-radius:6px;cursor:pointer;font-weight:500;min-width:160px;">';
+        echo '📤 Export Baseline';
+        echo '</button>';
+
+        echo '<div style="display:flex;align-items:center;gap:10px;">';
+        echo '<input type="file" id="import-baseline-file" accept=".json" style="flex:1;min-width:200px;padding:8px;border:1px solid #dee2e6;border-radius:4px;">';
+        echo '<button onclick="importBaseline()" style="background:#6c757d;color:white;border:none;padding:12px 20px;border-radius:6px;cursor:pointer;font-weight:500;">';
+        echo '📥 Import & Compare';
+        echo '</button>';
+        echo '</div>';
+        echo '</div>';
+
+        // Status messages container
+        echo '<div id="baseline-status-messages" style="margin-top:15px;"></div>';
+
+        echo '</div>';
+
         echo '<div id="additional-threats-container" style="margin-top:20px;"></div>'; // Container for loaded threats
 
     } else {

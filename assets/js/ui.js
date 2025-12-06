@@ -257,16 +257,18 @@ function startMalwareScan() {
         }
     })
     .then(data => {
+
+
         // Process completed - stop polling
         clearInterval(malwareProgressInterval);
         malwareProgressInterval = null;
 
         // Show results
         if (data.success && data.html) {
-            // Update the malware tab content with the rendered HTML
-            const malwareTab = document.getElementById('malware-tab');
-            if (malwareTab) {
-                malwareTab.innerHTML = data.html;
+            // Update the security tab content with the rendered HTML
+            const securityTab = document.getElementById('security-tab');
+            if (securityTab) {
+                securityTab.innerHTML = data.html;
             }
 
             // Hide the progress container

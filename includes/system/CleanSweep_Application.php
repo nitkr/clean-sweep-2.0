@@ -51,6 +51,26 @@ class CleanSweep_Application {
                 $this->handle_reinstall_core();
                 break;
 
+            case 'establish_core_baseline':
+                $this->handle_establish_core_baseline();
+                break;
+
+            case 'export_baseline':
+                $this->handle_export_baseline();
+                break;
+
+            case 'import_baseline':
+                $this->handle_import_baseline();
+                break;
+
+            case 'compare_baselines':
+                $this->handle_compare_baselines();
+                break;
+
+            case 'save_comprehensive_baseline_setting':
+                $this->handle_save_comprehensive_baseline_setting();
+                break;
+
             case 'extract_zip':
                 $this->handle_extract_zip();
                 break;
@@ -361,10 +381,209 @@ class CleanSweep_Application {
         clean_sweep_execute_core_reinstallation($wp_version);
     }
 
+    private function handle_establish_core_baseline() {
+        try {
+            // Clean output buffers
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+
+            // Establish the core integrity baseline
+            $result = clean_sweep_establish_core_baseline();
+
+            // Return JSON response
+            header('Content-Type: application/json; charset=utf-8', true);
+            echo json_encode([
+                'success' => $result,
+                'message' => $result ? 'Core integrity baseline established successfully' : 'Failed to establish baseline'
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        } catch (Exception $e) {
+            // Clean any output buffers
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+
+            // Return error response
+            header('Content-Type: application/json; charset=utf-8', true);
+            echo json_encode(['success' => false, 'error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+    }
+
+    private function handle_export_baseline() {
+        try {
+            // Clean output buffers
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+
+            // Get integrity manager and export baseline
+            global $clean_sweep_functions;
+            $integrity_manager = $clean_sweep_functions->get_integrity_manager();
+            $result = $integrity_manager->export_baseline();
+
+            if (isset($result['error'])) {
+                header('Content-Type: application/json; charset=utf-8', true);
+                echo json_encode(['success' => false, 'error' => $result['error']], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+
+            // Return JSON response with export data
+            header('Content-Type: application/json; charset=utf-8', true);
+            echo json_encode([
+                'success' => true,
+                'data' => $result['data'],
+                'filename' => $result['filename'],
+                'message' => 'Baseline exported successfully'
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        } catch (Exception $e) {
+            // Clean any output buffers
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+
+            // Return error response
+            header('Content-Type: application/json; charset=utf-8', true);
+            echo json_encode(['success' => false, 'error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+    }
+
+    private function handle_import_baseline() {
+        try {
+            // Clean output buffers
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+
+            // Check if file was uploaded
+            if (!isset($_FILES['baseline_file']) || $_FILES['baseline_file']['error'] !== UPLOAD_ERR_OK) {
+                header('Content-Type: application/json; charset=utf-8', true);
+                echo json_encode(['success' => false, 'error' => 'No file uploaded'], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+
+            // Read uploaded file
+            $file_content = file_get_contents($_FILES['baseline_file']['tmp_name']);
+            if ($file_content === false) {
+                header('Content-Type: application/json; charset=utf-8', true);
+                echo json_encode(['success' => false, 'error' => 'Failed to read uploaded file'], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+
+            // Get integrity manager and import baseline
+            global $clean_sweep_functions;
+            $integrity_manager = $clean_sweep_functions->get_integrity_manager();
+            $result = $integrity_manager->import_baseline($file_content);
+
+            if (isset($result['error'])) {
+                header('Content-Type: application/json; charset=utf-8', true);
+                echo json_encode(['success' => false, 'error' => $result['error']], JSON_UNESCAPED_UNICODE);
+                exit;
+            }
+
+            // Return success response
+            header('Content-Type: application/json; charset=utf-8', true);
+            echo json_encode([
+                'success' => true,
+                'message' => 'Baseline imported and verified successfully',
+                'metadata' => $result['metadata']
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        } catch (Exception $e) {
+            // Clean any output buffers
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+
+            // Return error response
+            header('Content-Type: application/json; charset=utf-8', true);
+            echo json_encode(['success' => false, 'error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+    }
+
+    private function handle_compare_baselines() {
+        try {
+            // Clean output buffers
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+
+            // Get integrity manager and perform comparison
+            global $clean_sweep_functions;
+            $integrity_manager = $clean_sweep_functions->get_integrity_manager();
+
+            // For now, just run the standard reinfection check
+            // TODO: Extend to compare against imported baseline specifically
+            $violations = clean_sweep_check_for_reinfection();
+
+            // Return JSON response
+            header('Content-Type: application/json; charset=utf-8', true);
+            echo json_encode([
+                'success' => true,
+                'violations' => $violations,
+                'total_violations' => count($violations),
+                'message' => count($violations) > 0 ?
+                    "Found " . count($violations) . " integrity violations" :
+                    "No integrity violations detected"
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        } catch (Exception $e) {
+            // Clean any output buffers
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+
+            // Return error response
+            header('Content-Type: application/json; charset=utf-8', true);
+            echo json_encode(['success' => false, 'error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+    }
+
+    private function handle_save_comprehensive_baseline_setting() {
+        try {
+            // Clean output buffers
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+
+            // Get the enabled parameter
+            $enabled = isset($_POST['enabled']) && $_POST['enabled'] === '1';
+
+            // Save to session
+            $_SESSION['clean_sweep_comprehensive_baseline'] = $enabled;
+
+            clean_sweep_log_message("Comprehensive baseline monitoring " . ($enabled ? 'enabled' : 'disabled'), 'info');
+
+            // Return success response
+            header('Content-Type: application/json; charset=utf-8', true);
+            echo json_encode([
+                'success' => true,
+                'enabled' => $enabled,
+                'message' => 'Setting saved successfully'
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        } catch (Exception $e) {
+            // Clean any output buffers
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+
+            // Return error response
+            header('Content-Type: application/json; charset=utf-8', true);
+            echo json_encode(['success' => false, 'error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+    }
+
     private function handle_extract_zip() {
         // DEBUG: Check /core/fresh state before processing
-        // CleanSweep_Application.php is in /includes/system/, so go up 3 levels to project root, then down to /core/fresh
-        $fresh_dir_before = __DIR__ . '/../../../core/fresh';
+        // CleanSweep_Application.php is in /includes/system/, so go up 2 levels to project root, then down to /core/fresh
+        $fresh_dir_before = __DIR__ . '/../../core/fresh';
         $file_php_before = $fresh_dir_before . '/wp-admin/includes/file.php';
         clean_sweep_log_message("DEBUG: At handle_extract_zip start - /core/fresh exists: " . (is_dir($fresh_dir_before) ? 'YES' : 'NO'), 'debug');
         clean_sweep_log_message("DEBUG: At handle_extract_zip start - file.php exists: " . (file_exists($file_php_before) ? 'YES' : 'NO'), 'debug');

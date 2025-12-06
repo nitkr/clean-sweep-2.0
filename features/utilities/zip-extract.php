@@ -211,6 +211,36 @@ if (!class_exists('WP_Upgrader') || !class_exists('Plugin_Upgrader') || !class_e
     $success_count = count($results['successful']);
     $fail_count = count($results['failed']);
 
+    // ============================================================================
+    // ESTABLISH INTEGRITY BASELINE FOR REINFECTION DETECTION (comprehensive mode only)
+    // ============================================================================
+
+    if ($success_count > 0) {
+        // Check if comprehensive baseline mode is enabled
+        $comprehensive_mode = false;
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+        $comprehensive_mode = isset($_SESSION['clean_sweep_comprehensive_baseline']) && $_SESSION['clean_sweep_comprehensive_baseline'];
+
+        if ($comprehensive_mode) {
+            clean_sweep_log_message("🔐 Updating comprehensive baseline after ZIP installation");
+
+            // Update baseline after successful plugin/theme installation (comprehensive mode only)
+            if (function_exists('clean_sweep_establish_core_baseline')) {
+                $baseline_result = clean_sweep_establish_core_baseline();
+                if ($baseline_result) {
+                    clean_sweep_log_message("✅ Comprehensive integrity baseline updated successfully after ZIP installation");
+                    clean_sweep_log_message("🛡️ Future malware scans will detect reinfection by comparing against this baseline");
+                } else {
+                    clean_sweep_log_message("⚠️ Failed to update comprehensive integrity baseline after ZIP installation", 'warning');
+                }
+            }
+        } else {
+            clean_sweep_log_message("ℹ️ Skipping baseline update after ZIP installation (comprehensive mode disabled)");
+        }
+    }
+
     clean_sweep_log_message("WordPress installer batch completed. Success: $success_count, Failed: $fail_count");
 
     // Display final results

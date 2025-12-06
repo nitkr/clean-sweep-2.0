@@ -29,7 +29,7 @@ class CleanSweep_Functions {
 
     private $db;
 
-    public function __construct($db) {
+    public function __construct($db = null) {
         $this->db = $db;
         $this->init_functions();
     }
@@ -44,6 +44,7 @@ class CleanSweep_Functions {
         $this->init_wp_error();
         $this->init_is_wp_error();
         $this->init_filesystem();
+        $this->init_integrity_checks();
     }
 
     /**
@@ -175,7 +176,7 @@ class CleanSweep_Functions {
         if (!function_exists('download_url')) {
             function download_url($url, $timeout = 300) {
                 // Use Clean Sweep backups directory instead of system temp
-                $backup_dir = CLEAN_SWEEP_ROOT . 'backups';
+                $backup_dir = dirname(__DIR__, 2) . '/backups';
                 if (!is_dir($backup_dir)) {
                     mkdir($backup_dir, 0755, true);
                 }
@@ -297,5 +298,23 @@ class CleanSweep_Functions {
                 WP_Filesystem();
             }
         }
+    }
+
+    /**
+     * Initialize integrity checking functions
+     */
+    private function init_integrity_checks() {
+        // Include global integrity functions
+        require_once __DIR__ . '/CleanSweep_Integrity.php';
+
+        // Initialize integrity class for advanced features
+        $this->integrity_manager = new CleanSweep_Integrity();
+    }
+
+    /**
+     * Get integrity manager instance
+     */
+    public function get_integrity_manager() {
+        return $this->integrity_manager;
     }
 }

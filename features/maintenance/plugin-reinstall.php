@@ -784,6 +784,34 @@ function clean_sweep_execute_reinstallation($repo_plugins, $progress_file = null
         $wpmudev_success = count($wpmudev_results['successful'] ?? []);
         $wpmudev_failed = count($wpmudev_results['failed'] ?? []);
 
+        // ============================================================================
+        // ESTABLISH INTEGRITY BASELINE FOR REINFECTION DETECTION (comprehensive mode only)
+        // ============================================================================
+
+        // Check if comprehensive baseline mode is enabled
+        $comprehensive_mode = false;
+        if (session_status() === PHP_SESSION_NONE) {
+            session_start();
+        }
+        $comprehensive_mode = isset($_SESSION['clean_sweep_comprehensive_baseline']) && $_SESSION['clean_sweep_comprehensive_baseline'];
+
+        if ($comprehensive_mode) {
+            clean_sweep_log_message("🔐 Establishing comprehensive baseline after plugin reinstallation");
+
+            // Establish baseline for freshly reinstalled plugins (comprehensive mode only)
+            if (function_exists('clean_sweep_establish_core_baseline')) {
+                $baseline_result = clean_sweep_establish_core_baseline();
+                if ($baseline_result) {
+                    clean_sweep_log_message("✅ Comprehensive integrity baseline established successfully after plugin reinstallation");
+                    clean_sweep_log_message("🛡️ Future malware scans will detect reinfection by comparing against this baseline");
+                } else {
+                    clean_sweep_log_message("⚠️ Failed to establish comprehensive integrity baseline after plugin reinstallation", 'warning');
+                }
+            }
+        } else {
+            clean_sweep_log_message("ℹ️ Skipping baseline establishment after plugin reinstallation (comprehensive mode disabled)");
+        }
+
         clean_sweep_log_message("Final Summary: WordPress.org ({$wp_success}/{$wp_failed} success/failed) + WPMU DEV ({$wpmudev_success}/{$wpmudev_failed} success/failed)");
         clean_sweep_log_message("=== Complete Plugin Ecosystem Re-installation Completed ===");
     } else {

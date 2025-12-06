@@ -72,8 +72,17 @@ class CleanSweep_RecoveryBootstrap {
         if ($this->fresh_env->load()) {
             clean_sweep_log_message("🎉 Clean Sweep ready!", 'info');
 
+            // Create global functions object for CleanSweep_Application handlers
+            // FreshEnvironment already loaded WordPress and set up database connection
+            global $clean_sweep_functions;
+            if (!isset($clean_sweep_functions)) {
+                // Create functions object - WordPress DB connection already available
+                $clean_sweep_functions = new CleanSweep_Functions(null);
+                clean_sweep_log_message("✅ Global functions object created for application handlers", 'debug');
+            }
+
             // DEBUG: Check /core/fresh state after recovery completion
-            $fresh_dir = __DIR__ . '/../core/fresh';
+            $fresh_dir = __DIR__ . '/../../core/fresh';
             $file_php = $fresh_dir . '/wp-admin/includes/file.php';
             $upgrader_php = $fresh_dir . '/wp-admin/includes/class-wp-upgrader.php';
             clean_sweep_log_message("DEBUG: After recovery completion - /core/fresh exists: " . (is_dir($fresh_dir) ? 'YES' : 'NO'), 'debug');

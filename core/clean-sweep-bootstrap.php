@@ -74,7 +74,7 @@ require_once CLEAN_SWEEP_ROOT . 'includes/system/CleanSweep_DB.php';
 require_once CLEAN_SWEEP_ROOT . 'includes/system/CleanSweep_Functions.php';
 
 // Initialize database connection and functions
-global $clean_sweep_db;
+global $clean_sweep_db, $clean_sweep_functions;
 $clean_sweep_db = new CleanSweep_DB();
 $clean_sweep_functions = new CleanSweep_Functions($clean_sweep_db);
 

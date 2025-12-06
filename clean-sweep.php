@@ -37,6 +37,7 @@ require_once __DIR__ . '/includes/system/CleanSweep_RecoveryBootstrap.php';
 // Independent Bootstrap Classes
 require_once __DIR__ . '/includes/system/CleanSweep_DB.php';
 require_once __DIR__ . '/includes/system/CleanSweep_Functions.php';
+require_once __DIR__ . '/includes/system/CleanSweep_Integrity.php';
 require_once __DIR__ . '/includes/system/CleanSweep_Filesystem.php';
 
 // Feature-specific modules
@@ -53,6 +54,11 @@ require_once __DIR__ . '/includes/system/CleanSweep_Cleanup.php';
 // ============================================================================
 // INITIALIZATION
 // ============================================================================
+
+// Start session for settings persistence (before any output)
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
 
 // Check if this is an AJAX request (has progress_file OR action parameter) - BULLETPROOF DETECTION
 $is_ajax_request = false;
