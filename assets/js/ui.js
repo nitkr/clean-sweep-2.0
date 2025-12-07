@@ -483,13 +483,13 @@ function loadAllRemainingRecursive(requestId, page, perPage) {
                 // Update pagination info
                 updatePaginationUI(data, page, perPage, requestId, true);
 
-                // Show completion message
-                const paginationContainer = document.getElementById('threat-pagination');
-                if (paginationContainer) {
+                // Show completion message in additional threats container
+                const additionalContainer = document.getElementById('additional-threats-container');
+                if (additionalContainer) {
                     const completionMsg = document.createElement('div');
                     completionMsg.style.cssText = 'background:#d4edda;border:1px solid #c3e6cb;padding:15px;border-radius:8px;margin:15px 0;color:#155724;text-align:center;';
                     completionMsg.innerHTML = '<h5>🎉 All Threats Loaded!</h5><p style="margin:5px 0 0 0;">Complete threat analysis ready for review.</p>';
-                    paginationContainer.appendChild(completionMsg);
+                    additionalContainer.appendChild(completionMsg);
                 }
             }
         } else {
@@ -547,10 +547,10 @@ function insertThreatsIntoCategories(htmlContent, requestId, page = 2) {
     // Append to the additional threats container
     additionalContainer.appendChild(newThreats_wrapper);
 
-    // Update the "loaded X of Y" counter if present
-    const paginationContainer = document.getElementById('threat-pagination');
-    if (paginationContainer) {
-        const statElement = Array.from(paginationContainer.querySelectorAll('strong')).find(el =>
+    // Update the "loaded X of Y" counter in the header if present
+    const headerContainer = document.querySelector('.threat-pagination-header');
+    if (headerContainer) {
+        const statElement = Array.from(headerContainer.querySelectorAll('strong')).find(el =>
             el.textContent.match(/^\d+$/)
         );
         if (statElement) {
@@ -588,16 +588,7 @@ function findExistingPresenter(riskLevel) {
 
 // Update pagination UI after loading
 function updatePaginationUI(data, currentPage, perPage, requestId, allLoaded = false) {
-    const paginationContainer = document.getElementById('threat-pagination');
-    if (!paginationContainer) return;
-
-    // Update page counter
-    const pageInfo = paginationContainer.querySelector('div strong:first-child');
-    if (pageInfo && data.total_loaded) {
-        pageInfo.textContent = data.total_loaded;
-    }
-
-    // Update next page button
+    // Update next page button in the header
     const nextBtn = document.querySelector('button[onclick*="loadNextThreatPage"]');
     if (nextBtn) {
         if (allLoaded || !data.has_more) {
@@ -607,18 +598,32 @@ function updatePaginationUI(data, currentPage, perPage, requestId, allLoaded = f
             nextBtn.disabled = false;
         }
     }
+
+    // Update "Load All Remaining" button if all loaded
+    if (allLoaded) {
+        const loadAllBtn = document.querySelector('button[onclick*="loadAllRemainingThreats"]');
+        if (loadAllBtn) {
+            loadAllBtn.textContent = '✅ All Threats Loaded!';
+            loadAllBtn.disabled = true;
+            loadAllBtn.style.background = '#28a745';
+        }
+    }
 }
 
 // Show pagination error
 function showPaginationError(message) {
-    const paginationContainer = document.getElementById('threat-pagination');
-    if (!paginationContainer) return;
+    // Show error in the pagination header or additional threats container
+    const headerContainer = document.querySelector('.threat-pagination-header');
+    const additionalContainer = document.getElementById('additional-threats-container');
+    const targetContainer = headerContainer || additionalContainer;
+
+    if (!targetContainer) return;
 
     const errorDiv = document.createElement('div');
     errorDiv.style.cssText = 'background:#f8d7da;border:1px solid #f5c6cb;padding:15px;border-radius:8px;margin:15px 0;color:#721c24;text-align:center;';
     errorDiv.innerHTML = '<strong>❌ Error Loading Threats</strong><br>' + message;
 
-    paginationContainer.appendChild(errorDiv);
+    targetContainer.appendChild(errorDiv);
 
     // Auto-hide error after 10 seconds
     setTimeout(() => {
