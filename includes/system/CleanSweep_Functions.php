@@ -40,7 +40,7 @@ class CleanSweep_Functions {
     private function init_functions() {
         $this->init_get_plugins();
         // $this->init_download_url(); // REMOVED: Duplicate declaration - already declared in clean-sweep-bootstrap.php
-        $this->init_unzip_file();
+        // $this->init_unzip_file(); // REMOVED: Duplicate declaration - already declared in clean-sweep-bootstrap.php (with path translation)
         $this->init_wp_error();
         $this->init_is_wp_error();
         $this->init_filesystem();
@@ -180,53 +180,13 @@ class CleanSweep_Functions {
 
     /**
      * Initialize unzip_file() function
+     * REMOVED: Duplicate declaration - already declared in clean-sweep-bootstrap.php (with path translation)
+     * This was causing "Cannot redeclare unzip_file()" fatal errors during plugin reinstallation
      */
-    private function init_unzip_file() {
-        if (!function_exists('unzip_file')) {
-            function unzip_file($file, $to) {
-                // Apply path translation in recovery mode for destination directory
-                $to = clean_sweep_translate_path($to);
-
-                // Use PHP's ZipArchive if available
-                if (class_exists('ZipArchive')) {
-                    $zip = new ZipArchive();
-                    $result = $zip->open($file);
-
-                    if ($result === true) {
-                        // Create destination directory if it doesn't exist
-                        if (!is_dir($to)) {
-                            mkdir($to, 0755, true);
-                        }
-
-                        // Extract all files
-                        $success = $zip->extractTo($to);
-                        $zip->close();
-
-                        if ($success) {
-                            return true;
-                        } else {
-                            return new WP_Error('unzip_failed', 'Failed to extract ZIP file');
-                        }
-                    } else {
-                        return new WP_Error('zip_open_failed', 'Failed to open ZIP file');
-                    }
-                }
-
-                // Fallback: try system unzip command
-                if (function_exists('exec')) {
-                    $command = "unzip -q -o '$file' -d '$to' 2>/dev/null";
-                    exec($command, $output, $return_var);
-
-                    if ($return_var === 0) {
-                        return true;
-                    }
-                }
-
-                // Last resort: return error
-                return new WP_Error('unzip_not_available', 'ZIP extraction not available');
-            }
-        }
-    }
+    // private function init_unzip_file() {
+    //     // Removed to prevent function redeclaration conflicts
+    //     // The bootstrap version now includes path translation for recovery mode compatibility
+    // }
 
     /**
      * Initialize WP_Error class reference
