@@ -109,9 +109,7 @@ function clean_sweep_display_malware_scan_results_real($scan_results) {
             echo '▶️ Load Next Page';
             echo '</button>';
 
-            echo '<button class="pagination-btn" onclick="loadAllRemainingThreats(\'' . htmlspecialchars($scan_results['request_id']) . '\')" style="background:#28a745;color:white;border:none;padding:12px 20px;font-size:14px;border-radius:6px;cursor:pointer;min-width:140px;">';
-            echo '📥 Load All Remaining';
-            echo '</button>';
+
             echo '</div>';
 
             echo '<div style="font-size:14px;color:#495057;margin-bottom:10px;">';
@@ -120,7 +118,7 @@ function clean_sweep_display_malware_scan_results_real($scan_results) {
             echo '</div>';
 
             echo '<div style="background:#fff3cd;border:1px solid #ffeaa7;padding:10px;border-radius:4px;font-size:13px;color:#856404;">';
-            echo '💡 <strong>Tip:</strong> Use "Load All Remaining" for complete results or navigate page-by-page for better performance.';
+            echo '💡 <strong>Tip:</strong> Use Previous/Next buttons to navigate through threat results page by page.';
             echo '</div>';
             echo '</div>';
         }
