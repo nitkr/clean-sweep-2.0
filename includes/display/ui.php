@@ -28,7 +28,7 @@ function clean_sweep_display_toolkit_interface($plugin_results = null, $malware_
         echo '<button class="tab-button' . $core_active . '" onclick="switchTab(\'core\')">🛡️ Core Files</button>';
         echo '<button class="tab-button' . $plugins_active . '" onclick="switchTab(\'plugins\')">📦 Plugins</button>';
         echo '<button class="tab-button' . $upload_active . '" onclick="switchTab(\'upload\')">📁 Upload & Extract</button>';
-        echo '<button class="tab-button" onclick="switchTab(\'malware\')">🔍 Malware Scan</button>';
+        echo '<button class="tab-button" onclick="switchTab(\'security\')">🔒 Security</button>';
         echo '<button class="tab-button' . $cleanup_active . '" onclick="switchTab(\'cleanup\')">🗑️ Cleanup</button>';
         echo '</div>';
 
@@ -324,20 +324,24 @@ twentytwentyfour-child/suspicious-admin.php" style="width:100%;height:120px;font
         echo '</form>';
         echo '</div>';
 
-        // Malware Scan Tab
-        echo '<div id="malware-tab" class="tab-content">';
-        echo '<h3>🔍 Malware Database & File Scanner</h3>';
-        echo '<p>Scan your WordPress database and files for malware signatures.</p>';
+        // Security Tab (Malware Scan + Baseline Management)
+        echo '<div id="security-tab" class="tab-content">';
+        echo '<h3>🔒 Security Monitoring & Integrity</h3>';
+        echo '<p>Comprehensive security tools: malware scanning and integrity baseline management for advanced threat detection.</p>';
+
+        // MALWARE SCANNING SECTION
+        echo '<div class="security-malware-section" style="background:#f8f9fa;border:1px solid #dee2e6;padding:25px;border-radius:8px;margin:20px 0;">';
+        echo '<h4 style="margin:0 0 20px 0;color:#495057;">🔍 Malware Database & File Scanner</h4>';
 
         echo '<div style="background:#e7f3ff;border:1px solid #b8daff;padding:20px;border-radius:4px;margin:20px 0;">';
-        echo '<h4>🔍 Scan Options</h4>';
+        echo '<h5>🔍 Scan Options</h5>';
         echo '<div style="margin:15px 0;">';
-        echo '<h5>🕵️ File Scanning Depth</h5>';
+        echo '<h6>🕵️ File Scanning Depth</h6>';
         echo '<div style="margin-left:25px; margin-bottom:25px;">';
         echo '<label><input type="checkbox" id="level-scan-toggle" name="level_scan" value="1"><strong>Deep scan (3 levels deep) - increases scan time and uses more server resources</strong></label><br>';
         echo '<small style="display:block;color:#856404;margin:5px 0 0 20px;">⚠️ <strong>Performance warning:</strong> Scans 3 directory levels instead of 2 (default). Takes significantly longer and uses more CPU/memory resources. Only enable if you need comprehensive file analysis.</small>';
         echo '</div>';
-        echo '<h5>⚡ Quick Scan Family</h5>';
+        echo '<h6>⚡ Quick Scan Family</h6>';
         echo '<div style="margin-left:25px; margin-bottom:15px;">';
         echo '<label><input type="radio" name="scan_type" value="all" checked> Complete Scan (30-60 sec - Database + Files)</label><br>';
         echo '<label style="margin-left:20px; display:block;"><input type="radio" name="scan_type" value="database"> Database Only</label><br>';
@@ -347,13 +351,13 @@ twentytwentyfour-child/suspicious-admin.php" style="width:100%;height:120px;font
         echo '<small style="display:block;color:#666;margin-top:2px;">Leave empty to scan entire wp-content directory. Supports any path within WordPress root.</small>';
         echo '</div>';
         echo '</div>';
-        echo '<h5>🕵️ Deep Scan Family</h5>';
+        echo '<h6>🕵️ Deep Scan Family</h6>';
         echo '<div style="margin-left:25px;">';
         echo '<label><input type="radio" name="scan_type" value="deep" style="color:#dc3545;"> Deep Scan (2-5 min - Advanced Investigation)</label><br>';
         echo '</div>';
         echo '</div>';
         echo '<div id="deep-scan-options" style="background:#fff3cd;border:1px solid #ffeaa7;padding:15px;border-radius:4px;margin:10px 0;display:none;">';
-        echo '<h4>🔥 Advanced Deep Scan Capabilities</h4>';
+        echo '<h6>🔥 Advanced Deep Scan Capabilities</h6>';
         echo '<p>This comprehensive scan includes all standard features plus advanced detection methods:</p>';
         echo '<ul style="margin:10px 0;padding-left:20px;">';
         echo '<li><strong>🎯 Enhanced Pattern Matching:</strong> Standard and obfuscated malware signatures</li>';
@@ -362,7 +366,7 @@ twentytwentyfour-child/suspicious-admin.php" style="width:100%;height:120px;font
         echo '<li><strong>💾 Large Content Analysis:</strong> Scans >1MB options and serialized data</li>';
         echo '</ul>';
         echo '<div style="margin-top:15px;padding:10px;background:#fff3cd;border:1px solid #ffeaa7;border-radius:3px;">';
-        echo '<h5>⚡ Optional Advanced Checks</h5>';
+        echo '<h6>⚡ Optional Advanced Checks</h6>';
         echo '<label><input type="checkbox" name="check_mysql_persistence" value="1"> 🔍 Include MySQL Server Persistence Check</label><br>';
         echo '<small style="color:#856404;margin-left:20px;">Rare requirement - scans for database triggers/events. May need elevated permissions.</small>';
         echo '</div>';
@@ -370,7 +374,7 @@ twentytwentyfour-child/suspicious-admin.php" style="width:100%;height:120px;font
         echo '</div>';
 
         echo '<div style="background:#fff3cd;border:1px solid #ffeaa7;padding:15px;border-radius:4px;margin:20px 0;">';
-        echo '<h4>⚠️ Scan Information</h4>';
+        echo '<h5>⚠️ Scan Information</h5>';
         echo '<ul style="margin:10px 0;padding-left:20px;">';
         echo '<li>Database scan checks post content, comments, and options for known malware patterns</li>';
         echo '<li>File scan examines .php and .js files while skipping cache and upload directories</li>';
@@ -379,22 +383,92 @@ twentytwentyfour-child/suspicious-admin.php" style="width:100%;height:120px;font
         echo '</ul>';
         echo '</div>';
 
-        echo '<div style="text-align:center;margin:30px 0;">';
-        echo '<button onclick="startMalwareScan()" style="background:#dc3545;color:white;border:none;padding:15px 30px;font-size:18px;font-weight:bold;border-radius:4px;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.2);">';
+        echo '<div style="text-align:center;margin:20px 0;">';
+        echo '<button onclick="startMalwareScan()" style="background:#dc3545;color:white;border:none;padding:12px 25px;font-size:16px;font-weight:bold;border-radius:4px;cursor:pointer;box-shadow:0 2px 4px rgba(0,0,0,0.2);">';
         echo '🔍 Start Malware Scan';
         echo '</button>';
-        echo '<p style="margin-top:10px;color:#666;font-size:14px;">Click to begin scanning for malware threats</p>';
         echo '</div>';
 
         // Progress display area
         echo '<div id="malware-progress-container" style="display:none;margin:20px 0;">';
         echo '<div class="progress-container">';
-        echo '<h3><span id="malware-status-indicator" class="status-indicator status-processing">Scanning</span> Malware Scan Progress</h3>';
+        echo '<h4><span id="malware-status-indicator" class="status-indicator status-processing">Scanning</span> Malware Scan Progress</h4>';
         echo '<div class="progress-bar"><div id="malware-progress-fill" class="progress-fill" style="width:0%"></div></div>';
         echo '<div id="malware-progress-text" class="progress-text">Initializing...</div>';
         echo '</div>';
         echo '<div id="malware-progress-details" style="background:#f8f9fa;border:1px solid #dee2e6;padding:15px;border-radius:4px;margin:10px 0;"></div>';
         echo '</div>';
+
+        echo '</div>'; // End malware section
+
+        // INTEGRITY BASELINE MANAGEMENT SECTION
+        echo '<div class="integrity-baseline-section" style="background:#f8f9fa;border:1px solid #dee2e6;padding:25px;border-radius:8px;margin:30px 0;">';
+        echo '<h4 style="margin:0 0 20px 0;color:#495057;">🔐 Integrity Baseline Management</h4>';
+        echo '<p style="margin:0 0 20px 0;color:#6c757d;font-size:14px;">Advanced monitoring for sites with persistent reinfection. Creates comprehensive file integrity baselines for forensic analysis.</p>';
+
+        // Get comprehensive mode setting from session
+        $comprehensive_enabled = isset($_SESSION['clean_sweep_comprehensive_baseline']) && $_SESSION['clean_sweep_comprehensive_baseline'];
+
+        // Comprehensive mode toggle
+        echo '<div style="margin-bottom:25px;padding:15px;border-radius:6px;background:#e7f3ff;border:1px solid #b8daff;">';
+        echo '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">';
+        echo '<input type="checkbox" id="enable-comprehensive-baseline" onchange="toggleComprehensiveMode(this.checked)" style="width:18px;height:18px;" ' . ($comprehensive_enabled ? 'checked' : '') . '>';
+        echo '<strong style="color:#0c5460;">Enable Comprehensive Integrity Monitoring</strong>';
+        echo '</div>';
+        echo '<p style="margin:0;font-size:13px;color:#0c5460;">Monitor all WordPress files (core + plugins + themes + uploads) for changes. Use only for sites with persistent reinfection. Requires sufficient disk space and significantly increases processing time.</p>';
+        echo '</div>';
+
+        // Baseline status
+        $baseline_exists = function_exists('clean_sweep_get_core_baseline') && clean_sweep_get_core_baseline() !== null;
+        echo '<div style="margin-bottom:20px;padding:15px;border-radius:6px;background:white;border:1px solid #dee2e6;">';
+        echo '<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">';
+        echo '<div style="width:12px;height:12px;border-radius:50%;background:' . ($baseline_exists ? '#28a745' : '#dc3545') . ';"></div>';
+        echo '<strong>Baseline Status:</strong> ' . ($baseline_exists ? 'Established' : 'Not Established');
+        echo '</div>';
+
+        if ($baseline_exists) {
+            $baseline = clean_sweep_get_core_baseline();
+            $established = isset($baseline['established_at']) ? date('Y-m-d H:i:s', $baseline['established_at']) : 'Unknown';
+            $wp_version = $baseline['wp_version'] ?? 'Unknown';
+            echo '<div style="font-size:14px;color:#6c757d;">';
+            echo '<strong>Established:</strong> ' . $established . ' • ';
+            echo '<strong>WordPress Version:</strong> ' . $wp_version;
+            echo '</div>';
+        }
+        echo '</div>';
+
+        // Baseline actions
+        echo '<div style="display:flex;flex-wrap:wrap;gap:15px;">';
+        echo '<button onclick="establishBaseline()" style="background:#28a745;color:white;border:none;padding:12px 20px;border-radius:6px;cursor:pointer;font-weight:500;min-width:160px;">';
+        echo '📋 Establish Baseline';
+        echo '</button>';
+
+        echo '<button onclick="exportBaseline()" style="background:#007bff;color:white;border:none;padding:12px 20px;border-radius:6px;cursor:pointer;font-weight:500;min-width:160px;">';
+        echo '📤 Export Baseline';
+        echo '</button>';
+
+        echo '<div style="display:flex;align-items:center;gap:10px;">';
+        echo '<input type="file" id="import-baseline-file" accept=".json" style="flex:1;min-width:200px;padding:8px;border:1px solid #dee2e6;border-radius:4px;">';
+        echo '<button onclick="importBaseline()" style="background:#6c757d;color:white;border:none;padding:12px 20px;border-radius:6px;cursor:pointer;font-weight:500;">';
+        echo '📥 Import & Compare';
+        echo '</button>';
+        echo '</div>';
+        echo '</div>';
+
+        // Warning about comprehensive mode
+        echo '<div style="margin-top:15px;padding:12px;background:#fff3cd;border:1px solid #ffeaa7;border-radius:4px;">';
+        echo '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">';
+        echo '<span style="font-size:16px;">⚠️</span>';
+        echo '<strong style="color:#856404;">Comprehensive Mode Warning</strong>';
+        echo '</div>';
+        echo '<p style="margin:0;font-size:13px;color:#856404;">When comprehensive monitoring is enabled, the baseline will monitor <strong>thousands of files</strong> across your entire WordPress installation. This provides maximum security but requires significant disk space and processing time. Only enable for sites with persistent reinfection issues.</p>';
+        echo '</div>';
+
+        // Status messages container
+        echo '<div id="baseline-status-messages" style="margin-top:15px;"></div>';
+
+        echo '</div>';
+
         echo '</div>';
 
         // Cleanup Tab
@@ -438,6 +512,9 @@ twentytwentyfour-child/suspicious-admin.php" style="width:100%;height:120px;font
         echo '</div>';
 
         echo '</div>';
+
+        // Load required CSS file (JS already loaded by assets/script.js in header)
+        echo '<link rel="stylesheet" href="assets/css/style.css">';
 
         // Add CSS for tab interface
         echo '<style>

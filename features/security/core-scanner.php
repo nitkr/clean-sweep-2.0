@@ -105,28 +105,68 @@ class Clean_Sweep_Core_Malware_Scanner {
     private function scan_critical_options($results, $progress_callback = null) {
         global $wpdb;
 
-        // Only scan HIGH-RISK option names - much faster and more accurate
-        $high_risk_patterns = [
+        // Separate exact option names from patterns
+        $exact_options = [
             'active_plugins',
             'cron',
+            'recently_activated',
+            'rewrite_rules'
+        ];
+
+        $pattern_options = [
             'theme_mods_%',
             'widget_%',
-            'recently_activated',
-            'rewrite_rules',
             '_transient_%',
             '_site_transient_%'
         ];
 
-        foreach ($high_risk_patterns as $pattern) {
+        $total_items = count($exact_options) + count($pattern_options);
+        $current_item = 0;
+
+        // Scan exact option names
+        foreach ($exact_options as $option_name) {
+            $current_item++;
             if ($progress_callback) {
-                $progress_callback(1, count($high_risk_patterns), "Scanning {$pattern}");
+                $progress_callback($current_item, $total_items, "Scanning {$option_name}");
+            }
+
+            $results_sql = $wpdb->get_results(
+                $wpdb->prepare(
+                    "SELECT option_name, option_value FROM {$wpdb->options}
+                     WHERE option_name = %s AND LENGTH(option_value) > 0
+                     LIMIT 10",
+                    $option_name
+                )
+            );
+
+            foreach ($results_sql as $row) {
+                // Skip legitimate base64 data (images, etc.)
+                if ($this->is_legitimate_option($row->option_name, $row->option_value)) {
+                    continue;
+                }
+
+                $threats = $this->scan_content($row->option_value, 'wp_options');
+                if (!empty($threats)) {
+                    foreach ($threats as $threat) {
+                        $threat['option_name'] = $row->option_name;
+                        $results['wp_options'][] = $threat;
+                    }
+                }
+            }
+        }
+
+        // Scan option patterns
+        foreach ($pattern_options as $pattern) {
+            $current_item++;
+            if ($progress_callback) {
+                $progress_callback($current_item, $total_items, "Scanning {$pattern}");
             }
 
             $results_sql = $wpdb->get_results(
                 $wpdb->prepare(
                     "SELECT option_name, option_value FROM {$wpdb->options}
                      WHERE option_name LIKE %s AND LENGTH(option_value) > 0
-                     LIMIT 200",
+                     LIMIT 50",
                     $pattern
                 )
             );
@@ -350,7 +390,9 @@ class Clean_Sweep_Core_Malware_Scanner {
      * Scan wp-config.php file
      */
     private function scan_wp_config() {
-        $wp_config_path = ABSPATH . 'wp-config.php';
+        // Use original site path in recovery mode, otherwise use current ABSPATH
+        $base_path = defined('ORIGINAL_ABSPATH') ? ORIGINAL_ABSPATH : ABSPATH;
+        $wp_config_path = $base_path . 'wp-config.php';
         $threats = [];
 
         if (!file_exists($wp_config_path)) {
@@ -395,7 +437,8 @@ class Clean_Sweep_Core_Malware_Scanner {
      * Scan wp-content directory recursively with memory optimization
      */
     private function scan_wp_content_directory($progress_callback = null) {
-        $wp_content_path = WP_CONTENT_DIR;
+        // In recovery mode, scan the original site's wp-content directory
+        $wp_content_path = ORIGINAL_WP_CONTENT_DIR;
         $results = [
             'threats' => [],
             'files_scanned' => 0
@@ -549,10 +592,13 @@ class Clean_Sweep_Core_Malware_Scanner {
         // Remove leading/trailing slashes and normalize
         $path = trim($input_path, '/');
 
+        // Use original site ABSPATH in recovery mode for path validation
+        $wordpress_root = defined('ORIGINAL_ABSPATH') ? ORIGINAL_ABSPATH : ABSPATH;
+
         // Convert relative paths to absolute paths within WordPress root
-        if (!str_starts_with($path, ABSPATH)) {
+        if (!str_starts_with($path, $wordpress_root)) {
             // Allow ANY relative path within WordPress root (much more flexible)
-            $full_path = ABSPATH . $path;
+            $full_path = $wordpress_root . $path;
         } else {
             $full_path = $path;
         }
@@ -565,7 +611,7 @@ class Clean_Sweep_Core_Malware_Scanner {
         }
 
         // CRITICAL Security: Ensure path is within WordPress root
-        if (!str_starts_with($full_path, ABSPATH)) {
+        if (!str_starts_with($full_path, $wordpress_root)) {
             clean_sweep_log_message("Rejected scan path: {$full_path} - outside WordPress root", 'warning');
             return false;
         }

@@ -152,6 +152,11 @@ function clean_sweep_assign_risk_level($threat, $source = null) {
         return 'info';
     }
 
+    // INTEGRITY VIOLATIONS - Always critical (potential reinfection)
+    elseif ($section === 'integrity') {
+        return 'critical';
+    }
+
     // UNKNOWN SOURCE - Fallback logic for edge cases
     else {
         // Apply general critical checks
@@ -227,6 +232,8 @@ function clean_sweep_categorize_threat($threat, $section) {
         } else {
             return 'WordPress Files';
         }
+    } elseif ($section === 'integrity') {
+        return 'Reinfection Alerts';
     }
 
     return 'General Threats';
@@ -355,6 +362,19 @@ function clean_sweep_extract_all_threats($scan_results) {
             $all_threats[] = $file_data;
         }
         // FORMAT 4: Skip scalars and unexpected types (prevents crash)
+    }
+
+    // ========================================================================
+    // INTEGRITY VIOLATIONS - Handle integrity check results
+    // ========================================================================
+    if (isset($scan_results['integrity']) && is_array($scan_results['integrity'])) {
+        foreach ($scan_results['integrity'] as $violation) {
+            if (is_array($violation)) {
+                $violation['_section'] = 'integrity';
+                $violation['_category'] = 'File Integrity';
+                $all_threats[] = $violation;
+            }
+        }
     }
 
     return $all_threats;
