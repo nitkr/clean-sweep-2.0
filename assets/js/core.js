@@ -104,6 +104,7 @@ document.addEventListener("DOMContentLoaded", function() {
     const pluginCheckboxes = document.querySelectorAll('input[type="checkbox"][data-slug]');
     pluginCheckboxes.forEach(checkbox => {
         checkbox.addEventListener('change', function() {
+            console.log('🔄 Checkbox changed - disabling auto-scroll');
             // Completely disable auto-scroll during plugin selection
             autoScrollEnabled = false;
 
@@ -111,6 +112,11 @@ document.addEventListener("DOMContentLoaded", function() {
             if (window.checkboxScrollTimeout) {
                 clearTimeout(window.checkboxScrollTimeout);
             }
+
+            // Debug: Check auto-scroll status after a short delay
+            setTimeout(() => {
+                console.log('⏰ Auto-scroll status after checkbox change:', autoScrollEnabled);
+            }, 100);
         });
     });
 });
@@ -422,9 +428,11 @@ function copyPluginList(type) {
         }
     } else if (type === "nonrepo") {
         // Find the heading that contains "Non-Repository Plugins"
+        // Exclude button text from the search
         let targetHeading = null;
         headings.forEach(function(heading) {
-            if (heading.textContent.includes("Non-Repository Plugins")) {
+            const headingText = heading.textContent.replace(/Copy/g, '').trim();
+            if (headingText.includes("Non-Repository Plugins")) {
                 targetHeading = heading;
             }
         });
@@ -451,9 +459,11 @@ function copyPluginList(type) {
         }
     } else if (type === "suspicious") {
         // Find the heading that contains "Suspicious Files Detected"
+        // Exclude button text from the search
         let targetHeading = null;
         headings.forEach(function(heading) {
-            if (heading.textContent.includes("Suspicious Files Detected")) {
+            const headingText = heading.textContent.replace(/Copy/g, '').trim();
+            if (headingText.includes("Suspicious Files Detected")) {
                 targetHeading = heading;
             }
         });
