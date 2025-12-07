@@ -17,7 +17,7 @@ class CleanSweep_FreshEnvironment {
     private $integrity_file;
 
     public function __construct() {
-        $this->fresh_dir = __DIR__ . '/../../core/fresh';
+        $this->fresh_dir = dirname(dirname(dirname(__DIR__))) . '/core/fresh';
         $this->marker_file = $this->fresh_dir . '/.clean-sweep-setup';
         $this->htaccess_file = $this->fresh_dir . '/.htaccess';
         $this->integrity_file = $this->fresh_dir . '/.integrity-hash';
