@@ -40,7 +40,7 @@ class CleanSweep_Functions {
     private function init_functions() {
         $this->init_get_plugins();
         // $this->init_download_url(); // REMOVED: Duplicate declaration - already declared in clean-sweep-bootstrap.php
-        // $this->init_unzip_file(); // REMOVED: Duplicate declaration - already declared in clean-sweep-bootstrap.php (with path translation)
+        // $this->init_unzip_file(); // REMOVED: Duplicate declaration - already declared in clean-sweep-bootstrap.php
         $this->init_wp_error();
         $this->init_is_wp_error();
         $this->init_filesystem();
@@ -169,24 +169,9 @@ class CleanSweep_Functions {
         }
     }
 
-    /**
-     * Initialize download_url() function
-     * REMOVED: Duplicate declaration - already declared in clean-sweep-bootstrap.php
-     * This was causing "Cannot redeclare download_url()" fatal errors during plugin reinstallation
-     */
-    // private function init_download_url() {
-    //     // Removed to prevent function redeclaration conflicts
-    // }
 
-    /**
-     * Initialize unzip_file() function
-     * REMOVED: Duplicate declaration - already declared in clean-sweep-bootstrap.php (with path translation)
-     * This was causing "Cannot redeclare unzip_file()" fatal errors during plugin reinstallation
-     */
-    // private function init_unzip_file() {
-    //     // Removed to prevent function redeclaration conflicts
-    //     // The bootstrap version now includes path translation for recovery mode compatibility
-    // }
+
+
 
     /**
      * Initialize WP_Error class reference
