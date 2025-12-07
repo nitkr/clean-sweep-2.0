@@ -168,6 +168,28 @@ class CleanSweep_PluginReinstaller {
             $wp_org_complete = empty($wp_org_plugins) || ($batch_start + ($batch_size ?? count($wp_org_plugins))) >= count($wp_org_plugins);
 
             if ($wp_org_complete && !empty($wpmu_dev_plugins)) {
+                // CRITICAL: Check WPMU DEV availability BEFORE processing any batches
+                if (!clean_sweep_is_wpmudev_available()) {
+                    clean_sweep_log_message("PluginReinstaller: WPMU DEV Dashboard not available - skipping ALL WPMU DEV plugin processing", 'warning');
+
+                    // Mark ALL WPMU DEV plugins as skipped due to authentication issues
+                    foreach ($wpmu_dev_plugins as $plugin_file => $plugin_info) {
+                        $results['wpmu_dev']['failed'][] = [
+                            'name' => $plugin_info['name'] ?? $plugin_file,
+                            'slug' => $plugin_file,
+                            'status' => 'Skipped - WPMU DEV Dashboard not authenticated (check Hub connection)'
+                        ];
+                    }
+
+                    // Accumulate WPMU DEV results
+                    $this->accumulate_batch_results($progress_file, $results, 'wpmu_dev');
+
+                    clean_sweep_log_message("PluginReinstaller: Skipped " . count($wpmu_dev_plugins) . " WPMU DEV plugins due to dashboard unavailability", 'info');
+
+                    // Skip to final processing - no more batches needed
+                    goto final_processing;
+                }
+
                 clean_sweep_log_message("PluginReinstaller: WordPress.org complete, processing WPMU DEV plugins - Batch start: $batch_start, Size: " . ($batch_size ?? 'all'), 'info');
                 clean_sweep_log_message("PluginReinstaller: DEBUG - WPMU DEV plugins array has " . count($wpmu_dev_plugins) . " items", 'info');
                 foreach ($wpmu_dev_plugins as $key => $data) {
@@ -244,6 +266,8 @@ class CleanSweep_PluginReinstaller {
                     clean_sweep_log_message("PluginReinstaller: DEBUG - No WPMU DEV plugins in this batch, ending processing", 'info');
                 }
             }
+
+            final_processing:
 
             // Determine overall success and populate top-level arrays for display compatibility
             $total_successful = count($results['wordpress_org']['successful']) + count($results['wpmu_dev']['successful']);
