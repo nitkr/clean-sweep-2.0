@@ -1,9 +1,6 @@
 // Clean Sweep - Core Utilities
 // Core utility functions for Clean Sweep
 
-let autoScrollEnabled = false; // Completely disable auto-scroll feature
-let pluginSelectionActive = false; // Track if user is actively selecting plugins
-
 function updateProgress(current, total, status) {
     const progressBar = document.getElementById("progress-fill");
     const progressText = document.getElementById("progress-text");
@@ -23,18 +20,6 @@ function updateProgress(current, total, status) {
         if (progressBar) progressBar.style.width = "0%";
         if (progressText) progressText.textContent = status;
     }
-
-    // Auto-scroll to follow progress
-    if (autoScrollEnabled) {
-        scrollToBottom();
-    }
-}
-
-function scrollToBottom() {
-    window.scrollTo({
-        top: document.body.scrollHeight,
-        behavior: "smooth"
-    });
 }
 
 function scrollToResults() {
@@ -47,96 +32,29 @@ function scrollToResults() {
     }
 }
 
-// Auto-scroll when new content is added
-const observer = new MutationObserver(function(mutations) {
-    // Skip auto-scroll for checkbox changes (plugin selection)
-    const hasCheckboxChange = mutations.some(mutation => {
-        // Check if the target element is a checkbox
-        if (mutation.target.type === 'checkbox') {
-            return true;
-        }
-        // Check if the target contains checkboxes (like table cells with checkboxes)
-        if (mutation.target.querySelector && mutation.target.querySelector('input[type="checkbox"]')) {
-            return true;
-        }
-        // Check added/removed nodes for checkboxes
-        const checkNodes = (nodes) => {
-            for (let node of nodes) {
+// Check if results section has loaded
+document.addEventListener("DOMContentLoaded", function() {
+    // Observe for results section loading (keep this functionality)
+    const observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+            mutation.addedNodes.forEach(function(node) {
                 if (node.nodeType === Node.ELEMENT_NODE) {
-                    if (node.type === 'checkbox' || (node.querySelector && node.querySelector('input[type="checkbox"]'))) {
-                        return true;
+                    if (node.querySelector && node.querySelector("h2") &&
+                        node.querySelector("h2").textContent.includes("Final Reinstallation Results")) {
+                        setTimeout(scrollToResults, 500);
+                    } else if (node.tagName === "H2" &&
+                             node.textContent.includes("Final Reinstallation Results")) {
+                        setTimeout(scrollToResults, 500);
                     }
                 }
-            }
-            return false;
-        };
-        return checkNodes(mutation.addedNodes) || checkNodes(mutation.removedNodes);
-    });
-
-    if (autoScrollEnabled && !hasCheckboxChange) {
-        // Small delay to ensure content is rendered
-        setTimeout(scrollToBottom, 100);
-    }
-
-    // Check if results section has loaded
-    mutations.forEach(function(mutation) {
-        mutation.addedNodes.forEach(function(node) {
-            if (node.nodeType === Node.ELEMENT_NODE) {
-                if (node.querySelector && node.querySelector("h2") &&
-                    node.querySelector("h2").textContent.includes("Final Reinstallation Results")) {
-                    setTimeout(scrollToResults, 500);
-                } else if (node.tagName === "H2" &&
-                         node.textContent.includes("Final Reinstallation Results")) {
-                    setTimeout(scrollToResults, 500);
-                }
-            }
+            });
         });
     });
-});
 
-// Start observing when page loads
-document.addEventListener("DOMContentLoaded", function() {
     observer.observe(document.body, {
         childList: true,
         subtree: true
     });
-
-    // Completely disable auto-scroll during plugin checkbox interactions
-    const pluginCheckboxes = document.querySelectorAll('input[type="checkbox"][data-slug]');
-    pluginCheckboxes.forEach(checkbox => {
-        checkbox.addEventListener('change', function() {
-            // Mark plugin selection as active
-            pluginSelectionActive = true;
-            // Completely disable auto-scroll during plugin selection
-            autoScrollEnabled = false;
-
-            // Clear any existing timeout that might re-enable it
-            if (window.checkboxScrollTimeout) {
-                clearTimeout(window.checkboxScrollTimeout);
-            }
-        });
-    });
-});
-
-// Handle scroll events for auto-scroll management
-let scrollTimeout;
-window.addEventListener("scroll", function() {
-    clearTimeout(scrollTimeout);
-    const currentScroll = window.pageYOffset;
-    const maxScroll = document.body.scrollHeight - window.innerHeight;
-
-    // If user scrolled to bottom and not actively selecting plugins, re-enable auto-scroll
-    if (currentScroll >= maxScroll - 10 && !pluginSelectionActive) {
-        autoScrollEnabled = true;
-    }
-    // If user scrolled up significantly, disable auto-scroll and reset plugin selection state
-    else if (currentScroll < maxScroll - 100) {
-        pluginSelectionActive = false; // User scrolled up - likely done with plugin selection
-        autoScrollEnabled = false;
-        scrollTimeout = setTimeout(function() {
-            autoScrollEnabled = true;
-        }, 3000); // Re-enable after 3 seconds of no scrolling (for progress updates)
-    }
 });
 
 // Copy to clipboard functionality
