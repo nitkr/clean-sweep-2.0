@@ -100,39 +100,38 @@ document.addEventListener("DOMContentLoaded", function() {
         subtree: true
     });
 
-    // Disable auto-scroll during plugin checkbox interactions
+    // Completely disable auto-scroll during plugin checkbox interactions
     const pluginCheckboxes = document.querySelectorAll('input[type="checkbox"][data-slug]');
     pluginCheckboxes.forEach(checkbox => {
         checkbox.addEventListener('change', function() {
-            // Temporarily disable auto-scroll during plugin selection
+            // Completely disable auto-scroll during plugin selection
             autoScrollEnabled = false;
 
-            // Clear any existing timeout
+            // Clear any existing timeout that might re-enable it
             if (window.checkboxScrollTimeout) {
                 clearTimeout(window.checkboxScrollTimeout);
             }
-
-            // Re-enable auto-scroll after 2 seconds of no checkbox activity
-            window.checkboxScrollTimeout = setTimeout(() => {
-                autoScrollEnabled = true;
-            }, 2000);
         });
     });
 });
 
-// Disable auto-scroll if user manually scrolls up
+// Handle scroll events for auto-scroll management
 let scrollTimeout;
 window.addEventListener("scroll", function() {
     clearTimeout(scrollTimeout);
     const currentScroll = window.pageYOffset;
     const maxScroll = document.body.scrollHeight - window.innerHeight;
 
-    // If user scrolled up (not at bottom), disable auto-scroll temporarily
-    if (currentScroll < maxScroll - 100) {
+    // If user scrolled to bottom, re-enable auto-scroll (indicates done with plugin selection)
+    if (currentScroll >= maxScroll - 10) {
+        autoScrollEnabled = true;
+    }
+    // If user scrolled up significantly, disable auto-scroll temporarily
+    else if (currentScroll < maxScroll - 100) {
         autoScrollEnabled = false;
         scrollTimeout = setTimeout(function() {
             autoScrollEnabled = true;
-        }, 3000); // Re-enable after 3 seconds of no scrolling
+        }, 3000); // Re-enable after 3 seconds of no scrolling (for progress updates)
     }
 });
 
@@ -357,9 +356,11 @@ function copyPluginList(type) {
 
     if (type === "reinstall") {
         // Find the heading that contains "WordPress.org Plugins to be Re-installed"
+        // Exclude button text from the search
         let targetHeading = null;
         headings.forEach(function(heading) {
-            if (heading.textContent.includes("WordPress.org Plugins to be Re-installed")) {
+            const headingText = heading.textContent.replace(/Copy/g, '').trim();
+            if (headingText.includes("WordPress.org Plugins to be Re-installed")) {
                 targetHeading = heading;
             }
         });
@@ -388,9 +389,11 @@ function copyPluginList(type) {
         }
     } else if (type === "wpmudev") {
         // Find the heading that contains "WPMU DEV Premium Plugins to be Re-installed"
+        // Exclude button text from the search
         let targetHeading = null;
         headings.forEach(function(heading) {
-            if (heading.textContent.includes("WPMU DEV Premium Plugins to be Re-installed")) {
+            const headingText = heading.textContent.replace(/Copy/g, '').trim();
+            if (headingText.includes("WPMU DEV Premium Plugins to be Re-installed")) {
                 targetHeading = heading;
             }
         });
