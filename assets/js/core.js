@@ -2,6 +2,7 @@
 // Core utility functions for Clean Sweep
 
 let autoScrollEnabled = false; // Completely disable auto-scroll feature
+let pluginSelectionActive = false; // Track if user is actively selecting plugins
 
 function updateProgress(current, total, status) {
     const progressBar = document.getElementById("progress-fill");
@@ -104,6 +105,8 @@ document.addEventListener("DOMContentLoaded", function() {
     const pluginCheckboxes = document.querySelectorAll('input[type="checkbox"][data-slug]');
     pluginCheckboxes.forEach(checkbox => {
         checkbox.addEventListener('change', function() {
+            // Mark plugin selection as active
+            pluginSelectionActive = true;
             // Completely disable auto-scroll during plugin selection
             autoScrollEnabled = false;
 
@@ -122,12 +125,13 @@ window.addEventListener("scroll", function() {
     const currentScroll = window.pageYOffset;
     const maxScroll = document.body.scrollHeight - window.innerHeight;
 
-    // If user scrolled to bottom, re-enable auto-scroll (indicates done with plugin selection)
-    if (currentScroll >= maxScroll - 10) {
+    // If user scrolled to bottom and not actively selecting plugins, re-enable auto-scroll
+    if (currentScroll >= maxScroll - 10 && !pluginSelectionActive) {
         autoScrollEnabled = true;
     }
-    // If user scrolled up significantly, disable auto-scroll temporarily
+    // If user scrolled up significantly, disable auto-scroll and reset plugin selection state
     else if (currentScroll < maxScroll - 100) {
+        pluginSelectionActive = false; // User scrolled up - likely done with plugin selection
         autoScrollEnabled = false;
         scrollTimeout = setTimeout(function() {
             autoScrollEnabled = true;
