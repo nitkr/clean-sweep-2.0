@@ -44,9 +44,10 @@ class CleanSweep_PluginAnalyzer {
             $non_repo_plugins = [];
             $skipped_plugins = [];
 
-            // Get WPMU DEV cached projects for lookup
+            // Check WPMU DEV availability and get cached projects for lookup
+            $wpmu_dev_available = clean_sweep_is_wpmudev_available();
             $wpmudev_projects = [];
-            if (clean_sweep_is_wpmudev_available()) {
+            if ($wpmu_dev_available) {
                 WPMUDEV_Dashboard::$site->refresh_local_projects('local');
                 $wpmudev_projects = WPMUDEV_Dashboard::$site->get_cached_projects();
             }
@@ -117,6 +118,7 @@ class CleanSweep_PluginAnalyzer {
                     'non_repo_plugins' => $non_repo_plugins,
                     'suspicious_files' => $suspicious_files,
                     'copy_lists' => $copy_lists,
+                    'wpmu_dev_available' => $wpmu_dev_available,
                     'totals' => [
                         'wordpress_org' => $wp_org_count,
                         'wpmu_dev' => $wpmu_dev_count,
@@ -138,6 +140,7 @@ class CleanSweep_PluginAnalyzer {
                 'skipped_plugins' => $skipped_plugins,
                 'suspicious_files' => $suspicious_files,
                 'copy_lists' => $copy_lists,
+                'wpmu_dev_available' => $wpmu_dev_available,
                 'totals' => [
                     'wordpress_org' => $wp_org_count,
                     'wpmu_dev' => $wpmu_dev_count,
