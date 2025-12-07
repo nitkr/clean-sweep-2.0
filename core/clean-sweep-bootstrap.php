@@ -126,13 +126,9 @@ if (!function_exists('download_url')) {
 /**
  * Custom unzip_file function that overrides WordPress's version
  * Doesn't require filesystem constants like FS_CHMOD_DIR
- * Includes path translation for recovery mode compatibility
  */
 if (!function_exists('unzip_file')) {
     function unzip_file($file, $to) {
-        // Apply path translation in recovery mode for destination directory
-        $to = clean_sweep_translate_path($to);
-
         // Use PHP's ZipArchive if available
         if (class_exists('ZipArchive')) {
             $zip = new ZipArchive();

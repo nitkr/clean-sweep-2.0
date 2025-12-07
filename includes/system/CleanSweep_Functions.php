@@ -196,21 +196,21 @@ class CleanSweep_Functions {
      * Initialize filesystem functions
      */
     private function init_filesystem() {
-        // WP_Filesystem initialization
-        if (!function_exists('WP_Filesystem')) {
-            function WP_Filesystem() {
-                global $wp_filesystem;
-                if (!isset($wp_filesystem)) {
-                    $wp_filesystem = new Clean_Sweep_Filesystem();
-                }
-                return true;
-            }
-        }
+        // WP_Filesystem is provided by WordPress core - don't declare it here
+        // Just ensure we initialize the filesystem with our custom class if WordPress hasn't done it
 
         // Initialize filesystem on first call
         if (!function_exists('clean_sweep_init_filesystem')) {
             function clean_sweep_init_filesystem() {
-                WP_Filesystem();
+                global $wp_filesystem;
+                // If WordPress hasn't initialized filesystem yet, do it with our class
+                if (!isset($wp_filesystem) && function_exists('WP_Filesystem')) {
+                    WP_Filesystem(); // Use WordPress core function
+                }
+                // If still not set, use our fallback
+                if (!isset($wp_filesystem)) {
+                    $wp_filesystem = new Clean_Sweep_Filesystem();
+                }
             }
         }
     }
