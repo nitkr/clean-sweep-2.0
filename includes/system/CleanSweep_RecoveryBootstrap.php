@@ -130,7 +130,7 @@ class CleanSweep_RecoveryBootstrap {
 
         echo '<div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 20px; border-radius: 6px; margin-bottom: 30px;">';
         echo '<h3 style="margin: 0 0 15px 0; color: #856404;">🔄 Setting up Secure Recovery Environment</h3>';
-        echo '<p style="margin: 0; color: #856404;">Clean Sweep uses a dedicated, secure environment for maximum protection. This ensures potentially compromised files are never executed during the recovery process.</p>';
+        echo '<p style="margin: 0; color: #856404;">Clean Sweep runs in a protected recovery environment that safely isolates and removes malware.</p>';
         echo '</div>';
 
         echo '<div id="setup-progress" style="margin-bottom: 30px;">';
