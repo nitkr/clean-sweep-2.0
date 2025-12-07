@@ -99,6 +99,25 @@ document.addEventListener("DOMContentLoaded", function() {
         childList: true,
         subtree: true
     });
+
+    // Disable auto-scroll during plugin checkbox interactions
+    const pluginCheckboxes = document.querySelectorAll('input[type="checkbox"][data-slug]');
+    pluginCheckboxes.forEach(checkbox => {
+        checkbox.addEventListener('change', function() {
+            // Temporarily disable auto-scroll during plugin selection
+            autoScrollEnabled = false;
+
+            // Clear any existing timeout
+            if (window.checkboxScrollTimeout) {
+                clearTimeout(window.checkboxScrollTimeout);
+            }
+
+            // Re-enable auto-scroll after 2 seconds of no checkbox activity
+            window.checkboxScrollTimeout = setTimeout(() => {
+                autoScrollEnabled = true;
+            }, 2000);
+        });
+    });
 });
 
 // Disable auto-scroll if user manually scrolls up
