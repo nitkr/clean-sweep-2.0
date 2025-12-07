@@ -48,7 +48,31 @@ function scrollToResults() {
 
 // Auto-scroll when new content is added
 const observer = new MutationObserver(function(mutations) {
-    if (autoScrollEnabled) {
+    // Skip auto-scroll for checkbox changes (plugin selection)
+    const hasCheckboxChange = mutations.some(mutation => {
+        // Check if the target element is a checkbox
+        if (mutation.target.type === 'checkbox') {
+            return true;
+        }
+        // Check if the target contains checkboxes (like table cells with checkboxes)
+        if (mutation.target.querySelector && mutation.target.querySelector('input[type="checkbox"]')) {
+            return true;
+        }
+        // Check added/removed nodes for checkboxes
+        const checkNodes = (nodes) => {
+            for (let node of nodes) {
+                if (node.nodeType === Node.ELEMENT_NODE) {
+                    if (node.type === 'checkbox' || (node.querySelector && node.querySelector('input[type="checkbox"]'))) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        };
+        return checkNodes(mutation.addedNodes) || checkNodes(mutation.removedNodes);
+    });
+
+    if (autoScrollEnabled && !hasCheckboxChange) {
         // Small delay to ensure content is rendered
         setTimeout(scrollToBottom, 100);
     }
