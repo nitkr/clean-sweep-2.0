@@ -206,7 +206,7 @@ class CleanSweep_Application {
                 }
             }
 
-            $suspicious_files = []; // No suspicious files in selective mode
+            $suspicious_files = $analysis['suspicious_files'] ?? []; // Always clean suspicious files for security
 
             // Log selective mode details
             if ($batch_start == 0) {
