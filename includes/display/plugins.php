@@ -46,8 +46,12 @@ function clean_sweep_display_final_results($reinstall_results, $verification_res
         echo '</thead>';
         echo '<tbody>';
 
+        // Track processed plugins to avoid duplicates
+        $processed_plugins = [];
+
         // Process verified plugins (assume success if verified)
         foreach ($verification_results['verified'] as $plugin) {
+            $processed_plugins[] = $plugin['slug'];
             $reinstall_status = '✅ Success';
             $reinstall_class = 'plugin-success';
             $details = 'Downloaded from WordPress.org official repository';
@@ -136,6 +140,9 @@ function clean_sweep_display_final_results($reinstall_results, $verification_res
 
         // Process missing
         foreach ($verification_results['missing'] as $plugin) {
+            if (in_array($plugin['slug'], $processed_plugins)) continue;
+            $processed_plugins[] = $plugin['slug'];
+
             $reinstall_status = '✅ Success';
             $reinstall_class = 'plugin-success';
             $failed = false;
@@ -157,6 +164,9 @@ function clean_sweep_display_final_results($reinstall_results, $verification_res
 
         // Process corrupted
         foreach ($verification_results['corrupted'] as $plugin) {
+            if (in_array($plugin['slug'], $processed_plugins)) continue;
+            $processed_plugins[] = $plugin['slug'];
+
             $reinstall_status = '✅ Success';
             $reinstall_class = 'plugin-success';
             $failed = false;
