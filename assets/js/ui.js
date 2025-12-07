@@ -395,11 +395,11 @@ function loadNextThreatPage(requestId, page, perPage) {
     })
     .then(data => {
         if (data.success) {
-            // Insert new threats into the threat categories structure
-            insertThreatsIntoCategories(data.html, requestId, page);
+            // Replace threat timeline with new page content
+            replaceThreatTimelineWithPage(data.html, requestId, page);
 
-            // Update pagination UI
-            updatePaginationUI(data, page, perPage, requestId);
+            // Update pagination UI with proper navigation
+            updatePaginationControls(data, page, perPage, requestId);
         } else {
             showPaginationError('Error loading next page: ' + (data.error || 'Unknown error'));
         }
@@ -465,32 +465,21 @@ function loadAllRemainingRecursive(requestId, page, perPage) {
     })
     .then(data => {
         if (data.success) {
-            // Insert new threats
-            insertThreatsIntoCategories(data.html, requestId);
+            // For "Load All Remaining", we show a completion message instead of pagination
+            const additionalContainer = document.getElementById('additional-threats-container');
+            if (additionalContainer) {
+                const completionMsg = document.createElement('div');
+                completionMsg.style.cssText = 'background:#d4edda;border:1px solid #c3e6cb;padding:15px;border-radius:8px;margin:15px 0;color:#155724;text-align:center;';
+                completionMsg.innerHTML = '<h5>🎉 All Threats Loaded!</h5><p style="margin:5px 0 0 0;">Complete threat analysis ready for review.</p>';
+                additionalContainer.appendChild(completionMsg);
+            }
 
-            if (data.has_more) {
-                // Continue loading next page
-                loadAllRemainingRecursive(requestId, page + 1, perPage);
-            } else {
-                // Finished loading all threats
-                const btn = document.querySelector('button[onclick*="loadAllRemainingThreats"]');
-                if (btn) {
-                    btn.textContent = '✅ All Threats Loaded!';
-                    btn.disabled = true;
-                    btn.style.background = '#28a745';
-                }
-
-                // Update pagination info
-                updatePaginationUI(data, page, perPage, requestId, true);
-
-                // Show completion message in additional threats container
-                const additionalContainer = document.getElementById('additional-threats-container');
-                if (additionalContainer) {
-                    const completionMsg = document.createElement('div');
-                    completionMsg.style.cssText = 'background:#d4edda;border:1px solid #c3e6cb;padding:15px;border-radius:8px;margin:15px 0;color:#155724;text-align:center;';
-                    completionMsg.innerHTML = '<h5>🎉 All Threats Loaded!</h5><p style="margin:5px 0 0 0;">Complete threat analysis ready for review.</p>';
-                    additionalContainer.appendChild(completionMsg);
-                }
+            // Update button status
+            const btn = document.querySelector('button[onclick*="loadAllRemainingThreats"]');
+            if (btn) {
+                btn.textContent = '✅ All Threats Loaded!';
+                btn.disabled = true;
+                btn.style.background = '#28a745';
             }
         } else {
             // Stop loading on error
@@ -515,51 +504,33 @@ function loadAllRemainingRecursive(requestId, page, perPage) {
     });
 }
 
-// Insert threats into existing timeline structure - FIXED for <li> elements
-function insertThreatsIntoCategories(htmlContent, requestId, page = 2) {
+// Replace threat timeline with new page content for proper pagination
+function replaceThreatTimelineWithPage(htmlContent, requestId, page) {
+    // Find the existing threat timeline
+    const threatTimeline = document.querySelector('.threat-timeline');
+    if (!threatTimeline) {
+        console.error('Threat timeline not found');
+        return;
+    }
+
+    // Parse the HTML content
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = htmlContent;
 
-    // Find the container for additional threats
-    const additionalContainer = document.getElementById('additional-threats-container');
-    if (!additionalContainer) {
-        console.error('Additional threats container not found');
-        return;
-    }
-
-    // Get all threat <li> elements from the response
-    const threatItems = tempDiv.querySelectorAll('li');
-    if (threatItems.length === 0) {
-        console.error('No threat items found in HTML response');
-        return;
-    }
-
-    // Create a wrapper for the new threats
-    const newThreats_wrapper = document.createElement('div');
-    newThreats_wrapper.style.cssText = 'background:#f8f9fa;border:1px solid #dee2e6;padding:20px;border-radius:8px;margin:30px 0;';
-    newThreats_wrapper.innerHTML = `
-        <h4 style="margin:0 0 20px 0;color:#495057;">📄 Additional Threats (Page ${page})</h4>
-        <ul style="list-style:none;padding:0;margin:0;">
-            ${Array.from(threatItems).map(li => li.outerHTML).join('')}
-        </ul>
+    // Create new paginated threat timeline
+    const newTimelineHTML = `
+        <div class="threat-timeline" style="margin:20px 0;">
+            <h4 style="background:#e7f0ff;border:1px solid #b3d9ff;padding:15px;border-radius:8px;margin-bottom:20px;text-align:center;">
+                📄 Threat Results - Page ${page}
+            </h4>
+            ${Array.from(tempDiv.children).map(child => child.outerHTML).join('')}
+        </div>
     `;
 
-    // Append to the additional threats container
-    additionalContainer.appendChild(newThreats_wrapper);
+    // Replace the existing timeline
+    threatTimeline.outerHTML = newTimelineHTML;
 
-    // Update the "loaded X of Y" counter in the header if present
-    const headerContainer = document.querySelector('.threat-pagination-header');
-    if (headerContainer) {
-        const statElement = Array.from(headerContainer.querySelectorAll('strong')).find(el =>
-            el.textContent.match(/^\d+$/)
-        );
-        if (statElement) {
-            const newTotal = parseInt(statElement.textContent) + threatItems.length;
-            statElement.textContent = newTotal;
-        }
-    }
-
-    console.log(`✅ Appended ${threatItems.length} threat items to additional container`);
+    console.log(`✅ Replaced threat timeline with page ${page} content`);
 }
 
 // Find existing threat presenter by risk level
@@ -586,28 +557,53 @@ function findExistingPresenter(riskLevel) {
     return null;
 }
 
-// Update pagination UI after loading
-function updatePaginationUI(data, currentPage, perPage, requestId, allLoaded = false) {
-    // Update next page button in the header
-    const nextBtn = document.querySelector('button[onclick*="loadNextThreatPage"]');
-    if (nextBtn) {
-        if (allLoaded || !data.has_more) {
-            nextBtn.style.display = 'none';
-        } else {
-            nextBtn.textContent = '▶️ Load Next Page';
-            nextBtn.disabled = false;
-        }
+// Update pagination controls with proper navigation
+function updatePaginationControls(data, currentPage, perPage, requestId) {
+    const totalPages = Math.ceil(data.total_available / perPage);
+
+    // Find the pagination header
+    const paginationHeader = document.querySelector('.threat-pagination-header');
+    if (!paginationHeader) {
+        console.error('Pagination header not found');
+        return;
     }
 
-    // Update "Load All Remaining" button if all loaded
-    if (allLoaded) {
-        const loadAllBtn = document.querySelector('button[onclick*="loadAllRemainingThreats"]');
-        if (loadAllBtn) {
-            loadAllBtn.textContent = '✅ All Threats Loaded!';
-            loadAllBtn.disabled = true;
-            loadAllBtn.style.background = '#28a745';
-        }
-    }
+    // Replace with proper navigation controls
+    paginationHeader.innerHTML = `
+        <h4 style="margin:0 0 15px 0;color:#084c7d;">🔄 Threat Results Navigation</h4>
+        <div style="display:flex;justify-content:center;align-items:center;gap:15px;margin-bottom:15px;flex-wrap:wrap;">
+            <button class="pagination-btn" ${currentPage <= 1 ? 'disabled' : ''}
+                    onclick="loadThreatPage('${requestId}', ${currentPage - 1}, ${perPage})"
+                    style="background:#007bff;color:white;border:none;padding:12px 20px;font-size:14px;border-radius:6px;cursor:pointer;min-width:120px;">
+                ◀️ Previous
+            </button>
+
+            <span style="font-size:16px;font-weight:bold;color:#495057;">
+                Page ${currentPage} of ${totalPages}
+            </span>
+
+            <button class="pagination-btn" ${!data.has_more ? 'disabled' : ''}
+                    onclick="loadNextThreatPage('${requestId}', ${currentPage + 1}, ${perPage})"
+                    style="background:#007bff;color:white;border:none;padding:12px 20px;font-size:14px;border-radius:6px;cursor:pointer;min-width:120px;">
+                Next ▶️
+            </button>
+        </div>
+
+        <div style="font-size:14px;color:#495057;margin-bottom:10px;text-align:center;">
+            <strong>${data.total_loaded || (currentPage * perPage)}</strong> threats shown of <strong>${data.total_available}</strong> total
+        </div>
+
+        <div style="background:#fff3cd;border:1px solid #ffeaa7;padding:10px;border-radius:4px;font-size:13px;color:#856404;text-align:center;">
+            💡 <strong>Navigation:</strong> Use Previous/Next buttons to browse threat pages
+        </div>
+    `;
+}
+
+// Load specific threat page (for Previous button)
+function loadThreatPage(requestId, page, perPage) {
+    if (page < 1) return;
+
+    loadNextThreatPage(requestId, page, perPage);
 }
 
 // Show pagination error
