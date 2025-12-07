@@ -487,6 +487,10 @@ class Clean_Sweep_Malware_Signatures {
 
             // Suspicious index.php in wp-content subdirs
             '#wp-content/(uploads|backup|backups|mu-plugins|[a-z0-9]{6,})/.*index\.php$#i',
+
+            // Gambling Affiliate Malware Detection (2025 threat)
+            // Detects hidden casino/gambling posts created by affiliate malware
+            '/(wp_insert_post|wp_update_post).*display\s*:\s*none.*(casino|slots?|jackpot|poker|roulette|blackjack|gambl|bet365|1xbet|azino|vulkan|frank|rox|champion|catcasino|eldorado|joycasino|playfortuna|sol|fresh|legzo|starda|drip|jet|izzi|kometa|vodka|monro|dragonmoney|retro|garilla|pharaoh|admiral|booi|gama|kent|daddy|vavada|selector|upx|lex|spark|cz|pin-?up|aviator|1win|melbet)/si',
         ];
     }
 
