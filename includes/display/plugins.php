@@ -21,11 +21,17 @@ function clean_sweep_display_final_results($reinstall_results, $verification_res
         echo 'Reinstallation complete. Below is a combined summary of the process and verification of installed plugins.';
         echo '</p>';
 
+        // Calculate total skipped count (general skipped + WPMU DEV failed)
+        $total_skipped = isset($reinstall_results['skipped']) ? count($reinstall_results['skipped']) : 0;
+        if (isset($reinstall_results['wpmu_dev']['failed'])) {
+            $total_skipped += count($reinstall_results['wpmu_dev']['failed']);
+        }
+
         // Combined stats with simplified verification
         echo '<div>';
         echo '<div class="stats-box" style="background:#d4edda;border-color:#c3e6cb;"><div class="stats-number" style="color:#155724;">' . $success_count . '</div><div class="stats-label">Successfully Reinstalled & Verified</div></div>';
         echo '<div class="stats-box" style="background:#f8d7da;border-color:#f5c6cb;"><div class="stats-number" style="color:#721c24;">' . $fail_count . '</div><div class="stats-label">Failed</div></div>';
-        echo '<div class="stats-box" style="background:#d1ecf1;border-color:#bee5eb;"><div class="stats-number" style="color:#0c5460;">' . (isset($reinstall_results['skipped']) ? count($reinstall_results['skipped']) : 0) . '</div><div class="stats-label">Skipped</div></div>';
+        echo '<div class="stats-box" style="background:#d1ecf1;border-color:#bee5eb;"><div class="stats-number" style="color:#0c5460;">' . $total_skipped . '</div><div class="stats-label">Skipped</div></div>';
         echo '</div>';
 
         // Combined table
@@ -46,15 +52,27 @@ function clean_sweep_display_final_results($reinstall_results, $verification_res
             $reinstall_class = 'plugin-success';
             $details = 'Downloaded from WordPress.org official repository';
 
-            // Check if this plugin was skipped
+            // Check if this plugin was skipped (general skipped array)
             $skipped = false;
+            $skip_reason = '';
             if (isset($reinstall_results['skipped'])) {
                 foreach ($reinstall_results['skipped'] as $skipped_plugin) {
                     if ($skipped_plugin['slug'] === $plugin['slug']) {
                         $skipped = true;
-                        $reinstall_status = '⏭️ Skipped';
-                        $reinstall_class = 'plugin-info';
-                        $details = $skipped_plugin['reason'] ?? 'Preserved (not available for reinstallation)';
+                        $skip_reason = $skipped_plugin['reason'] ?? 'Preserved (not available for reinstallation)';
+                        break;
+                    }
+                }
+            }
+
+            // Check if this WPMU DEV plugin was skipped due to authentication issues
+            $skipped_wpmu_dev = false;
+            if (!$skipped && isset($reinstall_results['wpmu_dev']['failed'])) {
+                foreach ($reinstall_results['wpmu_dev']['failed'] as $failed_wpmu_plugin) {
+                    if ($failed_wpmu_plugin['slug'] === $plugin['slug']) {
+                        $skipped = true;
+                        $skipped_wpmu_dev = true;
+                        $skip_reason = $failed_wpmu_plugin['status'] ?? 'WPMU DEV Dashboard not authenticated';
                         break;
                     }
                 }
@@ -73,8 +91,8 @@ function clean_sweep_display_final_results($reinstall_results, $verification_res
 
             // Check if this plugin was handled by WPMU DEV instead (successfully)
             $handled_by_wpmudev = false;
-            if (!$skipped && isset($reinstall_results['wpmudev'])) {
-                foreach ($reinstall_results['wpmudev']['wpmudev_plugins'] as $wpmudp) {
+            if (!$skipped && isset($reinstall_results['wpmu_dev'])) {
+                foreach ($reinstall_results['wpmu_dev']['wpmudev_plugins'] as $wpmudp) {
                     // WPMU DEV plugins use 'filename' field, not 'slug'
                     $wpmudev_identifier = $wpmudp['filename'] ?? $wpmudp['slug'] ?? '';
                     if ($wpmudev_identifier === $plugin['slug'] &&
@@ -89,7 +107,13 @@ function clean_sweep_display_final_results($reinstall_results, $verification_res
             $is_wpmu_dev_plugin = isset($plugin['status']) && strpos($plugin['status'], 'WPMU DEV') !== false;
 
             if ($skipped) {
-                // Already set above
+                // Show as skipped with appropriate reason
+                $reinstall_status = '⏭️ Skipped';
+                $reinstall_class = 'plugin-info';
+                $details = $skip_reason;
+                if ($skipped_wpmu_dev) {
+                    $details .= ' (WPMU DEV authentication required)';
+                }
             } elseif ($handled_by_wpmudev || $is_wpmu_dev_plugin) {
                 // Show as WPMU DEV success
                 $reinstall_status = '✅ WPMU DEV';
@@ -287,11 +311,23 @@ function clean_sweep_display_plugins_tab_content($plugin_results) {
         echo '<div class="enhanced-stats-box suspicious"><div class="enhanced-stats-number">' . $suspicious_count . '</div><div class="enhanced-stats-label">Suspicious Files</div></div>';
         echo '</div>';
 
+        // WPMU DEV Authentication Warning - Show immediately after stats if not authenticated
+        $wpmu_dev_available = isset($plugin_results['wpmu_dev_available']) ? $plugin_results['wpmu_dev_available'] : true;
+        if (!$wpmu_dev_available && !empty($plugin_results['wpmu_dev_plugins'])) {
+            echo '<div style="background:#fff3cd;border:1px solid #ffeaa7;padding:15px;border-radius:4px;margin:15px 0;color:#856404;">';
+            echo '<h4 style="margin:0 0 10px 0;color:#856404;">⚠️ WPMU DEV Dashboard Not Connected</h4>';
+            echo '<p style="margin:0;font-size:14px;">Your site is not connected to the WPMU DEV Hub. <strong>' . $wpmudev_count . ' WPMU DEV premium plugins cannot be automatically reinstalled</strong> because authentication is required.</p>';
+            echo '<p style="margin:5px 0 0 0;font-size:13px;"><strong>To fix this:</strong> Go to <em>WPMU DEV → Settings → API</em> and connect your site to the WPMU DEV Hub, then re-run the plugin analysis.</p>';
+            echo '<p style="margin:5px 0 0 0;font-size:13px;"><strong>Note:</strong> WPMU DEV plugins will be skipped during reinstallation. You can manually reinstall them after connecting to the Hub.</p>';
+            echo '</div>';
+        }
+
         // Security Analysis Summary
         echo '<div class="security-warning">';
         echo '<h4>🔒 Security Analysis Results</h4>';
         echo '<p>' . ($suspicious_count > 0 ? '<strong>⚠️ ALERT:</strong> ' . $suspicious_count . ' suspicious files detected in plugins directory! These will be automatically removed before plugin reinstallation for security.' : '<strong>✅ SECURE:</strong> No suspicious files found in plugins directory.') . '</p>';
-        echo '<p><strong>Reinstallation Plan:</strong> ' . $total_to_reinstall . ' plugins will be re-installed (' . $repo_count . ' from WordPress.org, ' . $wpmudev_count . ' from WPMU DEV). ' . $non_repo_count . ' non-repository plugins will be preserved.</p>';
+        $reinstallable_count = $wpmu_dev_available ? $total_to_reinstall : $repo_count;
+        echo '<p><strong>Reinstallation Plan:</strong> ' . $reinstallable_count . ' plugins will be re-installed (' . $repo_count . ' from WordPress.org' . ($wpmu_dev_available ? ', ' . $wpmudev_count . ' from WPMU DEV' : '') . '). ' . $non_repo_count . ' non-repository plugins will be preserved.</p>';
         if ($suspicious_count > 0) {
             echo '<p><strong>🛡️ Security Action:</strong> Suspicious files will be automatically removed before installing fresh plugins to prevent reinfection.</p>';
         }
