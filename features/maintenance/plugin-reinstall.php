@@ -83,7 +83,11 @@ function clean_sweep_analyze_plugins($progress_file = null, $force_refresh = fal
             }
         }
 
-        clean_sweep_log_message("Running fresh plugin analysis" . ($force_refresh ? " (force refresh requested)" : ""));
+        // Force fresh analysis to ensure wpmu_dev_available flag is current
+        // Clear any cached results to prevent stale authentication status
+        delete_transient('clean_sweep_plugin_analysis_cache');
+
+        clean_sweep_log_message("Running fresh plugin analysis" . ($force_refresh ? " (force refresh requested)" : "") . " (cache cleared)");
 
         // Use the advanced PluginAnalyzer class
         $analyzer = new CleanSweep_PluginAnalyzer();
