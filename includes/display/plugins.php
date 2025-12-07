@@ -312,7 +312,9 @@ function clean_sweep_display_plugins_tab_content($plugin_results) {
         echo '</div>';
 
         // WPMU DEV Authentication Warning - Show immediately after stats if not authenticated
-        $wpmu_dev_available = isset($plugin_results['wpmu_dev_available']) ? $plugin_results['wpmu_dev_available'] : true;
+        // Default to false when WPMU DEV plugins detected but auth flag missing (authentication likely failed)
+        $wpmu_dev_available = isset($plugin_results['wpmu_dev_available']) ? $plugin_results['wpmu_dev_available'] :
+            (!empty($plugin_results['wpmu_dev_plugins']) ? false : true);
 
     if (!$wpmu_dev_available && !empty($plugin_results['wpmu_dev_plugins'])) {
             echo '<div style="background:#fff3cd;border:1px solid #ffeaa7;padding:15px;border-radius:4px;margin:15px 0;color:#856404;">';
