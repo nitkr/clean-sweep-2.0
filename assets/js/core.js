@@ -396,19 +396,15 @@ function copyPluginList(type) {
                     const tableRows = table.querySelectorAll("tbody tr");
                     console.log('Found', tableRows.length, 'table rows');
                     tableRows.forEach(function(row, index) {
-                        const firstTd = row.querySelector("td:first-child");
-                        if (firstTd) {
-                            const strongElement = firstTd.querySelector("strong");
-                            if (strongElement) {
-                                const fullText = strongElement.textContent.trim();
-                                const pluginName = fullText.split(' (')[0]; // Remove slug part
-                                console.log(`Row ${index}: "${fullText}" -> "${pluginName}"`);
-                                pluginNames.push(pluginName);
-                            } else {
-                                console.log(`Row ${index}: No strong element found`);
-                            }
+                        // Look for <strong> element anywhere in the row (works for all table structures)
+                        const strongElement = row.querySelector("strong");
+                        if (strongElement) {
+                            const fullText = strongElement.textContent.trim();
+                            const pluginName = fullText.split(' (')[0]; // Remove slug part
+                            console.log(`Row ${index}: "${fullText}" -> "${pluginName}"`);
+                            pluginNames.push(pluginName);
                         } else {
-                            console.log(`Row ${index}: No first td found`);
+                            console.log(`Row ${index}: No strong element found in row`);
                         }
                     });
                     console.log('📋 Extracted plugins:', pluginNames);
@@ -433,22 +429,19 @@ function copyPluginList(type) {
         });
 
         if (targetHeading) {
-            // Find the next div sibling (table container) and specifically get strong elements from table cells only
+            // Find the next div sibling (table container) and get strong elements from table cells
             const nextDiv = targetHeading.nextElementSibling;
             if (nextDiv && nextDiv.tagName === "DIV") {
-                // Get only strong elements that are direct children of td elements in the table, exclude security notice
                 const table = nextDiv.querySelector("table");
                 if (table) {
                     const tableRows = table.querySelectorAll("tbody tr");
                     tableRows.forEach(function(row) {
-                        const firstTd = row.querySelector("td:first-child");
-                        if (firstTd) {
-                            const strongElement = firstTd.querySelector("strong");
-                            if (strongElement) {
-                                const fullText = strongElement.textContent.trim();
-                                const pluginName = fullText.split(' (')[0]; // Remove slug part
-                                pluginNames.push(pluginName);
-                            }
+                        // Look for <strong> element anywhere in the row (works for all table structures)
+                        const strongElement = row.querySelector("strong");
+                        if (strongElement) {
+                            const fullText = strongElement.textContent.trim();
+                            const pluginName = fullText.split(' (')[0]; // Remove slug part
+                            pluginNames.push(pluginName);
                         }
                     });
                 }
@@ -473,13 +466,11 @@ function copyPluginList(type) {
                 if (table) {
                     const tableRows = table.querySelectorAll("tbody tr");
                     tableRows.forEach(function(row) {
-                        const firstTd = row.querySelector("td:first-child");
-                        if (firstTd) {
-                            const strongElement = firstTd.querySelector("strong");
-                            if (strongElement) {
-                                const pluginName = strongElement.textContent.trim();
-                                pluginNames.push(pluginName);
-                            }
+                        // Look for <strong> element anywhere in the row (works for all table structures)
+                        const strongElement = row.querySelector("strong");
+                        if (strongElement) {
+                            const pluginName = strongElement.textContent.trim();
+                            pluginNames.push(pluginName);
                         }
                     });
                 }
@@ -504,13 +495,11 @@ function copyPluginList(type) {
                 if (table) {
                     const tableRows = table.querySelectorAll("tbody tr");
                     tableRows.forEach(function(row) {
-                        const firstTd = row.querySelector("td:first-child");
-                        if (firstTd) {
-                            const strongElement = firstTd.querySelector("strong");
-                            if (strongElement) {
-                                const fileName = strongElement.textContent.trim();
-                                pluginNames.push(fileName);
-                            }
+                        // Look for <strong> element anywhere in the row (works for all table structures)
+                        const strongElement = row.querySelector("strong");
+                        if (strongElement) {
+                            const fileName = strongElement.textContent.trim();
+                            pluginNames.push(fileName);
                         }
                     });
                 }
