@@ -15,30 +15,7 @@ function clean_sweep_is_wpmudev_available() {
         return false;
     }
 
-    // First check: Basic has_key() method
-    $has_key = WPMUDEV_Dashboard::$api->has_key();
-
-    // Second check: Try to get the API key directly (more reliable)
-    $api_key = WPMUDEV_Dashboard::$api->get_key();
-
-    // Third check: Try a simple API call to verify authentication
-    $is_authenticated = false;
-    if ($has_key && !empty($api_key)) {
-        // Try to get user data as a test of authentication
-        try {
-            $user_data = WPMUDEV_Dashboard::$api->get_user_data();
-            $is_authenticated = !empty($user_data) && !isset($user_data['error']);
-        } catch (Exception $e) {
-            $is_authenticated = false;
-        }
-    }
-
-    // Log debug information
-    clean_sweep_log_message("WPMU DEV Auth Check - has_key: " . ($has_key ? 'TRUE' : 'FALSE') .
-                           ", api_key: " . (!empty($api_key) ? 'PRESENT' : 'EMPTY') .
-                           ", authenticated: " . ($is_authenticated ? 'TRUE' : 'FALSE'), 'debug');
-
-    if (!$is_authenticated) {
+    if (!WPMUDEV_Dashboard::$api->has_key()) {
         clean_sweep_log_message("WPMU DEV Dashboard found but not authenticated", 'warning');
         return false;
     }
