@@ -1,7 +1,7 @@
 // Clean Sweep - Core Utilities
 // Core utility functions for Clean Sweep
 
-let autoScrollEnabled = true;
+let autoScrollEnabled = false; // Completely disable auto-scroll feature
 
 function updateProgress(current, total, status) {
     const progressBar = document.getElementById("progress-fill");
@@ -354,11 +354,13 @@ function cancelBackupChoice() {
 }
 
 function copyPluginList(type) {
+    console.log('🎯 Copy button clicked for type:', type);
     let pluginNames = [];
     const button = event.target;
 
     // Find all h3 and h4 elements
     const headings = document.querySelectorAll("h3, h4");
+    console.log('📋 Found', headings.length, 'headings on page');
 
     if (type === "reinstall") {
         // Find the heading that contains "WordPress.org Plugins to be Re-installed"
