@@ -39,7 +39,7 @@ class CleanSweep_Functions {
      */
     private function init_functions() {
         $this->init_get_plugins();
-        $this->init_download_url();
+        // $this->init_download_url(); // REMOVED: Duplicate declaration - already declared in clean-sweep-bootstrap.php
         $this->init_unzip_file();
         $this->init_wp_error();
         $this->init_is_wp_error();
@@ -171,42 +171,12 @@ class CleanSweep_Functions {
 
     /**
      * Initialize download_url() function
+     * REMOVED: Duplicate declaration - already declared in clean-sweep-bootstrap.php
+     * This was causing "Cannot redeclare download_url()" fatal errors during plugin reinstallation
      */
-    private function init_download_url() {
-        if (!function_exists('download_url')) {
-            function download_url($url, $timeout = 300) {
-                // Use Clean Sweep backups directory instead of system temp
-                $backup_dir = dirname(__DIR__, 2) . '/backups';
-                if (!is_dir($backup_dir)) {
-                    mkdir($backup_dir, 0755, true);
-                }
-
-                // Download file and save to backups directory
-                $ch = curl_init();
-                curl_setopt($ch, CURLOPT_URL, $url);
-                curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-                curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
-                curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-
-                $data = curl_exec($ch);
-                $error = curl_error($ch);
-                curl_close($ch);
-
-                if ($data === false) {
-                    return false;
-                }
-
-                // Save to temp file in backups directory and return path
-                $temp_file = tempnam($backup_dir, 'download_');
-                if ($temp_file && file_put_contents($temp_file, $data) !== false) {
-                    return $temp_file;
-                }
-
-                return false;
-            }
-        }
-    }
+    // private function init_download_url() {
+    //     // Removed to prevent function redeclaration conflicts
+    // }
 
     /**
      * Initialize unzip_file() function

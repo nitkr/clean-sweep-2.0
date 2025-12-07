@@ -143,12 +143,15 @@ function clean_sweep_analyze_plugins($progress_file = null, $force_refresh = fal
             }
         }
 
+
+
         // Prepare the complete result set for caching
         $complete_result = array_merge(compact('wp_org_plugins', 'wpmu_dev_plugins', 'skipped'), [
             'non_repo_plugins' => $non_repo_plugins,
             'suspicious_files' => $suspicious_files,
             'copy_lists' => $result['copy_lists'] ?? [],
             'totals' => $result['totals'] ?? [],
+            'wpmu_dev_available' => $result['wpmu_dev_available'], // ✅ FIXED: Add the missing flag
             'plugin_mtimes' => $plugin_mtimes,
             'cached_at' => time(),
             'cache_expires' => time() + $cache_expiry
