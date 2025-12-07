@@ -362,38 +362,64 @@ function copyPluginList(type) {
     const headings = document.querySelectorAll("h3, h4");
     console.log('📋 Found', headings.length, 'headings on page');
 
+    // Debug: Log all headings and their text content
+    headings.forEach((heading, index) => {
+        console.log(`Heading ${index}: "${heading.textContent}"`);
+    });
+
     if (type === "reinstall") {
+        console.log('🔍 Looking for WordPress.org heading...');
         // Find the heading that contains "WordPress.org Plugins to be Re-installed"
         // Exclude button text from the search
         let targetHeading = null;
         headings.forEach(function(heading) {
             const headingText = heading.textContent.replace(/Copy/g, '').trim();
+            console.log('Checking heading:', headingText);
             if (headingText.includes("WordPress.org Plugins to be Re-installed")) {
                 targetHeading = heading;
+                console.log('✅ Found WordPress.org heading!');
             }
         });
 
         if (targetHeading) {
+            console.log('🎯 Target heading found, looking for table...');
             // Find the next div sibling (table container) and specifically get strong elements from table cells only
             const nextDiv = targetHeading.nextElementSibling;
+            console.log('Next element:', nextDiv, 'tagName:', nextDiv?.tagName);
             if (nextDiv && nextDiv.tagName === "DIV") {
+                console.log('📊 Found next div, looking for table...');
                 // Get only strong elements that are direct children of td elements in this specific section
                 const table = nextDiv.querySelector("table");
+                console.log('Table found:', !!table);
                 if (table) {
+                    console.log('🗂️ Found table, extracting plugins...');
                     const tableRows = table.querySelectorAll("tbody tr");
-                    tableRows.forEach(function(row) {
+                    console.log('Found', tableRows.length, 'table rows');
+                    tableRows.forEach(function(row, index) {
                         const firstTd = row.querySelector("td:first-child");
                         if (firstTd) {
                             const strongElement = firstTd.querySelector("strong");
                             if (strongElement) {
                                 const fullText = strongElement.textContent.trim();
                                 const pluginName = fullText.split(' (')[0]; // Remove slug part
+                                console.log(`Row ${index}: "${fullText}" -> "${pluginName}"`);
                                 pluginNames.push(pluginName);
+                            } else {
+                                console.log(`Row ${index}: No strong element found`);
                             }
+                        } else {
+                            console.log(`Row ${index}: No first td found`);
                         }
                     });
+                    console.log('📋 Extracted plugins:', pluginNames);
+                } else {
+                    console.log('❌ No table found in next div');
                 }
+            } else {
+                console.log('❌ No div found after heading');
             }
+        } else {
+            console.log('❌ WordPress.org heading not found');
         }
     } else if (type === "wpmudev") {
         // Find the heading that contains "WPMU DEV Premium Plugins to be Re-installed"
