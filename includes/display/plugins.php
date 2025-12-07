@@ -371,22 +371,10 @@ function clean_sweep_display_plugins_tab_content($plugin_results) {
             echo '</div>';
         }
 
-        // Check WPMU DEV authentication status and show warning if needed
-        $wpmu_dev_available = isset($plugin_results['wpmu_dev_available']) ? $plugin_results['wpmu_dev_available'] : true;
-
         // WPMU DEV plugins section (WPMU DEV Dashboard already filtered out during analysis)
         if (!empty($plugin_results['wpmu_dev_plugins'])) {
             $wpmu_count = count($plugin_results['wpmu_dev_plugins']);
             $total_to_reinstall = $repo_count + $wpmu_count;
-
-            // Show warning if WPMU DEV is not authenticated
-            if (!$wpmu_dev_available) {
-                echo '<div style="background:#fff3cd;border:1px solid #ffeaa7;padding:15px;border-radius:4px;margin:15px 0;color:#856404;">';
-                echo '<h4 style="margin:0 0 10px 0;color:#856404;">⚠️ WPMU DEV Dashboard Not Connected</h4>';
-                echo '<p style="margin:0;font-size:14px;">Your site is not connected to the WPMU DEV Hub. WPMU DEV premium plugins listed below <strong>cannot be automatically reinstalled</strong> because authentication is required.</p>';
-                echo '<p style="margin:5px 0 0 0;font-size:13px;"><strong>To fix this:</strong> Go to <em>WPMU DEV → Settings → API</em> and connect your site to the WPMU DEV Hub, then re-run the plugin analysis.</p>';
-                echo '</div>';
-            }
 
             echo '<h4>💎 WPMU DEV Premium Plugins to be Re-installed (' . $wpmu_count . ') <button onclick="copyPluginList(\'wpmudev\')" style="background:#7c3aed;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:12px;">Copy</button></h4>';
             echo '<div style="background:#f8f9ff;padding:15px;border-radius:4px;border:1px solid #c3b1e1;margin:10px 0;max-height:400px;overflow-y:auto;">';
