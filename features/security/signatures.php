@@ -488,9 +488,23 @@ class Clean_Sweep_Malware_Signatures {
             // Suspicious index.php in wp-content subdirs
             '#wp-content/(uploads|backup|backups|mu-plugins|[a-z0-9]{6,})/.*index\.php$#i',
 
-            // Gambling Affiliate Malware Detection (2025 threat)
-            // Detects hidden casino/gambling posts created by affiliate malware
-            '/(wp_insert_post|wp_update_post).*display\s*:\s*none.*(casino|slots?|jackpot|poker|roulette|blackjack|gambl|bet365|1xbet|azino|vulkan|frank|rox|champion|catcasino|eldorado|joycasino|playfortuna|sol|fresh|legzo|starda|drip|jet|izzi|kometa|vodka|monro|dragonmoney|retro|garilla|pharaoh|admiral|booi|gama|kent|daddy|vavada|selector|upx|lex|spark|cz|pin-?up|aviator|1win|melbet)/si',
+            // Advanced Gambling/Pharma Spam Detection (2025 Multi-Vector Patterns)
+
+            // Pattern 1: HTML/Content Injection with Spam Keywords
+            // Detects variables with HTML content, hidden elements, or links followed by spam
+            '/(?:\$\w+\s*=\s*[\'"]<[^>]*>|display\s*:\s*none|<a\s+href=[\'"]https?:\/\/).{0,200}(casino|azino|jackpot|slots?|gambl|viagra|cialis|poker|roulette|bet365|1xbet|vulkan|frank|rox|legzo|starda|drip|jet|kometa|vodka|pharaoh|admiral|booi|kent|daddy|vavada|aviator|1win|melbet)/si',
+
+            // Pattern 2: Variable Assignment Spam
+            // Detects short string variables containing spam keywords
+            '/\$\w+\s*=\s*[\'"][^\'"]{0,50}(casino|azino|jackpot|viagra|cialis|bet365|1xbet|vulkan|slots?|poker|gambl).{0,100}[\'"];/si',
+
+            // Pattern 3: WordPress Post Function Spam Injection
+            // Detects wp_insert_post/wp_update_post calls with spam in array parameters
+            '/wp_(insert|update)_post\s*\(\s*array\s*\([^)]{0,500}(casino|azino|jackpot|viagra|cialis|poker|gambl|bet365|1xbet|vulkan|slots?)/si',
+
+            // Pattern 4: Database Spam Injection
+            // Detects direct database queries with spam content
+            '/\$wpdb\s*->\s*(query|insert|update|replace)\s*\([^)]{0,300}(casino|azino|jackpot|viagra|cialis|poker|gambl|bet365|1xbet)/si',
         ];
     }
 
