@@ -60,6 +60,9 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+// DEBUG: Log session information for troubleshooting
+clean_sweep_log_message("🔍 SESSION DEBUG: ID = " . session_id() . ", Fresh Env Flag = " . ($_SESSION['fresh_env_setup_complete'] ?? 'NOT SET') . ", Status = " . session_status(), 'error');
+
 // Check if this is an AJAX request (has progress_file OR action parameter) - BULLETPROOF DETECTION
 $is_ajax_request = false;
 $progress_file_param = isset($_POST['progress_file']) ? trim($_POST['progress_file']) : '';

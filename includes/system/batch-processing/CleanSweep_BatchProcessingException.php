@@ -20,9 +20,9 @@ class CleanSweep_BatchProcessingException extends Exception {
      * @param string $message Error message
      * @param array $contextData Additional context data
      * @param int $code Error code
-     * @param Exception $previous Previous exception
+     * @param ?Exception $previous Previous exception
      */
-    public function __construct($message = '', $contextData = [], $code = 0, Exception $previous = null) {
+    public function __construct($message = '', $contextData = [], $code = 0, ?Exception $previous = null) {
         parent::__construct($message, $code, $previous);
         $this->contextData = $contextData;
 

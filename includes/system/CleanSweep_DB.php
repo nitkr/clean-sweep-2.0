@@ -25,9 +25,11 @@ class CleanSweep_DB {
      * Parse wp-config.php to extract database configuration
      */
     private function parse_wp_config() {
+        // Use robust wp-config detection (same as FreshEnvironment)
         $wp_config_paths = [
-            CLEAN_SWEEP_ROOT . 'wp-config.php',
-            dirname(CLEAN_SWEEP_ROOT) . '/wp-config.php'
+            dirname(dirname(dirname(__DIR__))) . '/wp-config.php',
+            dirname(dirname(dirname(dirname(__DIR__)))) . '/wp-config.php',
+            dirname(dirname(dirname(dirname(dirname(__DIR__))))) . '/wp-config.php'
         ];
 
         $wp_config_found = false;
@@ -80,7 +82,9 @@ class CleanSweep_DB {
      */
     private function connect() {
         try {
-            $dsn = "mysql:host={$this->db_config['DB_HOST']};dbname={$this->db_config['DB_NAME']};charset={$this->db_config['DB_CHARSET']}";
+            // Remove charset from DSN to avoid "Unknown character set" errors
+            // Some MySQL versions don't recognize 'utf8' and require 'utf8mb4'
+            $dsn = "mysql:host={$this->db_config['DB_HOST']};dbname={$this->db_config['DB_NAME']}";
             $options = [
                 PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                 PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
