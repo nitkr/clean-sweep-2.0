@@ -371,7 +371,7 @@ function updateCoreProgress(data) {
                         </p>
                     `}
                     <div style="margin-top:15px;">
-                        <button onclick="proceedCoreReinstallWithBackup()" style="background:#28a745;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;margin-right:10px;">
+                        <button onclick="proceedCoreReinstallWithBackup()" ${isInsufficient ? 'disabled style="background:#6c757d;color:#ffffff;border:none;padding:8px 16px;border-radius:4px;cursor:not-allowed;opacity:0.5;margin-right:10px;" title="Cannot create backup - insufficient disk space"' : 'style="background:#28a745;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;margin-right:10px;"'}>
                             Create Backup (~${diskCheck.backup_size_mb}MB)
                         </button>
                         <button onclick="proceedCoreReinstallWithoutBackup()" style="background:#ffc107;color:black;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;margin-right:10px;">
