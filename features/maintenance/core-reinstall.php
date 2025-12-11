@@ -62,23 +62,97 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
     // Get progress file parameter for AJAX progress tracking
     $progress_file = isset($_POST['progress_file']) ? $_POST['progress_file'] : null;
 
+    // Check if user has made a backup choice
+    $create_backup = isset($_POST['create_backup']) && $_POST['create_backup'] === '1';
+    $proceed_without_backup = isset($_POST['proceed_without_backup']) && $_POST['proceed_without_backup'] === '1';
+
     clean_sweep_log_message("=== WordPress Core Re-installation Started ===");
     clean_sweep_log_message("Target Version: $wp_version");
     clean_sweep_log_message("Progress file: " . ($progress_file ?: 'none'));
+    clean_sweep_log_message("Create backup: " . ($create_backup ? 'YES' : 'NO'));
+    clean_sweep_log_message("Proceed without backup: " . ($proceed_without_backup ? 'YES' : 'NO'));
     clean_sweep_log_message("Current WordPress Version: " . get_bloginfo('version'));
 
     // DETECT REAL SITE ROOT (where wp-config.php lives, not ABSPATH)
     $site_root = clean_sweep_detect_site_root();
     clean_sweep_log_message("Detected site root: $site_root");
 
+    // CHECK DISK SPACE BEFORE PROCEEDING
+    $disk_check = clean_sweep_check_disk_space('core_reinstall');
+    clean_sweep_log_message("Disk space check result: " . json_encode($disk_check), 'info');
+
+    // Handle user's backup choice
+    if ($create_backup) {
+        // User chose to create backup - check if we have sufficient space
+        if (!$disk_check['success'] || $disk_check['space_status'] === 'insufficient') {
+            $error_msg = 'Cannot create backup - insufficient disk space';
+            clean_sweep_log_message($error_msg, 'error');
+            if ($progress_file) {
+                $progress_data = [
+                    'status' => 'error',
+                    'progress' => 0,
+                    'message' => $error_msg,
+                    'details' => '<div style="color:#dc3545;">Error: ' . ($disk_check['warning'] ?? $disk_check['message']) . '</div>'
+                ];
+                clean_sweep_write_progress_file($progress_file, $progress_data);
+            }
+            return ['success' => false, 'message' => $error_msg, 'disk_check' => $disk_check];
+        }
+        clean_sweep_log_message("User requested backup creation - proceeding", 'info');
+    } elseif ($proceed_without_backup) {
+        // User chose to skip backup
+        clean_sweep_log_message("User chose to proceed without backup", 'warning');
+    } elseif ($progress_file) {
+        // For AJAX requests without a user choice, return disk space information first
+        if (!$disk_check['success']) {
+            // Disk space check failed
+            $progress_data = [
+                'status' => 'disk_space_error',
+                'progress' => 0,
+                'message' => 'Disk space check failed',
+                'disk_check' => $disk_check,
+                'details' => '<div style="color:#dc3545;">Error: ' . $disk_check['message'] . '</div>'
+            ];
+            clean_sweep_write_progress_file($progress_file, $progress_data);
+            return ['success' => false, 'message' => $disk_check['message'], 'disk_check' => $disk_check];
+        } elseif ($disk_check['space_status'] === 'insufficient') {
+            // Insufficient disk space - show warning
+            $progress_data = [
+                'status' => 'disk_space_warning',
+                'progress' => 0,
+                'message' => 'Insufficient disk space for backup',
+                'disk_check' => $disk_check,
+                'can_proceed_without_backup' => true // Allow proceeding without backup
+            ];
+            clean_sweep_write_progress_file($progress_file, $progress_data);
+            return ['disk_space_warning' => $disk_check];
+        } else {
+            // Sufficient disk space - show backup choice
+            $progress_data = [
+                'status' => 'backup_choice',
+                'progress' => 0,
+                'message' => 'Choose backup option for core reinstallation',
+                'disk_check' => $disk_check
+            ];
+            clean_sweep_write_progress_file($progress_file, $progress_data);
+            return ['backup_choice' => $disk_check];
+        }
+    }
+
+    // For non-AJAX requests, proceed with backup creation if sufficient space (unless user explicitly chose no backup)
+    if (!$progress_file && !$proceed_without_backup && (!$disk_check['success'] || $disk_check['space_status'] === 'insufficient')) {
+        return ['success' => false, 'message' => 'Insufficient disk space for backup', 'disk_check' => $disk_check];
+    }
+
     // Initialize progress tracking
+    $total_steps = $create_backup ? 4 : 3; // Fewer steps if no backup
     $progress_data = [
         'status' => 'initializing',
         'progress' => 0,
         'message' => 'Initializing core re-installation...',
         'details' => '',
         'step' => 0,
-        'total_steps' => 4
+        'total_steps' => $total_steps
     ];
     clean_sweep_write_progress_file($progress_file, $progress_data);
 
@@ -101,62 +175,73 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
         clean_sweep_log_message("Using WordPress version: $wp_version");
     }
 
-    // Create backup directory for core files
-    $core_backup_dir = 'backups/wp-core-backup-' . date('Y-m-d-H-i-s');
-    clean_sweep_log_message("Creating core files backup to: $core_backup_dir");
+    // Create backup directory for core files (only if user requested backup)
+    $core_backup_dir = null;
+    if ($create_backup) {
+        $core_backup_dir = 'backups/wp-core-backup-' . date('Y-m-d-H-i-s');
+        clean_sweep_log_message("Creating core files backup to: $core_backup_dir");
 
-    if (!wp_mkdir_p($core_backup_dir)) {
-        clean_sweep_log_message("Failed to create core backup directory", 'error');
-        return ['success' => false, 'message' => 'Failed to create backup directory'];
-    }
-
-    // Files to preserve (backup from REAL SITE ROOT)
-    $preserve_files = [
-        'wp-config.php',
-        'wp-content',
-        '.htaccess',
-        'robots.txt'
-    ];
-
-    // Backup preserve files FROM REAL SITE ROOT
-    foreach ($preserve_files as $file) {
-        $full_path = $site_root . $file;
-        if (file_exists($full_path)) {
-            $backup_path = $core_backup_dir . '/' . $file;
-            $backup_dir = dirname($backup_path);
-
-            if (!wp_mkdir_p($backup_dir)) {
-                clean_sweep_log_message("Failed to create backup subdirectory: $backup_dir", 'error');
-                continue;
-            }
-
-            if (is_dir($full_path)) {
-                // Copy directory recursively
-                $iterator = new RecursiveIteratorIterator(
-                    new RecursiveDirectoryIterator($full_path, RecursiveDirectoryIterator::SKIP_DOTS),
-                    RecursiveIteratorIterator::SELF_FIRST
-                );
-
-                foreach ($iterator as $item) {
-                    if ($item->isDir()) {
-                        wp_mkdir_p($backup_path . '/' . $iterator->getSubPathName());
-                    } else {
-                        copy($item->getPathname(), $backup_path . '/' . $iterator->getSubPathName());
-                    }
-                }
-            } else {
-                copy($full_path, $backup_path);
-            }
-            clean_sweep_log_message("Backed up: $file");
+        if (!wp_mkdir_p($core_backup_dir)) {
+            clean_sweep_log_message("Failed to create core backup directory", 'error');
+            return ['success' => false, 'message' => 'Failed to create backup directory'];
         }
-    }
 
-    // Update progress: Starting backup
-    $progress_data['status'] = 'backing_up';
-    $progress_data['progress'] = 25;
-    $progress_data['message'] = 'Creating backup of preserve files...';
-    $progress_data['step'] = 1;
-    clean_sweep_write_progress_file($progress_file, $progress_data);
+        // Files to preserve (backup from REAL SITE ROOT)
+        $preserve_files = [
+            'wp-config.php',
+            'wp-content',
+            '.htaccess',
+            'robots.txt'
+        ];
+
+        // Backup preserve files FROM REAL SITE ROOT
+        foreach ($preserve_files as $file) {
+            $full_path = $site_root . $file;
+            if (file_exists($full_path)) {
+                $backup_path = $core_backup_dir . '/' . $file;
+                $backup_dir = dirname($backup_path);
+
+                if (!wp_mkdir_p($backup_dir)) {
+                    clean_sweep_log_message("Failed to create backup subdirectory: $backup_dir", 'error');
+                    continue;
+                }
+
+                if (is_dir($full_path)) {
+                    // Copy directory recursively
+                    $iterator = new RecursiveIteratorIterator(
+                        new RecursiveDirectoryIterator($full_path, RecursiveDirectoryIterator::SKIP_DOTS),
+                        RecursiveIteratorIterator::SELF_FIRST
+                    );
+
+                    foreach ($iterator as $item) {
+                        if ($item->isDir()) {
+                            wp_mkdir_p($backup_path . '/' . $iterator->getSubPathName());
+                        } else {
+                            copy($item->getPathname(), $backup_path . '/' . $iterator->getSubPathName());
+                        }
+                    }
+                } else {
+                    copy($full_path, $backup_path);
+                }
+                clean_sweep_log_message("Backed up: $file");
+            }
+        }
+
+        // Update progress: Starting backup
+        $progress_data['status'] = 'backing_up';
+        $progress_data['progress'] = 25;
+        $progress_data['message'] = 'Creating backup of preserve files...';
+        $progress_data['step'] = 1;
+        clean_sweep_write_progress_file($progress_file, $progress_data);
+    } else {
+        // Skip backup - update progress accordingly
+        clean_sweep_log_message("Skipping backup as requested by user", 'info');
+        $progress_data['status'] = 'preparing';
+        $progress_data['progress'] = 25;
+        $progress_data['message'] = 'Preparing core reinstallation (backup skipped)...';
+        $progress_data['step'] = 1;
+        clean_sweep_write_progress_file($progress_file, $progress_data);
+    }
 
     // Download WordPress
     clean_sweep_log_message("Downloading WordPress from: $download_url");
@@ -335,19 +420,28 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
 
     clean_sweep_log_message("WordPress core re-installation completed successfully");
     clean_sweep_log_message("Files copied: $files_copied");
-    clean_sweep_log_message("Backup location: " . __DIR__ . '/' . $core_backup_dir);
+    if ($core_backup_dir) {
+        clean_sweep_log_message("Backup location: " . __DIR__ . '/' . $core_backup_dir);
+    } else {
+        clean_sweep_log_message("Backup: Skipped as requested by user");
+    }
 
     // Update final progress status
     $progress_data['status'] = 'complete';
     $progress_data['progress'] = 100;
     $progress_data['message'] = 'Core re-installation completed successfully!';
+
+    $backup_info = $core_backup_dir ?
+        '<li><strong>Backup location:</strong> <code>' . htmlspecialchars($core_backup_dir) . '</code></li>' :
+        '<li><strong>Backup:</strong> Skipped as requested</li>';
+
     $progress_data['details'] = '<div style="background:#d4edda;border:1px solid #c3e6cb;padding:15px;border-radius:4px;margin:10px 0;color:#155724;">' .
         '<h4>✅ Success!</h4>' .
         '<p>WordPress core files have been successfully re-installed.</p>' .
         '<ul style="margin:10px 0;padding-left:20px;">' .
         '<li><strong>Version:</strong> ' . htmlspecialchars($wp_version) . '</li>' .
         '<li><strong>Files copied:</strong> ' . $files_copied . '</li>' .
-        '<li><strong>Backup location:</strong> <code>' . htmlspecialchars($core_backup_dir) . '</code></li>' .
+        $backup_info .
         '<li><strong>Preserved files:</strong> wp-config.php, uploads, themes, plugins</li>' .
         '</ul>' .
         '<p><strong>Next steps:</strong></p>' .
@@ -374,7 +468,11 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
             echo '<ul style="margin:10px 0;padding-left:20px;">';
             echo '<li><strong>Version:</strong> ' . htmlspecialchars($wp_version) . '</li>';
             echo '<li><strong>Files copied:</strong> ' . $files_copied . '</li>';
-            echo '<li><strong>Backup location:</strong> <code>' . htmlspecialchars(__DIR__ . '/' . $core_backup_dir) . '</code></li>';
+            if ($core_backup_dir) {
+                echo '<li><strong>Backup location:</strong> <code>' . htmlspecialchars(__DIR__ . '/' . $core_backup_dir) . '</code></li>';
+            } else {
+                echo '<li><strong>Backup:</strong> Skipped as requested</li>';
+            }
             echo '<li><strong>Preserved files:</strong> wp-config.php, uploads, themes, plugins</li>';
             echo '</ul>';
             echo '<p><strong>Next steps:</strong></p>';
@@ -392,7 +490,11 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
         echo "✅ Success!\n";
         echo "Version: $wp_version\n";
         echo "Files copied: $files_copied\n";
-        echo "Backup location: " . __DIR__ . '/' . $core_backup_dir . "\n";
+        if ($core_backup_dir) {
+            echo "Backup location: " . __DIR__ . '/' . $core_backup_dir . "\n";
+        } else {
+            echo "Backup: Skipped as requested\n";
+        }
         echo str_repeat("=", 50) . "\n";
     }
 

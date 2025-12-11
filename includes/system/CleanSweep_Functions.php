@@ -233,3 +233,167 @@ class CleanSweep_Functions {
         return $this->integrity_manager;
     }
 }
+
+/**
+ * Check disk space availability for backup operations
+ *
+ * @param string $operation_type Type of operation ('plugin_reinstall', 'core_reinstall', etc.)
+ * @return array Disk space information
+ */
+function clean_sweep_check_disk_space($operation_type = 'plugin_reinstall') {
+    try {
+        // Get disk space information with fallbacks for restricted hosting
+        $total_space = false;
+        $free_space = false;
+
+        // Try to get total space (often disabled on shared hosting)
+        if (function_exists('disk_total_space')) {
+            $total_space = @disk_total_space(ABSPATH);
+        }
+
+        // Try to get free space (sometimes available even when total is not)
+        if (function_exists('disk_free_space')) {
+            $free_space = @disk_free_space(ABSPATH);
+        }
+
+        // If both functions failed, provide fallback behavior
+        if ($total_space === false && $free_space === false) {
+            clean_sweep_log_message("Disk space functions not available - using fallback mode", 'warning');
+
+            // Provide reasonable defaults for backup size estimation
+            // Without disk space info, we'll still show the UI but with warnings
+            $estimated_free_mb = 100; // Assume 100MB minimum available
+            $estimated_total_mb = 1000; // Assume 1GB total
+            $free_mb = $estimated_free_mb;
+            $total_mb = $estimated_total_mb;
+            $disk_space_unavailable = true;
+        } elseif ($free_space === false) {
+            // Only free space failed - use estimated values
+            clean_sweep_log_message("disk_free_space() not available - using estimated values", 'warning');
+            $estimated_free_mb = 100; // Conservative estimate
+            $free_mb = $estimated_free_mb;
+            $total_mb = $total_space ? round($total_space / 1024 / 1024, 2) : 1000;
+            $disk_space_unavailable = true;
+        } else {
+            // Disk space functions are available
+            $total_mb = $total_space ? round($total_space / 1024 / 1024, 2) : null;
+            $free_mb = round($free_space / 1024 / 1024, 2);
+            $disk_space_unavailable = false;
+        }
+
+        if (!$disk_space_unavailable) {
+            $used_mb = $total_mb ? $total_mb - $free_mb : 0;
+        } else {
+            $used_mb = 0; // Unknown when disk space unavailable
+        }
+
+        // Estimate backup size based on operation type
+        $backup_size_mb = 0;
+        $buffer_mb = 50; // Safety buffer
+
+        switch ($operation_type) {
+            case 'plugin_reinstall':
+                // Estimate plugin backup size
+                $plugins_dir = WP_PLUGIN_DIR;
+                if (is_dir($plugins_dir)) {
+                    $backup_size_mb = clean_sweep_calculate_directory_size($plugins_dir) / 1024 / 1024;
+                    $backup_size_mb = round($backup_size_mb * 1.2, 2); // 20% overhead for zip compression
+                }
+                break;
+
+            case 'core_reinstall':
+                // Estimate core files backup size (wp-config.php, .htaccess, wp-content, etc.)
+                $preserve_files = ['wp-config.php', 'wp-content', '.htaccess', 'robots.txt'];
+                $site_root = clean_sweep_detect_site_root();
+
+                foreach ($preserve_files as $file) {
+                    $full_path = $site_root . '/' . $file;
+                    if (file_exists($full_path)) {
+                        if (is_dir($full_path)) {
+                            $backup_size_mb += clean_sweep_calculate_directory_size($full_path) / 1024 / 1024;
+                        } else {
+                            $backup_size_mb += filesize($full_path) / 1024 / 1024;
+                        }
+                    }
+                }
+                $backup_size_mb = round($backup_size_mb * 1.3, 2); // 30% overhead for zip compression and logs
+                break;
+
+            default:
+                $backup_size_mb = 100; // Default estimate
+                break;
+        }
+
+        $required_mb = $backup_size_mb + $buffer_mb;
+        $shortfall_mb = max(0, $required_mb - $free_mb);
+
+        // Determine status
+        $space_status = 'sufficient';
+        $warning = '';
+        $can_proceed = true;
+
+        if ($shortfall_mb > 0) {
+            $space_status = 'insufficient';
+            $warning = "Insufficient disk space. Need {$required_mb}MB, only {$free_mb}MB available. Shortfall: {$shortfall_mb}MB.";
+            $can_proceed = false;
+        } elseif ($free_mb < 100) {
+            $space_status = 'warning';
+            $warning = "Low disk space warning. Only {$free_mb}MB available.";
+        }
+
+        clean_sweep_log_message("Disk space check for {$operation_type}: {$free_mb}MB available, {$backup_size_mb}MB backup needed, {$required_mb}MB required", 'info');
+
+        return [
+            'success' => true,
+            'total_mb' => $total_mb,
+            'used_mb' => $used_mb,
+            'available_mb' => $free_mb,
+            'backup_size_mb' => $backup_size_mb,
+            'required_mb' => $required_mb,
+            'shortfall_mb' => $shortfall_mb,
+            'space_status' => $space_status,
+            'warning' => $warning,
+            'message' => $space_status === 'sufficient' ? 'Sufficient disk space available' : $warning,
+            'can_proceed' => $can_proceed
+        ];
+
+    } catch (Exception $e) {
+        clean_sweep_log_message("Disk space check failed: " . $e->getMessage(), 'error');
+        return [
+            'success' => false,
+            'message' => 'Disk space check failed: ' . $e->getMessage(),
+            'error' => $e->getMessage(),
+            'space_status' => 'error'
+        ];
+    }
+}
+
+/**
+ * Calculate directory size recursively
+ *
+ * @param string $directory Directory path
+ * @return int Size in bytes
+ */
+function clean_sweep_calculate_directory_size($directory) {
+    $size = 0;
+
+    if (!is_dir($directory)) {
+        return $size;
+    }
+
+    try {
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($directory, RecursiveDirectoryIterator::SKIP_DOTS)
+        );
+
+        foreach ($iterator as $file) {
+            if ($file->isFile()) {
+                $size += $file->getSize();
+            }
+        }
+    } catch (Exception $e) {
+        clean_sweep_log_message("Error calculating directory size for {$directory}: " . $e->getMessage(), 'warning');
+    }
+
+    return $size;
+}
