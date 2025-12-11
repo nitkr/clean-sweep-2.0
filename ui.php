@@ -20,7 +20,11 @@ function clean_sweep_output_html_header() {
         echo '<!DOCTYPE html><html><head><title>Clean Sweep - WordPress Malware Cleanup Toolkit' . $title_suffix . '</title>';
         echo '<link rel="stylesheet" href="assets/css/style.css">';
         echo '<script src="assets/script.js"></script>';
-        echo '</head><body' . ($recovery_mode ? ' class="recovery-mode"' : '') . '><h1>🧹 Clean Sweep' . $badge_html . '</h1>';
+        // Detect if we're in setup phase (before fresh environment setup completes)
+        // vs main interface phase (after setup is complete)
+        $is_setup_phase = !isset($_SESSION['fresh_env_setup_complete']);
+        $title_class = $is_setup_phase ? 'centered-title' : '';
+        echo '</head><body><h1 class="' . $title_class . '">🧹 Clean Sweep v ' . CLEAN_SWEEP_VERSION . $badge_html . '</h1>';
 
 
     }
