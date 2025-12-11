@@ -56,6 +56,167 @@ function clean_sweep_delete_core_directory($dir_path) {
 }
 
 /**
+ * Create ZIP backup of core files that need to be preserved
+ *
+ * @param string $site_root Real WordPress site root directory
+ * @param string|null $progress_file Progress file for AJAX updates
+ * @return string|false ZIP file path on success, false on failure
+ */
+function clean_sweep_create_core_backup_zip($site_root, $progress_file = null) {
+    // Get Clean Sweep root directory
+    $clean_sweep_root = dirname(__DIR__, 2);
+    $backup_dir = $clean_sweep_root . DIRECTORY_SEPARATOR . 'backups';
+
+    // Create unique ZIP filename with timestamp
+    $timestamp = date('Y-m-d_H-i-s');
+    $zip_filename = 'wp-core-backup_' . $timestamp . '.zip';
+    $zip_path = $backup_dir . DIRECTORY_SEPARATOR . $zip_filename;
+
+    clean_sweep_log_message("Creating ZIP backup of core files to: " . $zip_path);
+
+    // Ensure backup directory exists
+    if (!file_exists($backup_dir)) {
+        if (!wp_mkdir_p($backup_dir)) {
+            if (!mkdir($backup_dir, 0755, true)) {
+                clean_sweep_log_message("Failed to create backup directory: $backup_dir", 'error');
+                return false;
+            }
+        }
+        clean_sweep_log_message("Created backup directory: $backup_dir");
+    }
+
+    // Check if ZipArchive is available
+    if (!class_exists('ZipArchive')) {
+        clean_sweep_log_message("ZipArchive class not available, cannot create ZIP backup", 'error');
+        return false;
+    }
+
+    $zip = new ZipArchive();
+
+    if ($zip->open($zip_path, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== TRUE) {
+        clean_sweep_log_message("Failed to create ZIP file: $zip_path", 'error');
+        return false;
+    }
+
+    clean_sweep_log_message("Created ZIP file successfully: $zip_filename");
+
+    // Files to preserve (backup from REAL SITE ROOT)
+    $preserve_files = [
+        'wp-config.php',
+        'wp-content',
+        '.htaccess',
+        'robots.txt'
+    ];
+
+    // Count total files for progress tracking
+    $file_count = 0;
+    foreach ($preserve_files as $file) {
+        $full_path = $site_root . $file;
+        if (file_exists($full_path)) {
+            if (is_dir($full_path)) {
+                $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($full_path));
+                foreach ($iterator as $item) {
+                    if ($item->isFile()) {
+                        $file_count++;
+                    }
+                }
+            } else {
+                $file_count++;
+            }
+        }
+    }
+
+    clean_sweep_log_message("Found $file_count files to backup to ZIP");
+
+    // Add files to ZIP with proper relative paths
+    $processed_count = 0;
+
+    foreach ($preserve_files as $file) {
+        $full_path = $site_root . $file;
+        if (file_exists($full_path)) {
+            if (is_dir($full_path)) {
+                // Handle directory recursively
+                $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($full_path));
+                foreach ($iterator as $item) {
+                    if ($item->isFile()) {
+                        $relative_path = str_replace($site_root, '', $item->getPathname());
+
+                        // Skip if relative path contains '..'
+                        if (strpos($relative_path, '..') !== false) {
+                            clean_sweep_log_message("Skipping invalid relative path: $relative_path", 'warning');
+                            continue;
+                        }
+
+                        // Add file to ZIP
+                        if ($zip->addFile($item->getPathname(), $relative_path)) {
+                            clean_sweep_log_message("Added to ZIP: $relative_path");
+                        } else {
+                            clean_sweep_log_message("Failed to add to ZIP: $relative_path", 'error');
+                        }
+
+                        $processed_count++;
+
+                        // Update progress every 10 files or for the last file
+                        if ($progress_file && ($processed_count % 10 === 0 || $processed_count === $file_count)) {
+                            $progress_percentage = round(($processed_count / $file_count) * 100);
+                            $progress_data = [
+                                'status' => 'backing_up',
+                                'progress' => 10 + round($progress_percentage * 0.15), // 10-25% range for backup
+                                'message' => "Creating core backup ZIP... ($processed_count/$file_count files)",
+                                'current' => $processed_count,
+                                'total' => $file_count,
+                                'phase' => 'backup'
+                            ];
+                            @clean_sweep_write_progress_file($progress_file, $progress_data);
+                        }
+                    }
+                }
+            } else {
+                // Handle single file
+                $relative_path = $file;
+
+                // Add file to ZIP
+                if ($zip->addFile($full_path, $relative_path)) {
+                    clean_sweep_log_message("Added to ZIP: $relative_path");
+                } else {
+                    clean_sweep_log_message("Failed to add to ZIP: $relative_path", 'error');
+                }
+
+                $processed_count++;
+
+                // Update progress
+                if ($progress_file) {
+                    $progress_percentage = round(($processed_count / $file_count) * 100);
+                    $progress_data = [
+                        'status' => 'backing_up',
+                        'progress' => 10 + round($progress_percentage * 0.15), // 10-25% range for backup
+                        'message' => "Creating core backup ZIP... ($processed_count/$file_count files)",
+                        'current' => $processed_count,
+                        'total' => $file_count,
+                        'phase' => 'backup'
+                    ];
+                    @clean_sweep_write_progress_file($progress_file, $progress_data);
+                }
+            }
+        }
+    }
+
+    // Close the ZIP file
+    $zip->close();
+
+    // Verify ZIP was created successfully
+    if (!file_exists($zip_path) || filesize($zip_path) === 0) {
+        clean_sweep_log_message("ZIP backup failed - file not created or empty: $zip_path", 'error');
+        return false;
+    }
+
+    $zip_size = round(filesize($zip_path) / 1024 / 1024, 2); // Size in MB
+    clean_sweep_log_message("Core ZIP backup created successfully: $zip_filename ($zip_size MB, $file_count files)", 'success');
+
+    return $zip_path; // Return the ZIP file path
+}
+
+/**
  * Execute WordPress core file re-installation
  */
 function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
@@ -175,62 +336,23 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
         clean_sweep_log_message("Using WordPress version: $wp_version");
     }
 
-    // Create backup directory for core files (only if user requested backup)
-    $core_backup_dir = null;
+    // Create backup ZIP for core files (only if user requested backup)
+    $core_backup_zip = null;
     if ($create_backup) {
-        $core_backup_dir = 'backups/wp-core-backup-' . date('Y-m-d-H-i-s');
-        clean_sweep_log_message("Creating core files backup to: $core_backup_dir");
+        // Create ZIP backup of core files
+        $core_backup_zip = clean_sweep_create_core_backup_zip($site_root, $progress_file);
 
-        if (!wp_mkdir_p($core_backup_dir)) {
-            clean_sweep_log_message("Failed to create core backup directory", 'error');
-            return ['success' => false, 'message' => 'Failed to create backup directory'];
+        if (!$core_backup_zip) {
+            clean_sweep_log_message("Failed to create core backup ZIP", 'error');
+            return ['success' => false, 'message' => 'Failed to create backup ZIP'];
         }
 
-        // Files to preserve (backup from REAL SITE ROOT)
-        $preserve_files = [
-            'wp-config.php',
-            'wp-content',
-            '.htaccess',
-            'robots.txt'
-        ];
+        clean_sweep_log_message("Core backup ZIP created: $core_backup_zip");
 
-        // Backup preserve files FROM REAL SITE ROOT
-        foreach ($preserve_files as $file) {
-            $full_path = $site_root . $file;
-            if (file_exists($full_path)) {
-                $backup_path = $core_backup_dir . '/' . $file;
-                $backup_dir = dirname($backup_path);
-
-                if (!wp_mkdir_p($backup_dir)) {
-                    clean_sweep_log_message("Failed to create backup subdirectory: $backup_dir", 'error');
-                    continue;
-                }
-
-                if (is_dir($full_path)) {
-                    // Copy directory recursively
-                    $iterator = new RecursiveIteratorIterator(
-                        new RecursiveDirectoryIterator($full_path, RecursiveDirectoryIterator::SKIP_DOTS),
-                        RecursiveIteratorIterator::SELF_FIRST
-                    );
-
-                    foreach ($iterator as $item) {
-                        if ($item->isDir()) {
-                            wp_mkdir_p($backup_path . '/' . $iterator->getSubPathName());
-                        } else {
-                            copy($item->getPathname(), $backup_path . '/' . $iterator->getSubPathName());
-                        }
-                    }
-                } else {
-                    copy($full_path, $backup_path);
-                }
-                clean_sweep_log_message("Backed up: $file");
-            }
-        }
-
-        // Update progress: Starting backup
+        // Update progress: Backup complete
         $progress_data['status'] = 'backing_up';
         $progress_data['progress'] = 25;
-        $progress_data['message'] = 'Creating backup of preserve files...';
+        $progress_data['message'] = 'Core backup ZIP created successfully...';
         $progress_data['step'] = 1;
         clean_sweep_write_progress_file($progress_file, $progress_data);
     } else {
@@ -420,8 +542,8 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
 
     clean_sweep_log_message("WordPress core re-installation completed successfully");
     clean_sweep_log_message("Files copied: $files_copied");
-    if ($core_backup_dir) {
-        clean_sweep_log_message("Backup location: " . __DIR__ . '/' . $core_backup_dir);
+    if ($core_backup_zip) {
+        clean_sweep_log_message("Backup ZIP location: $core_backup_zip");
     } else {
         clean_sweep_log_message("Backup: Skipped as requested by user");
     }
@@ -431,8 +553,8 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
     $progress_data['progress'] = 100;
     $progress_data['message'] = 'Core re-installation completed successfully!';
 
-    $backup_info = $core_backup_dir ?
-        '<li><strong>Backup location:</strong> <code>' . htmlspecialchars($core_backup_dir) . '</code></li>' :
+    $backup_info = $core_backup_zip ?
+        '<li><strong>Backup ZIP:</strong> <code>' . htmlspecialchars(basename($core_backup_zip)) . '</code></li>' :
         '<li><strong>Backup:</strong> Skipped as requested</li>';
 
     $progress_data['details'] = '<div style="background:#d4edda;border:1px solid #c3e6cb;padding:15px;border-radius:4px;margin:10px 0;color:#155724;">' .
@@ -468,8 +590,8 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
             echo '<ul style="margin:10px 0;padding-left:20px;">';
             echo '<li><strong>Version:</strong> ' . htmlspecialchars($wp_version) . '</li>';
             echo '<li><strong>Files copied:</strong> ' . $files_copied . '</li>';
-            if ($core_backup_dir) {
-                echo '<li><strong>Backup location:</strong> <code>' . htmlspecialchars(__DIR__ . '/' . $core_backup_dir) . '</code></li>';
+            if ($core_backup_zip) {
+                echo '<li><strong>Backup ZIP:</strong> <code>' . htmlspecialchars(basename($core_backup_zip)) . '</code></li>';
             } else {
                 echo '<li><strong>Backup:</strong> Skipped as requested</li>';
             }
