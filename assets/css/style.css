@@ -8,6 +8,11 @@ body {
     background: #f8f9fa;
 }
 
+/* Recovery mode specific styling */
+body.recovery-mode h1 {
+    text-align: center;
+}
+
 .log {
     color: #666;
     font-size: 12px;
