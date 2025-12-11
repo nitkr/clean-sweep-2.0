@@ -8,7 +8,11 @@ body {
     background: #f8f9fa;
 }
 
-/* Recovery mode specific styling */
+h1 {
+    text-align: left;
+}
+
+/* Recovery mode specific styling - center for recovery mode */
 body.recovery-mode h1 {
     text-align: center;
 }
