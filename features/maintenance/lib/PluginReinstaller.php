@@ -24,14 +24,7 @@ class CleanSweep_PluginReinstaller {
     public function start_reinstallation($progress_file = null, $create_backup = false, $proceed_without_backup = false, $wp_org_plugins = [], $wpmu_dev_plugins = [], $suspicious_files_to_delete = [], $batch_start = 0, $batch_size = null) {
         clean_sweep_log_message("PluginReinstaller: Starting reinstallation process with separate processing phases", 'info');
 
-        // Use progress-file-specific transient key to prevent multi-tab interference
-        $wpmu_batch_key = 'clean_sweep_wpmu_batch_' . md5($progress_file ?? 'default');
-
-        // Reset WPMU DEV batch counter ONLY at the true start of the process (when starting WordPress.org plugins)
-        if ($batch_start === 0 && !empty($wp_org_plugins)) {
-            delete_transient($wpmu_batch_key);
-            clean_sweep_log_message("PluginReinstaller: Reset WPMU DEV batch counter for fresh process start", 'info');
-        }
+        // With JavaScript-only batching, no transient keys needed for cross-request state
 
         // Initialize progress manager
         $progressManager = $progress_file ? new CleanSweep_ProgressManager($progress_file) : null;
@@ -196,75 +189,25 @@ class CleanSweep_PluginReinstaller {
                     clean_sweep_log_message("PluginReinstaller: DEBUG - WPMU DEV plugin: $key => " . json_encode($data), 'info');
                 }
 
-                // Use progress-file-specific transient storage to track WPMU DEV batch progress across requests
-                $wpmu_batch_number = get_transient($wpmu_batch_key) ?: 0;
+                // With JavaScript-only batching, process all WPMU DEV plugins at once
+                // No transient-based batching needed since all data is passed with each request
+                clean_sweep_log_message("PluginReinstaller: Processing all WPMU DEV plugins at once", 'info');
 
-                $wpmu_batch_start = $wpmu_batch_number * $batch_size;
-                $wpmu_batch_plugins = array_slice($wpmu_dev_plugins, $wpmu_batch_start, $batch_size, true);
-                $total_wpmu_plugins = count($wpmu_dev_plugins);
-                $wpmu_batch_count = count($wpmu_batch_plugins);
+                $wmu_results = $this->reinstall_wpmu_dev_batch($wpmu_dev_plugins, $progressManager, 75, 95);
 
-                clean_sweep_log_message("PluginReinstaller: DEBUG - wpmu_batch_number: $wpmu_batch_number, wpmu_batch_start: $wpmu_batch_start, batch_size: $batch_size", 'info');
-                clean_sweep_log_message("PluginReinstaller: DEBUG - wpmu_batch_plugins has $wpmu_batch_count items", 'info');
-                foreach ($wpmu_batch_plugins as $key => $data) {
-                    clean_sweep_log_message("PluginReinstaller: DEBUG - Batch plugin: $key => " . json_encode($data), 'info');
-                }
+                // Merge WPMU DEV results into main results
+                $results['wpmu_dev']['successful'] = array_merge($results['wpmu_dev']['successful'] ?? [], $wmu_results['successful']);
+                $results['wpmu_dev']['failed'] = array_merge($results['wpmu_dev']['failed'] ?? [], $wmu_results['failed']);
 
-                if (!empty($wpmu_batch_plugins)) {
-                    clean_sweep_log_message("PluginReinstaller: Processing WPMU DEV batch " . ($wpmu_batch_start + 1) . "-" . ($wpmu_batch_start + $wpmu_batch_count) . " of $total_wpmu_plugins plugins", 'info');
+                clean_sweep_log_message("PluginReinstaller: WPMU DEV processing - Success: " . count($wmu_results['successful']) . ", Failed: " . count($wmu_results['failed']), 'info');
 
-                    $wmu_results = $this->reinstall_wpmu_dev_batch($wpmu_batch_plugins, $progressManager, 75, 95);
-
-                    // Merge WPMU DEV results into main results
-                    $results['wpmu_dev']['successful'] = array_merge($results['wpmu_dev']['successful'] ?? [], $wmu_results['successful']);
-                    $results['wpmu_dev']['failed'] = array_merge($results['wpmu_dev']['failed'] ?? [], $wmu_results['failed']);
-
-                    clean_sweep_log_message("PluginReinstaller: WPMU DEV batch - Success: " . count($wmu_results['successful']) . ", Failed: " . count($wmu_results['failed']), 'info');
-
-                    // Accumulate WPMU DEV results across batches
-                    $this->accumulate_batch_results($progress_file, $results, 'wpmu_dev');
-
-                    // Increment and store batch number for next call
-                    $wpmu_batch_number++;
-                    set_transient($wpmu_batch_key, $wpmu_batch_number, 3600);
-
-                    // Check if there are more WPMU DEV batches
-                    // Next batch start would be: current_batch_number * batch_size
-                    $next_batch_start = $wpmu_batch_number * $batch_size;
-                    $has_more_wpmu_batches = $next_batch_start < $total_wpmu_plugins;
-
-                    clean_sweep_log_message("PluginReinstaller: DEBUG - next_batch_start: $next_batch_start, total_wpmu_plugins: $total_wpmu_plugins, has_more: " . ($has_more_wpmu_batches ? 'YES' : 'NO'), 'info');
-
-                    if ($has_more_wpmu_batches) {
-                        $results['batch_info'] = [
-                            'has_more_batches' => true,
-                            'next_batch_start' => $batch_start + $batch_size, // Keep incrementing for frontend compatibility
-                            'processing_type' => 'wpmu_dev'
-                        ];
-
-                        if ($progressManager) {
-                            $progressManager->updateProgress([
-                                'status' => 'batch_complete',
-                                'progress' => 95,
-                                'message' => 'WPMU DEV batch completed, continuing...',
-                                'details' => "Processed " . count($wmu_results['successful']) . " successful, " . count($wmu_results['failed']) . " failed",
-                                'batch_info' => $results['batch_info']
-                            ]);
-                        }
-                        clean_sweep_log_message("PluginReinstaller: WPMU DEV batch completed, more batches pending", 'info');
-                        return $results;
-                    } else {
-                        // All WPMU DEV batches completed - set completion info
-                        $results['batch_info'] = [
-                            'has_more_batches' => false,
-                            'processing_complete' => true,
-                            'processing_type' => 'wpmu_dev'
-                        ];
-                        clean_sweep_log_message("PluginReinstaller: DEBUG - All WPMU DEV batches completed", 'info');
-                    }
-                } else {
-                    clean_sweep_log_message("PluginReinstaller: DEBUG - No WPMU DEV plugins in this batch, ending processing", 'info');
-                }
+                // All WPMU DEV plugins processed - set completion info
+                $results['batch_info'] = [
+                    'has_more_batches' => false,
+                    'processing_complete' => true,
+                    'processing_type' => 'wpmu_dev'
+                ];
+                clean_sweep_log_message("PluginReinstaller: All WPMU DEV plugins processed in single batch", 'info');
             }
 
             final_processing:
@@ -294,10 +237,6 @@ class CleanSweep_PluginReinstaller {
             ];
 
             clean_sweep_log_message("PluginReinstaller: Reinstallation completed - Total successful: $total_successful, Total failed: $total_failed", 'info');
-
-            // Clean up WPMU DEV batch transient on successful completion
-            delete_transient($wpmu_batch_key);
-            clean_sweep_log_message("PluginReinstaller: Cleaned up WPMU DEV batch transient on completion", 'info');
 
             // Send completion
             if ($progressManager) {

@@ -309,7 +309,7 @@ function processPluginBatchWithAnalysis(repoPluginsJson, analysisDataJson, batch
     const formData = new FormData();
     formData.append('action', 'reinstall_plugins');
     formData.append('repo_plugins', repoPluginsJson);
-    formData.append('existing_analysis', analysisDataJson);
+    formData.append('existing_analysis', analysisDataJson); // Pass analysis data with EVERY batch
     formData.append('progress_file', reinstallProgressFile);
     formData.append('batch_start', batchStart);
     formData.append('batch_size', batchSize);
