@@ -26,19 +26,49 @@ class CleanSweep_FreshEnvironment {
     /**
      * Check if fresh environment exists and is valid
      *
+     * @param string $context Context identifier for debugging (e.g., 'main_page', 'ajax')
      * @return bool True if environment is ready
      */
-    public function isValid() {
-        clean_sweep_log_message("🔍 DEBUG: isValid() checking fresh environment...", 'error');
-        clean_sweep_log_message("🔍 DEBUG: fresh_dir = " . $this->fresh_dir, 'error');
-        clean_sweep_log_message("🔍 DEBUG: marker_file = " . $this->marker_file, 'error');
+    public function isValid($context = 'unknown') {
+        // CHECK 1: Session-based validation (survives filesystem caching)
+        // Sessions are in-process memory, not affected by FastCGI caching
+        if (isset($_SESSION['fresh_env_setup_complete'])) {
+            $setup_timestamp = $_SESSION['fresh_env_setup_complete'];
+            $current_time = time();
+            $time_since_setup = $current_time - $setup_timestamp;
+            
+            // Trust session flag if setup completed within last 5 minutes
+            if ($time_since_setup < 300) {
+                clean_sweep_log_message("✅ [{$context}] Session flag indicates setup was just completed {$time_since_setup}s ago", 'info');
+                return true;
+            } else {
+                clean_sweep_log_message("🔍 [{$context}] Session flag expired ({$time_since_setup}s old), checking filesystem...", 'debug');
+                unset($_SESSION['fresh_env_setup_complete']);
+            }
+        }
 
-        // Check if directory exists
+        // CHECK 2: Filesystem cache clearing + canary file check
+        // CRITICAL: Clear FastCGI filesystem cache to bypass stale file detection
+        clearstatcache();
+        clean_sweep_log_message("🧹 [{$context}] Cleared FastCGI filesystem cache (clearstatcache)", 'debug');
+
+        $canary_path = $this->fresh_dir . '/.clean-sweep-canary.php';
+        clean_sweep_log_message("🔍 [{$context}] Checking for canary file at: {$canary_path}", 'debug');
+        
+        if (file_exists($canary_path)) {
+            clean_sweep_log_message("✅ [{$context}] Canary file found - fresh environment setup is COMPLETE", 'info');
+            return true;
+        }
+        clean_sweep_log_message("⚠️ [{$context}] Canary file NOT found - setup may be incomplete", 'debug');
+
+        // CHECK 2: Fallback validation - check if directory and key files exist
+        clean_sweep_log_message("🔍 [{$context}] Fallback: Checking fresh directory structure", 'debug');
+
         if (!is_dir($this->fresh_dir)) {
-            clean_sweep_log_message("❌ DEBUG: Fresh directory does not exist: " . $this->fresh_dir, 'error');
+            clean_sweep_log_message("❌ [{$context}] Fresh directory does not exist: " . $this->fresh_dir, 'error');
             return false;
         }
-        clean_sweep_log_message("✅ DEBUG: Fresh directory exists", 'error');
+        clean_sweep_log_message("✅ [{$context}] Fresh directory exists", 'debug');
 
         // Check essential WordPress files
         $required_files = [
@@ -51,11 +81,11 @@ class CleanSweep_FreshEnvironment {
         foreach ($required_files as $file) {
             $file_path = $this->fresh_dir . '/' . $file;
             if (!file_exists($file_path)) {
-                clean_sweep_log_message("❌ DEBUG: Required file missing: " . $file_path, 'error');
+                clean_sweep_log_message("❌ [{$context}] Required file missing: " . $file_path, 'error');
                 return false;
             }
         }
-        clean_sweep_log_message("✅ DEBUG: All required files exist", 'error');
+        clean_sweep_log_message("✅ [{$context}] All required files exist", 'debug');
 
         // Check essential directories
         $required_dirs = [
@@ -66,16 +96,16 @@ class CleanSweep_FreshEnvironment {
         foreach ($required_dirs as $dir) {
             $dir_path = $this->fresh_dir . '/' . $dir;
             if (!is_dir($dir_path)) {
-                clean_sweep_log_message("❌ DEBUG: Required directory missing: " . $dir_path, 'error');
+                clean_sweep_log_message("❌ [{$context}] Required directory missing: " . $dir_path, 'error');
                 return false;
             }
         }
-        clean_sweep_log_message("✅ DEBUG: All required directories exist", 'error');
+        clean_sweep_log_message("✅ [{$context}] All required directories exist", 'debug');
 
         // Check marker file
         if (!file_exists($this->marker_file)) {
-            clean_sweep_log_message("⚠️ DEBUG: Marker file missing: " . $this->marker_file, 'error');
-            clean_sweep_log_message("🔄 DEBUG: Creating marker file for existing fresh environment", 'error');
+            clean_sweep_log_message("⚠️ [{$context}] Marker file missing: " . $this->marker_file, 'debug');
+            clean_sweep_log_message("🔄 [{$context}] Creating marker file for existing fresh environment", 'debug');
 
             $marker_data = [
                 'created' => time(),
@@ -85,24 +115,24 @@ class CleanSweep_FreshEnvironment {
 
             $marker_result = file_put_contents($this->marker_file, json_encode($marker_data, JSON_PRETTY_PRINT));
             if ($marker_result === false) {
-                clean_sweep_log_message("❌ DEBUG: Failed to create marker file!", 'error');
+                clean_sweep_log_message("❌ [{$context}] Failed to create marker file!", 'error');
                 return false;
             }
 
-            clean_sweep_log_message("✅ DEBUG: Created marker file successfully", 'error');
+            clean_sweep_log_message("✅ [{$context}] Created marker file successfully", 'debug');
         } else {
-            clean_sweep_log_message("✅ DEBUG: Marker file exists", 'error');
+            clean_sweep_log_message("✅ [{$context}] Marker file exists", 'debug');
         }
 
         // Verify integrity if hash file exists
         if (file_exists($this->integrity_file)) {
-            clean_sweep_log_message("🔍 DEBUG: Integrity file exists, verifying...", 'error');
+            clean_sweep_log_message("🔍 [{$context}] Integrity file exists, verifying...", 'debug');
             $integrity_valid = $this->verifyIntegrity();
-            clean_sweep_log_message("✅ DEBUG: Integrity check: " . ($integrity_valid ? 'PASSED' : 'FAILED'), 'error');
+            clean_sweep_log_message("✅ [{$context}] Integrity check: " . ($integrity_valid ? 'PASSED' : 'FAILED'), 'debug');
             return $integrity_valid;
         }
 
-        clean_sweep_log_message("✅ DEBUG: isValid() returning TRUE - fresh environment is ready", 'error');
+        clean_sweep_log_message("✅ [{$context}] isValid() returning TRUE - fresh environment is ready (fallback validation)", 'info');
         return true;
     }
 
@@ -290,6 +320,16 @@ EOT;
 
         // Generate integrity hash
         $this->generateIntegrityHash();
+
+        // Write canary file to signal setup completion (inline to avoid class loading issues)
+        $canary_path = $this->fresh_dir . '/.clean-sweep-canary.php';
+        $canary_data = '<?php // Canary file - setup complete at ' . time() . ' ?>';
+        $canary_written = @file_put_contents($canary_path, $canary_data);
+        if ($canary_written !== false) {
+            clean_sweep_log_message("✅ Canary file written at: $canary_path", "info");
+        } else {
+            clean_sweep_log_message("⚠️ Failed to write canary file at: $canary_path", "error");
+        }
 
         clean_sweep_log_message("✅ Fresh environment setup complete with Option B architecture", 'info');
         return true;

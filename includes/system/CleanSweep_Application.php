@@ -153,34 +153,17 @@ class CleanSweep_Application {
         $batch_start = isset($_POST['batch_start']) ? intval($_POST['batch_start']) : 0;
         $batch_size = isset($_POST['batch_size']) ? intval($_POST['batch_size']) : 5;
 
-        // OPTIMIZATION: Use existing analysis data from UI instead of re-analyzing
-        if ($batch_start == 0) {
-            // FIRST BATCH: Check for existing analysis data from UI
-            $existing_analysis = isset($_POST['existing_analysis']) ?
-                json_decode(stripslashes($_POST['existing_analysis']), true) : null;
+        // JavaScript-only batching: Analysis data must be provided with each request
+        $analysis = isset($_POST['existing_analysis']) ?
+            json_decode(stripslashes($_POST['existing_analysis']), true) : null;
 
-            if ($existing_analysis && is_array($existing_analysis)) {
-                // Use the existing analysis data from the UI
-                $analysis = $existing_analysis;
-                clean_sweep_log_message("Using existing analysis data from UI - skipping redundant analysis", 'info');
-            } else {
-                // Fallback: Perform fresh analysis if no existing data
-                clean_sweep_log_message("No existing analysis data found, performing fresh analysis", 'info');
-                $analysis = clean_sweep_analyze_plugins($progress_file);
-            }
-
-            // Store for reuse across batches
-            set_transient('clean_sweep_batch_analysis', $analysis, 3600); // 1 hour expiry
-            clean_sweep_log_message("Plugin analysis stored for optimized batch processing");
+        if (!$analysis || !is_array($analysis)) {
+            // This should never happen with proper JavaScript implementation
+            clean_sweep_log_message("ERROR: No analysis data provided with batch request", 'error');
+            // Fallback for safety (though this indicates a JavaScript issue)
+            $analysis = clean_sweep_analyze_plugins($progress_file);
         } else {
-            // SUBSEQUENT BATCHES: Use stored analysis for instant processing
-            $analysis = get_transient('clean_sweep_batch_analysis');
-            if (!$analysis) {
-                // Fallback if transient expired (rare - storage/save issue)
-                clean_sweep_log_message("Warning: Stored analysis expired, re-analyzing", 'warning');
-                $analysis = clean_sweep_analyze_plugins($progress_file);
-                set_transient('clean_sweep_batch_analysis', $analysis, 3600);
-            }
+            clean_sweep_log_message("Using analysis data from JavaScript batch request", 'debug');
         }
 
         // Check if selective plugin filtering was requested via AJAX

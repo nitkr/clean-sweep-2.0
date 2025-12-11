@@ -10,11 +10,39 @@
 class CleanSweep_Cleanup {
 
     /**
+     * Clean up database entries created by Clean Sweep
+     * Removes validation timestamps and other temporary data
+     */
+    private function cleanup_database_entries() {
+        try {
+            // Remove Clean Sweep validation timestamp from WordPress options
+            $db = new CleanSweep_DB();
+            $db->query(
+                "DELETE FROM {$db->get_table_prefix()}options WHERE option_name = ?",
+                ['clean_sweep_env_validated']
+            );
+
+            if (!defined('WP_CLI') || !WP_CLI) {
+                echo "🗑️  Cleaned up database entries\n";
+            }
+        } catch (Exception $e) {
+            // Silently continue if database cleanup fails
+            // This prevents cleanup from failing due to database issues
+            if (!defined('WP_CLI') || !WP_CLI) {
+                echo "⚠️  Database cleanup skipped (may not be available)\n";
+            }
+        }
+    }
+
+    /**
      * Execute cleanup of all Clean Sweep files and directories
      * Memory-efficient version for managed hosting with limited memory
      */
     public function execute_cleanup() {
         // Note: Cleanup operations are not logged to avoid creating log files during cleanup
+
+        // FIRST: Clean up database entries before file deletion
+        $this->cleanup_database_entries();
 
         // Calculate Clean Sweep root directory dynamically (compatible with all architectures)
         $clean_sweep_dir = dirname(__DIR__, 2); // From includes/system/ up 2 levels to project root

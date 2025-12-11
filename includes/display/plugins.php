@@ -348,7 +348,7 @@ function clean_sweep_display_plugins_tab_content($plugin_results) {
 
         // Plugin lists
         if (!empty($plugin_results['wp_org_plugins'])) {
-            echo '<h4>📦 WordPress.org Plugins to be Re-installed (' . $repo_count . ') <button onclick="copyPluginList(\'reinstall\')" style="background:#007bff;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:12px;">Copy</button></h4>';
+            echo '<h4 style="display:flex; align-items:center; gap:10px;">📦 WordPress.org Plugins to be Re-installed (' . $repo_count . ') <button onclick="copyPluginList(\'reinstall\')" style="background:#007bff;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:12px;">Copy</button></h4>';
             echo '<div style="background:white;padding:15px;border-radius:4px;border:1px solid #dee2e6;margin:10px 0;max-height:400px;overflow-y:auto;">';
             echo '<div style="margin-bottom:10px;"><button onclick="selectAllWpOrg()" style="background:#28a745;color:white;border:none;padding:6px 12px;border-radius:3px;cursor:pointer;font-size:12px;margin-right:5px;">Select All</button><button onclick="selectNoneWpOrg()" style="background:#dc3545;color:white;border:none;padding:6px 12px;border-radius:3px;cursor:pointer;font-size:12px;">Select None</button></div>';
             echo '<table class="plugin-analysis-table" style="width:100%;border-collapse:collapse;">';
@@ -389,7 +389,7 @@ function clean_sweep_display_plugins_tab_content($plugin_results) {
             $wpmu_count = count($plugin_results['wpmu_dev_plugins']);
             $total_to_reinstall = $repo_count + $wpmu_count;
 
-            echo '<h4>💎 WPMU DEV Premium Plugins to be Re-installed (' . $wpmu_count . ') <button onclick="copyPluginList(\'wpmudev\')" style="background:#7c3aed;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:12px;">Copy</button></h4>';
+            echo '<h4 style="display:flex; align-items:center; gap:10px;">💎 WPMU DEV Premium Plugins to be Re-installed (' . $wpmu_count . ') <button onclick="copyPluginList(\'wpmudev\')" style="background:#7c3aed;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:12px;">Copy</button></h4>';
             echo '<div style="background:#f8f9ff;padding:15px;border-radius:4px;border:1px solid #c3b1e1;margin:10px 0;max-height:400px;overflow-y:auto;">';
             echo '<div style="margin-bottom:10px;"><button onclick="selectAllWpmuDev()" style="background:#28a745;color:white;border:none;padding:6px 12px;border-radius:3px;cursor:pointer;font-size:12px;margin-right:5px;">Select All</button><button onclick="selectNoneWpmuDev()" style="background:#dc3545;color:white;border:none;padding:6px 12px;border-radius:3px;cursor:pointer;font-size:12px;">Select None</button></div>';
 
@@ -502,16 +502,7 @@ function clean_sweep_display_plugins_tab_content($plugin_results) {
             echo '</div>';
         }
 
-        // Core Integrity Baseline Section
-        echo '<div style="background:#e7f3ff;border:1px solid #b8daff;padding:15px;border-radius:4px;margin:20px 0;">';
-        echo '<h4>🛡️ Core Integrity Baseline</h4>';
-        echo '<p>Establish a cryptographic baseline of your WordPress core files to detect future reinfection attempts. This creates SHA256 hashes of critical core files for ongoing integrity monitoring.</p>';
-        echo '<div style="margin:10px 0;">';
-        echo '<button onclick="establishCoreBaseline()" style="background:#17a2b8;color:white;border:none;padding:8px 16px;border-radius:4px;cursor:pointer;font-weight:bold;">🔐 Establish Core Baseline</button>';
-        echo '<span id="baseline-status" style="margin-left:10px;font-size:12px;color:#666;"></span>';
-        echo '</div>';
-        echo '<p style="font-size:12px;color:#666;margin:5px 0;"><em>Recommended after core reinstallation or when you\'re confident your core files are clean.</em></p>';
-        echo '</div>';
+
 
         // Safety warnings (backup choice now handled during progress)
         echo '<div style="background:#f8d7da;border:1px solid #f5c6cb;padding:15px;border-radius:4px;margin:20px 0;">';

@@ -109,26 +109,8 @@ class CleanSweep_PluginAnalyzer {
                 clean_sweep_log_message("WPMU DEV plugin: {$name} (slug: {$slug}, ID: {$wdp_id})", 'info');
             }
 
-            // Store FULL analysis data in site_transient keyed by progress_file for AJAX persistence
-            if ($progress_file) {
-                $analysis_key = 'clean_sweep_analysis_' . md5($progress_file);
-                $full_analysis_data = [
-                    'wp_org_plugins' => $wp_org_plugins,
-                    'wpmu_dev_plugins' => $wpmu_dev_plugins,
-                    'non_repo_plugins' => $non_repo_plugins,
-                    'suspicious_files' => $suspicious_files,
-                    'copy_lists' => $copy_lists,
-                    'wpmu_dev_available' => $wpmu_dev_available,
-                    'totals' => [
-                        'wordpress_org' => $wp_org_count,
-                        'wpmu_dev' => $wpmu_dev_count,
-                        'non_repository' => $non_repo_count,
-                        'suspicious' => $suspicious_count,
-                        'total' => $total_plugins
-                    ]
-                ];
-                set_site_transient($analysis_key, $full_analysis_data);
-            }
+            // Analysis data is now passed directly with each JavaScript batch request
+            // No database storage needed with JavaScript-only batching
 
             clean_sweep_log_message("=== WordPress Plugin Analysis Completed ===");
 

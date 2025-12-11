@@ -1,8 +1,6 @@
 // Clean Sweep - Core Utilities
 // Core utility functions for Clean Sweep
 
-let autoScrollEnabled = true;
-
 function updateProgress(current, total, status) {
     const progressBar = document.getElementById("progress-fill");
     const progressText = document.getElementById("progress-text");
@@ -22,18 +20,6 @@ function updateProgress(current, total, status) {
         if (progressBar) progressBar.style.width = "0%";
         if (progressText) progressText.textContent = status;
     }
-
-    // Auto-scroll to follow progress
-    if (autoScrollEnabled) {
-        scrollToBottom();
-    }
-}
-
-function scrollToBottom() {
-    window.scrollTo({
-        top: document.body.scrollHeight,
-        behavior: "smooth"
-    });
 }
 
 function scrollToResults() {
@@ -46,51 +32,29 @@ function scrollToResults() {
     }
 }
 
-// Auto-scroll when new content is added
-const observer = new MutationObserver(function(mutations) {
-    if (autoScrollEnabled) {
-        // Small delay to ensure content is rendered
-        setTimeout(scrollToBottom, 100);
-    }
-
-    // Check if results section has loaded
-    mutations.forEach(function(mutation) {
-        mutation.addedNodes.forEach(function(node) {
-            if (node.nodeType === Node.ELEMENT_NODE) {
-                if (node.querySelector && node.querySelector("h2") &&
-                    node.querySelector("h2").textContent.includes("Final Reinstallation Results")) {
-                    setTimeout(scrollToResults, 500);
-                } else if (node.tagName === "H2" &&
-                         node.textContent.includes("Final Reinstallation Results")) {
-                    setTimeout(scrollToResults, 500);
+// Check if results section has loaded
+document.addEventListener("DOMContentLoaded", function() {
+    // Observe for results section loading (keep this functionality)
+    const observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+            mutation.addedNodes.forEach(function(node) {
+                if (node.nodeType === Node.ELEMENT_NODE) {
+                    if (node.querySelector && node.querySelector("h2") &&
+                        node.querySelector("h2").textContent.includes("Final Reinstallation Results")) {
+                        setTimeout(scrollToResults, 500);
+                    } else if (node.tagName === "H2" &&
+                             node.textContent.includes("Final Reinstallation Results")) {
+                        setTimeout(scrollToResults, 500);
+                    }
                 }
-            }
+            });
         });
     });
-});
 
-// Start observing when page loads
-document.addEventListener("DOMContentLoaded", function() {
     observer.observe(document.body, {
         childList: true,
         subtree: true
     });
-});
-
-// Disable auto-scroll if user manually scrolls up
-let scrollTimeout;
-window.addEventListener("scroll", function() {
-    clearTimeout(scrollTimeout);
-    const currentScroll = window.pageYOffset;
-    const maxScroll = document.body.scrollHeight - window.innerHeight;
-
-    // If user scrolled up (not at bottom), disable auto-scroll temporarily
-    if (currentScroll < maxScroll - 100) {
-        autoScrollEnabled = false;
-        scrollTimeout = setTimeout(function() {
-            autoScrollEnabled = true;
-        }, 3000); // Re-enable after 3 seconds of no scrolling
-    }
 });
 
 // Copy to clipboard functionality
@@ -314,9 +278,11 @@ function copyPluginList(type) {
 
     if (type === "reinstall") {
         // Find the heading that contains "WordPress.org Plugins to be Re-installed"
+        // Exclude button text from the search
         let targetHeading = null;
         headings.forEach(function(heading) {
-            if (heading.textContent.includes("WordPress.org Plugins to be Re-installed")) {
+            const headingText = heading.textContent.replace(/Copy/g, '').trim();
+            if (headingText.includes("WordPress.org Plugins to be Re-installed")) {
                 targetHeading = heading;
             }
         });
@@ -330,14 +296,12 @@ function copyPluginList(type) {
                 if (table) {
                     const tableRows = table.querySelectorAll("tbody tr");
                     tableRows.forEach(function(row) {
-                        const firstTd = row.querySelector("td:first-child");
-                        if (firstTd) {
-                            const strongElement = firstTd.querySelector("strong");
-                            if (strongElement) {
-                                const fullText = strongElement.textContent.trim();
-                                const pluginName = fullText.split(' (')[0]; // Remove slug part
-                                pluginNames.push(pluginName);
-                            }
+                        // Look for <strong> element anywhere in the row (works for all table structures)
+                        const strongElement = row.querySelector("strong");
+                        if (strongElement) {
+                            const fullText = strongElement.textContent.trim();
+                            const pluginName = fullText.split(' (')[0]; // Remove slug part
+                            pluginNames.push(pluginName);
                         }
                     });
                 }
@@ -345,40 +309,11 @@ function copyPluginList(type) {
         }
     } else if (type === "wpmudev") {
         // Find the heading that contains "WPMU DEV Premium Plugins to be Re-installed"
+        // Exclude button text from the search
         let targetHeading = null;
         headings.forEach(function(heading) {
-            if (heading.textContent.includes("WPMU DEV Premium Plugins to be Re-installed")) {
-                targetHeading = heading;
-            }
-        });
-
-        if (targetHeading) {
-            // Find the next div sibling (table container) and specifically get strong elements from table cells only
-            const nextDiv = targetHeading.nextElementSibling;
-            if (nextDiv && nextDiv.tagName === "DIV") {
-                // Get only strong elements that are direct children of td elements in the table, exclude security notice
-                const table = nextDiv.querySelector("table");
-                if (table) {
-                    const tableRows = table.querySelectorAll("tbody tr");
-                    tableRows.forEach(function(row) {
-                        const firstTd = row.querySelector("td:first-child");
-                        if (firstTd) {
-                            const strongElement = firstTd.querySelector("strong");
-                            if (strongElement) {
-                                const fullText = strongElement.textContent.trim();
-                                const pluginName = fullText.split(' (')[0]; // Remove slug part
-                                pluginNames.push(pluginName);
-                            }
-                        }
-                    });
-                }
-            }
-        }
-    } else if (type === "nonrepo") {
-        // Find the heading that contains "Non-Repository Plugins"
-        let targetHeading = null;
-        headings.forEach(function(heading) {
-            if (heading.textContent.includes("Non-Repository Plugins")) {
+            const headingText = heading.textContent.replace(/Copy/g, '').trim();
+            if (headingText.includes("WPMU DEV Premium Plugins to be Re-installed")) {
                 targetHeading = heading;
             }
         });
@@ -391,13 +326,41 @@ function copyPluginList(type) {
                 if (table) {
                     const tableRows = table.querySelectorAll("tbody tr");
                     tableRows.forEach(function(row) {
-                        const firstTd = row.querySelector("td:first-child");
-                        if (firstTd) {
-                            const strongElement = firstTd.querySelector("strong");
-                            if (strongElement) {
-                                const pluginName = strongElement.textContent.trim();
-                                pluginNames.push(pluginName);
-                            }
+                        // Look for <strong> element anywhere in the row (works for all table structures)
+                        const strongElement = row.querySelector("strong");
+                        if (strongElement) {
+                            const fullText = strongElement.textContent.trim();
+                            const pluginName = fullText.split(' (')[0]; // Remove slug part
+                            pluginNames.push(pluginName);
+                        }
+                    });
+                }
+            }
+        }
+    } else if (type === "nonrepo") {
+        // Find the heading that contains "Non-Repository Plugins"
+        // Exclude button text from the search
+        let targetHeading = null;
+        headings.forEach(function(heading) {
+            const headingText = heading.textContent.replace(/Copy/g, '').trim();
+            if (headingText.includes("Non-Repository Plugins")) {
+                targetHeading = heading;
+            }
+        });
+
+        if (targetHeading) {
+            // Find the next div sibling (table container) and get strong elements from table cells
+            const nextDiv = targetHeading.nextElementSibling;
+            if (nextDiv && nextDiv.tagName === "DIV") {
+                const table = nextDiv.querySelector("table");
+                if (table) {
+                    const tableRows = table.querySelectorAll("tbody tr");
+                    tableRows.forEach(function(row) {
+                        // Look for <strong> element anywhere in the row (works for all table structures)
+                        const strongElement = row.querySelector("strong");
+                        if (strongElement) {
+                            const pluginName = strongElement.textContent.trim();
+                            pluginNames.push(pluginName);
                         }
                     });
                 }
@@ -405,9 +368,11 @@ function copyPluginList(type) {
         }
     } else if (type === "suspicious") {
         // Find the heading that contains "Suspicious Files Detected"
+        // Exclude button text from the search
         let targetHeading = null;
         headings.forEach(function(heading) {
-            if (heading.textContent.includes("Suspicious Files Detected")) {
+            const headingText = heading.textContent.replace(/Copy/g, '').trim();
+            if (headingText.includes("Suspicious Files Detected")) {
                 targetHeading = heading;
             }
         });
@@ -420,13 +385,11 @@ function copyPluginList(type) {
                 if (table) {
                     const tableRows = table.querySelectorAll("tbody tr");
                     tableRows.forEach(function(row) {
-                        const firstTd = row.querySelector("td:first-child");
-                        if (firstTd) {
-                            const strongElement = firstTd.querySelector("strong");
-                            if (strongElement) {
-                                const fileName = strongElement.textContent.trim();
-                                pluginNames.push(fileName);
-                            }
+                        // Look for <strong> element anywhere in the row (works for all table structures)
+                        const strongElement = row.querySelector("strong");
+                        if (strongElement) {
+                            const fileName = strongElement.textContent.trim();
+                            pluginNames.push(fileName);
                         }
                     });
                 }

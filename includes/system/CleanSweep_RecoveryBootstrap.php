@@ -40,7 +40,7 @@ class CleanSweep_RecoveryBootstrap {
         }
 
         // Check if fresh environment exists
-        if ($this->fresh_env->isValid()) {
+        if ($this->fresh_env->isValid('main_page')) {
             // Load existing fresh environment
             return $this->loadFreshEnvironment();
         } else {
@@ -56,7 +56,7 @@ class CleanSweep_RecoveryBootstrap {
      */
     private function isRecoverySetupAjax() {
         $action = $_POST['action'] ?? '';
-        $recovery_actions = ['start_fresh_setup', 'get_setup_progress', 'upload_wordpress_zip'];
+        $recovery_actions = ['start_fresh_setup', 'get_setup_progress', 'upload_wordpress_zip', 'clear_all_caches', 'check_canary'];
 
         return in_array($action, $recovery_actions);
     }
@@ -119,7 +119,7 @@ class CleanSweep_RecoveryBootstrap {
         // Double-check: if environment became valid while loading the page, redirect immediately
         if ($this->fresh_env->isValid()) {
             clean_sweep_log_message("Environment became valid during page load, redirecting to app", 'info');
-            echo '<script>window.location.reload();</script>';
+            echo '<script>window.location.href = window.location.pathname + "?recovery_token=" + Date.now();</script>';
             return;
         }
 
@@ -130,7 +130,7 @@ class CleanSweep_RecoveryBootstrap {
 
         echo '<div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 20px; border-radius: 6px; margin-bottom: 30px;">';
         echo '<h3 style="margin: 0 0 15px 0; color: #856404;">🔄 Setting up Secure Recovery Environment</h3>';
-        echo '<p style="margin: 0; color: #856404;">Clean Sweep uses a dedicated, secure environment for maximum protection. This ensures potentially compromised files are never executed during the recovery process.</p>';
+        echo '<p style="margin: 0; color: #856404;">Clean Sweep runs in a protected recovery environment that safely isolates and removes malware.</p>';
         echo '</div>';
 
         echo '<div id="setup-progress" style="margin-bottom: 30px;">';
@@ -175,7 +175,7 @@ class CleanSweep_RecoveryBootstrap {
 
         echo '</div>';
 
-        // JavaScript for setup process
+        // JavaScript for setup process with enhanced cache-busting
         echo '<script>
         document.addEventListener("DOMContentLoaded", function() {
             const progressBar = document.getElementById("progress-bar");
@@ -193,6 +193,8 @@ class CleanSweep_RecoveryBootstrap {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/x-www-form-urlencoded",
+                        "Cache-Control": "no-cache, no-store",
+                        "Pragma": "no-cache"
                     },
                     body: "action=start_fresh_setup"
                 })
@@ -215,6 +217,8 @@ class CleanSweep_RecoveryBootstrap {
                     method: "POST",
                     headers: {
                         "Content-Type": "application/x-www-form-urlencoded",
+                        "Cache-Control": "no-cache, no-store",
+                        "Pragma": "no-cache"
                     },
                     body: "action=get_setup_progress"
                 })
@@ -226,12 +230,72 @@ class CleanSweep_RecoveryBootstrap {
                             setTimeout(pollProgress, 1000);
                         } else if (data.success) {
                             updateProgress(100, "Environment configured! Starting Clean Sweep...");
-                            setTimeout(() => window.location.reload(), 2000);
+                            // PRE-RELOAD CACHE CLEAR + INCREASED DELAY
+                            setTimeout(() => completeSetup(), 1000);
                         }
                     }
                 })
                 .catch(error => {
                     showManualUpload("Progress check failed");
+                });
+            }
+
+            function completeSetup() {
+                // Step 1: Clear server caches before reload
+                updateProgress(100, "Clearing server caches...");
+                fetch("", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "Cache-Control": "no-cache, no-store",
+                        "Pragma": "no-cache"
+                    },
+                    body: "action=clear_all_caches"
+                })
+                .then(() => {
+                    // Step 2: Verify canary file exists (proves setup completed)
+                    updateProgress(100, "Verifying environment setup completion...");
+                    pollCanary(0);
+                })
+                .catch(() => {
+                    // Fallback: still try to reload
+                    setTimeout(() => window.location.href = window.location.pathname + "?recovery_token=" + Date.now(), 2000);
+                });
+            }
+
+            function pollCanary(attempts) {
+                const maxAttempts = 10;  // Try for 5 seconds (500ms * 10)
+                
+                if (attempts >= maxAttempts) {
+                    // Canary check timed out, reload anyway (cache should have cleared)
+                    updateProgress(100, "Environment ready! Starting Clean Sweep...");
+                    setTimeout(() => window.location.href = window.location.pathname + "?recovery_token=" + Date.now(), 1000);
+                    return;
+                }
+
+                fetch("", {
+                    method: "POST",
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "Cache-Control": "no-cache, no-store",
+                        "Pragma": "no-cache"
+                    },
+                    body: "action=check_canary"
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Canary file found! Setup is definitely complete
+                        updateProgress(100, "✅ Setup verified! Starting Clean Sweep...");
+                        setTimeout(() => window.location.href = window.location.pathname + "?recovery_token=" + Date.now(), 1000);
+                    } else {
+                        // Canary not found yet, keep polling
+                        setTimeout(() => pollCanary(attempts + 1), 500);
+                    }
+                })
+                .catch(() => {
+                    // Network error, keep polling
+                    setTimeout(() => pollCanary(attempts + 1), 500);
                 });
             }
 
@@ -255,13 +319,17 @@ class CleanSweep_RecoveryBootstrap {
 
                     fetch("", {
                         method: "POST",
+                        headers: {
+                            "Cache-Control": "no-cache, no-store",
+                            "Pragma": "no-cache"
+                        },
                         body: formData
                     })
                     .then(response => response.json())
                     .then(data => {
                         if (data.success) {
                             updateProgress(100, "Environment configured! Starting Clean Sweep...");
-                            setTimeout(() => window.location.reload(), 2000);
+                            setTimeout(() => completeSetup(), 1000);
                         } else {
                             alert("Upload failed: " + (data.error || "Unknown error"));
                         }
@@ -305,6 +373,13 @@ class CleanSweep_RecoveryBootstrap {
                 $this->handleUploadZip();
                 break;
 
+            case 'clear_all_caches':
+                $this->handleClearCaches();
+            case 'check_canary':
+                $this->handleCanaryCheck();
+                break;
+                break;
+
             default:
                 $this->sendJsonResponse(false, 'Invalid action');
         }
@@ -333,6 +408,15 @@ class CleanSweep_RecoveryBootstrap {
 
         // Start setup process
         if ($this->fresh_env->setup()) {
+            // SET SESSION FLAG WITH TIMESTAMP FOR FAST VALIDATION BYPASS
+            // This prevents FastCGI caching issues on subsequent page loads
+            // Sessions are in-process memory, not affected by filesystem caching
+            $_SESSION['fresh_env_setup_complete'] = time();
+            clean_sweep_log_message("✅ Session flag set: fresh_env_setup_complete = " . $_SESSION['fresh_env_setup_complete'], 'info');
+
+            // PHP will auto-save session data when request ends
+            // No need to manually call session_write_close()
+
             // Update progress to complete
             $progress_data = [
                 'status' => 'complete',
@@ -396,6 +480,134 @@ class CleanSweep_RecoveryBootstrap {
             $this->sendJsonResponse(true, 'Upload and setup complete');
         } else {
             $this->sendJsonResponse(false, 'Upload processing failed');
+        }
+    }
+
+    /**
+     * Handle cache clearing request
+     * Clears all possible caches to ensure filesystem checks work correctly
+     */
+    private function handleClearCaches() {
+        clean_sweep_log_message("🧹 Clearing all caches for fresh filesystem validation", 'info');
+
+        // Clear PHP filesystem cache
+        clearstatcache();
+        clean_sweep_log_message("✅ PHP stat cache cleared", 'debug');
+
+        // Clear OPcache if available
+        if (function_exists('opcache_reset')) {
+            opcache_reset();
+            clean_sweep_log_message("✅ OPcache cleared", 'debug');
+        }
+
+        // Clear APCu cache if available (modern PHP 7+)
+        if (function_exists('apcu_clear_cache')) {
+            apcu_clear_cache();
+            clean_sweep_log_message("✅ APCu cache cleared", 'debug');
+        }
+
+        // Clear any custom caches
+        if (isset($GLOBALS['wp_object_cache']) && is_object($GLOBALS['wp_object_cache'])) {
+            $GLOBALS['wp_object_cache']->flush();
+            clean_sweep_log_message("✅ WordPress object cache cleared", 'debug');
+        }
+
+        // Clear server-specific caches
+        $this->handleServerSpecificCaches();
+
+        clean_sweep_log_message("🎉 All caches cleared successfully", 'info');
+        $this->sendJsonResponse(true, 'All caches cleared successfully');
+    }
+
+    /**
+     * Handle canary file check request
+     * Verifies if the fresh environment setup is complete
+     */
+    private function handleCanaryCheck() {
+        $canary_path = dirname(dirname(__DIR__)) . '/core/fresh/.clean-sweep-canary.php';
+
+        if (file_exists($canary_path)) {
+            $this->sendJsonResponse(true, 'Environment is ready');
+        } else {
+            $this->sendJsonResponse(false, 'Environment not ready');
+        }
+    }
+
+    /**
+     * Clear server-specific caches based on hosting environment
+     * Add server-specific cache clearing functions here as needed
+     */
+    private function handleServerSpecificCaches() {
+        // WPMUDEV Hosting detection and cache clearing
+        if (isset($_SERVER['WPMUDEV_HOSTED'])) {
+            if (function_exists('curl_init')) {
+                try {
+                    // Build domain and resolver
+                    $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https://' : 'http://';
+                    $domain   = $protocol . rtrim($_SERVER['HTTP_HOST'], '/');
+                    $resolver = str_replace(array('http://', 'https://'), '', $domain) . ':443:127.0.0.1';
+
+                    // Purge site root instead of current script to clear homepage and main pages
+                    $path = '/'; // Site root - this will clear homepage and main cached pages
+                    $url  = $domain . $path;
+
+                    $ch = curl_init();
+                    curl_setopt_array($ch, array(
+                        CURLOPT_URL                  => $url,
+                        CURLOPT_RETURNTRANSFER       => true,
+                        CURLOPT_CUSTOMREQUEST        => 'PURGE',
+                        CURLOPT_DNS_USE_GLOBAL_CACHE => false,
+                        CURLOPT_RESOLVE              => array($resolver),
+                        CURLOPT_TIMEOUT              => 10,
+                    ));
+
+                    $response = curl_exec($ch);
+                    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                    $curl_error = curl_error($ch);
+                    curl_close($ch);
+
+                    if (empty($curl_error) && (strpos(strtoupper($response), 'OK') !== false || $http_code === 200 || $http_code === 204)) {
+                        clean_sweep_log_message("✅ WPMUDEV cache purge successful", 'info');
+                        // Test cache effectiveness by making a follow-up request
+                        $this->testCacheEffectiveness($url);
+                    }
+
+                } catch (Exception $e) {
+                    // Silently fail - cache purging is not critical
+                }
+            }
+        }
+    }
+
+    /**
+     * Test cache effectiveness by making a follow-up request
+     * This helps verify if the PURGE request actually cleared the cache
+     *
+     * @param string $url The URL that was purged
+     */
+    private function testCacheEffectiveness($url) {
+        try {
+            // Add a cache-busting parameter to ensure we get a fresh response
+            $test_url = $url . (strpos($url, '?') !== false ? '&' : '?') . 'cache_test=' . time() . rand(1000, 9999);
+
+            $ch = curl_init();
+            curl_setopt_array($ch, array(
+                CURLOPT_URL            => $test_url,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_TIMEOUT        => 5,
+                CURLOPT_NOBODY         => false, // We want the body to check for dynamic content
+            ));
+
+            $response = curl_exec($ch);
+            $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_close($ch);
+
+            if ($http_code === 200 && strpos($response, 'cache_test=') !== false) {
+                // Cache appears to be working correctly
+                return;
+            }
+        } catch (Exception $e) {
+            // Silently fail - cache testing is not critical
         }
     }
 

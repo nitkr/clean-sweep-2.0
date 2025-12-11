@@ -93,18 +93,35 @@ function clean_sweep_display_malware_scan_results_real($scan_results) {
             echo '</div>';
         }
 
-        // Truncation notice
+        echo '</div>';
+
+        // Enhanced pagination controls (moved to top for better UX)
         if (isset($scan_results['truncated']) && $scan_results['truncated']) {
             $total_available = $scan_results['full_count'] ?? $total_threats;
-            $progress_percent = $total_available > 0 ? round(($shown_threats / $total_available) * 100) : 0;
-            echo '<div style="background:#fff3cd;border:1px solid #ffeaa7;padding:12px;border-radius:6px;margin:15px 0;">';
-            echo '<strong>📄 Large Results:</strong> Showing ' . $shown_threats . ' of ' . $total_available . ' threats • Page 1 of ' . ceil($total_available / 50);
-            echo '<div style="margin:8px 0;"><div style="background:#e9ecef;border-radius:10px;height:8px;overflow:hidden;">';
-            echo '<div style="background:#007bff;height:100%;width:' . $progress_percent . '%;"></div></div></div>';
+            $pages_needed = ceil($total_available / 50);
+            $current_page = 1;
+
+            echo '<div class="threat-pagination-header" style="background:#e7f0ff;border:1px solid #b3d9ff;padding:20px;border-radius:8px;margin:20px 0;text-align:center;">';
+            echo '<h4 style="margin:0 0 15px 0;color:#084c7d;">📄 Threat Results Navigation</h4>';
+
+            echo '<div style="display:flex;justify-content:center;align-items:center;gap:15px;margin-bottom:15px;flex-wrap:wrap;">';
+            echo '<button class="pagination-btn" onclick="loadNextThreatPage(\'' . htmlspecialchars($scan_results['request_id']) . '\', ' . ($current_page + 1) . ', 50)" style="background:#007bff;color:white;border:none;padding:12px 20px;font-size:14px;border-radius:6px;cursor:pointer;min-width:140px;">';
+            echo '▶️ Load Next Page';
+            echo '</button>';
+
+
+            echo '</div>';
+
+            echo '<div style="font-size:14px;color:#495057;margin-bottom:10px;">';
+            echo '<strong>Page ' . $current_page . ' of ' . $pages_needed . '</strong> • ';
+            echo '<strong>' . $shown_threats . '</strong> threats shown of <strong>' . $total_available . '</strong> total';
+            echo '</div>';
+
+            echo '<div style="background:#fff3cd;border:1px solid #ffeaa7;padding:10px;border-radius:4px;font-size:13px;color:#856404;">';
+            echo '💡 <strong>Tip:</strong> Use Previous/Next buttons to navigate through threat results page by page.';
+            echo '</div>';
             echo '</div>';
         }
-
-        echo '</div>';
 
         // Use the new timeline display system
         clean_sweep_display_categorized_threats($scan_results);
@@ -118,35 +135,7 @@ function clean_sweep_display_malware_scan_results_real($scan_results) {
             echo '</div>';
         }
 
-        // Bottom pagination controls
-        if (isset($scan_results['truncated']) && $scan_results['truncated'] && isset($scan_results['request_id'])) {
-            $total_available = $scan_results['full_count'] ?? $total_threats;
-            $pages_needed = ceil($total_available / 50);
-            $current_page = 1; // Always start at page 1 for new scans
 
-            echo '<div class="threat-pagination-container" id="threat-pagination" style="background:#f8f9fa;border:1px solid #dee2e6;padding:25px;border-radius:8px;margin:30px 0;text-align:center;">';
-            echo '<h4 style="margin-bottom:15px;color:#495057;">📄 Load Additional Results</h4>';
-
-            echo '<div style="display:flex;justify-content:center;align-items:center;gap:10px;margin-bottom:15px;">';
-            echo '<button class="pagination-btn" onclick="loadNextThreatPage(\'' . htmlspecialchars($scan_results['request_id']) . '\', ' . ($current_page + 1) . ', 50)" style="background:#007bff;color:white;border:none;padding:12px 20px;font-size:16px;border-radius:6px;cursor:pointer;min-width:150px;">';
-            echo '▶️ Load Next Page';
-            echo '</button>';
-
-            echo '<button class="pagination-btn" onclick="loadAllRemainingThreats(\'' . htmlspecialchars($scan_results['request_id']) . '\')" style="background:#28a745;color:white;border:none;padding:12px 20px;font-size:16px;border-radius:6px;cursor:pointer;min-width:150px;">';
-            echo '📥 Load All Remaining';
-            echo '</button>';
-            echo '</div>';
-
-            echo '<div style="font-size:14px;color:#6c757d;">';
-            echo 'Page <strong>' . $current_page . ' of ' . $pages_needed . '</strong> • ';
-            echo '<strong>' . $shown_threats . '</strong> threats shown of <strong>' . $total_available . '</strong> total';
-            echo '</div>';
-
-            echo '<div style="margin-top:15px;font-size:12px;color:#6c757d;text-decoration:none;">';
-            echo '📋 Complete results also available in: <code style="background:#e9ecef;padding:2px 6px;border-radius:3px;font-size:11px;">' . htmlspecialchars($scan_results['log_file_reference'] ?? 'logs/clean-sweep.log') . '</code>';
-            echo '</div>';
-            echo '</div>';
-        }
 
         // INTEGRITY BASELINE MANAGEMENT SECTION
         echo '<div class="integrity-baseline-section" style="background:#f8f9fa;border:1px solid #dee2e6;padding:25px;border-radius:8px;margin:30px 0;">';
