@@ -8,6 +8,16 @@ body {
     background: #f8f9fa;
 }
 
+/* Center title in recovery mode only */
+.centered-title {
+    text-align: center !important;
+}
+
+/* Default left alignment for main interface */
+h1 {
+    text-align: left;
+}
+
 .log {
     color: #666;
     font-size: 12px;
