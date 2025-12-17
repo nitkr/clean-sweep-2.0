@@ -316,7 +316,9 @@ function clean_sweep_display_plugins_tab_content($plugin_results) {
         // Enhanced Stats overview with all categories
         echo '<div class="enhanced-stats-container">';
         echo '<div class="enhanced-stats-box wordpress-org"><div class="enhanced-stats-number">' . $repo_count . '</div><div class="enhanced-stats-label">WordPress.org Plugins</div></div>';
-        echo '<div class="enhanced-stats-box wpmu-dev"><div class="enhanced-stats-number">' . $wpmudev_count . '</div><div class="enhanced-stats-label">WPMU DEV Plugins</div></div>';
+        if ($wpmudev_count > 0) {
+            echo '<div class="enhanced-stats-box wpmu-dev"><div class="enhanced-stats-number">' . $wpmudev_count . '</div><div class="enhanced-stats-label">WPMU DEV Plugins</div></div>';
+        }
         echo '<div class="enhanced-stats-box non-repo"><div class="enhanced-stats-number">' . $non_repo_count . '</div><div class="enhanced-stats-label">Non-Repository</div></div>';
         echo '<div class="enhanced-stats-box suspicious"><div class="enhanced-stats-number">' . $suspicious_count . '</div><div class="enhanced-stats-label">Suspicious Files</div></div>';
         echo '</div>';
@@ -510,7 +512,9 @@ function clean_sweep_display_plugins_tab_content($plugin_results) {
         echo '<ul style="margin:10px 0;padding-left:20px;">';
         echo '<li>You will be asked whether to create a backup before proceeding</li>';
         echo '<li>Hello Dolly (demo plugin) will be automatically removed if present</li>';
-        echo '<li><strong>WPMU DEV Dashboard:</strong> Will be automatically preserved (core dashboard plugin cannot be reinstalled)</li>';
+        if (class_exists('WPMUDEV_Dashboard')) {
+            echo '<li><strong>WPMU DEV Dashboard:</strong> Will be automatically preserved (core dashboard plugin cannot be reinstalled)</li>';
+        }
         echo '<li>This process cannot be undone - review the list above carefully</li>';
         echo '<li>Ensure you have database backups before proceeding</li>';
         echo '</ul>';
