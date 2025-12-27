@@ -96,20 +96,26 @@ function clean_sweep_is_wpmudev_available() {
         }
     }
 
-    // Check API key status - Use our own validation since plugin's has_key() is unreliable
-    $has_key = false;
-
-    // If we successfully found and defined the API key, consider it authenticated
-    if (defined('WPMUDEV_APIKEY') && !empty(WPMUDEV_APIKEY)) {
-        $has_key = true;
-        clean_sweep_log_message("✅ Authentication successful - API key found and defined", 'info');
-    } elseif (isset(WPMUDEV_Dashboard::$api)) {
-        // Fallback to plugin's method if our method didn't work
-        $has_key = WPMUDEV_Dashboard::$api->has_key();
-        clean_sweep_log_message("🔑 WPMUDEV_Dashboard::\$api->has_key(): " . ($has_key ? 'TRUE' : 'FALSE'), 'info');
-    } else {
+    // Check API key status
+    if (!isset(WPMUDEV_Dashboard::$api)) {
         clean_sweep_log_message("❌ WPMUDEV_Dashboard::\$api not available", 'error');
         return false;
+    }
+
+    // Debug: Check API object properties
+    clean_sweep_log_message("🔍 WPMU DEV API Debug - API object exists: " . (isset(WPMUDEV_Dashboard::$api) ? 'YES' : 'NO'), 'info');
+    clean_sweep_log_message("🔍 WPMU DEV API Debug - API key property: " . (property_exists(WPMUDEV_Dashboard::$api, 'api_key') ? 'EXISTS' : 'MISSING'), 'info');
+    if (property_exists(WPMUDEV_Dashboard::$api, 'api_key')) {
+        clean_sweep_log_message("🔍 WPMU DEV API Debug - API key value: " . (!empty(WPMUDEV_Dashboard::$api->api_key) ? 'SET (' . strlen(WPMUDEV_Dashboard::$api->api_key) . ' chars)' : 'EMPTY'), 'info');
+    }
+    clean_sweep_log_message("🔍 WPMU DEV API Debug - has_key method: " . (method_exists(WPMUDEV_Dashboard::$api, 'has_key') ? 'EXISTS' : 'MISSING'), 'info');
+
+    $has_key = WPMUDEV_Dashboard::$api->has_key();
+    clean_sweep_log_message("🔑 WPMUDEV_Dashboard::\$api->has_key(): " . ($has_key ? 'TRUE' : 'FALSE'), 'info');
+
+    // Debug: Check what happens after has_key call
+    if (property_exists(WPMUDEV_Dashboard::$api, 'api_key')) {
+        clean_sweep_log_message("🔍 WPMU DEV API Debug - API key after has_key(): " . (!empty(WPMUDEV_Dashboard::$api->api_key) ? 'SET (' . strlen(WPMUDEV_Dashboard::$api->api_key) . ' chars)' : 'EMPTY'), 'info');
     }
 
     // If target is multisite but API key check fails, try alternative authentication methods
