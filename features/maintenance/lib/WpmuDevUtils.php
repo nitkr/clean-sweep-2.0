@@ -60,97 +60,39 @@ function clean_sweep_is_wpmudev_available() {
         $option_key_length = !empty($option_api_key) ? strlen($option_api_key) : 0;
         clean_sweep_log_message("🔍 API Key Check - sitemeta: " . ($site_key_length > 0 ? "{$site_key_length} chars" : "empty") . ", options: " . ($option_key_length > 0 ? "{$option_key_length} chars" : "empty"), 'info');
 
-        // Debug: Direct database query to see what's actually stored
+        // Get API key using direct database queries since get_site_option() doesn't work in recovery environment
+        $api_key = null;
         try {
             global $wpdb;
             if ($wpdb) {
-                // Log table names and site info
-                clean_sweep_log_message("🔍 DB Debug - Table prefix: '{$wpdb->prefix}'", 'info');
-                clean_sweep_log_message("🔍 DB Debug - sitemeta table: '{$wpdb->sitemeta}'", 'info');
-                clean_sweep_log_message("🔍 DB Debug - options table: '{$wpdb->options}'", 'info');
-                clean_sweep_log_message("🔍 DB Debug - Current site ID: " . get_current_blog_id(), 'info');
-                clean_sweep_log_message("🔍 DB Debug - Main site ID: " . get_main_site_id(), 'info');
-
-                // Check table existence first
-                $sitemeta_exists = $wpdb->get_var("SHOW TABLES LIKE '{$wpdb->sitemeta}'");
-                $options_exists = $wpdb->get_var("SHOW TABLES LIKE '{$wpdb->options}'");
-                clean_sweep_log_message("🔍 DB Debug - sitemeta table exists: " . ($sitemeta_exists ? 'YES' : 'NO'), 'info');
-                clean_sweep_log_message("🔍 DB Debug - options table exists: " . ($options_exists ? 'YES' : 'NO'), 'info');
-
-                // Try different site IDs for sitemeta
-                $main_site_id = get_main_site_id();
-                for ($site_id = 1; $site_id <= max(2, $main_site_id); $site_id++) {
-                    $sitemeta_result = $wpdb->get_row($wpdb->prepare(
-                        "SELECT meta_value FROM {$wpdb->sitemeta} WHERE meta_key = %s AND site_id = %d",
-                        'wpmudev_apikey', $site_id
-                    ));
-                    if (!empty($sitemeta_result)) {
-                        clean_sweep_log_message("🔍 Direct DB Query - wp_sitemeta wpmudev_apikey (site_id={$site_id}): found (" . strlen($sitemeta_result->meta_value) . " chars)", 'info');
-                        break;
-                    }
-                }
-                if (empty($sitemeta_result)) {
-                    clean_sweep_log_message("🔍 Direct DB Query - wp_sitemeta wpmudev_apikey: NOT found with any site_id", 'info');
-                }
-
-                // Check wp_options for wpmudev_apikey
-                $options_result = $wpdb->get_row($wpdb->prepare(
-                    "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s",
-                    'wpmudev_apikey'
-                ));
-                clean_sweep_log_message("🔍 Direct DB Query - wp_options wpmudev_apikey: " . (!empty($options_result) ? "found (" . strlen($options_result->option_value) . " chars)" : "NOT found"), 'info');
-
-                // Check for any wpmudev-related options in options table
-                $all_wpmudev_options = $wpdb->get_results($wpdb->prepare(
-                    "SELECT option_name, LENGTH(option_value) as value_length FROM {$wpdb->options} WHERE option_name LIKE %s LIMIT 10",
-                    'wpmudev%'
-                ));
-                if (!empty($all_wpmudev_options)) {
-                    clean_sweep_log_message("🔍 WPMU DEV options in wp_options table:", 'info');
-                    foreach ($all_wpmudev_options as $opt) {
-                        clean_sweep_log_message("  - {$opt->option_name}: {$opt->value_length} chars", 'info');
-                    }
+                // Get API key directly from database - try sitemeta first, then options
+                $sitemeta_key = $wpdb->get_var("SELECT meta_value FROM {$wpdb->sitemeta} WHERE meta_key = 'wpmudev_apikey' LIMIT 1");
+                if (!empty($sitemeta_key)) {
+                    $api_key = $sitemeta_key;
+                    clean_sweep_log_message("🔑 Found WPMU DEV API key in wp_sitemeta table", 'info');
                 } else {
-                    clean_sweep_log_message("🔍 No WPMU DEV options found in wp_options table", 'info');
-                }
-
-                // Check for any wpmudev-related sitemeta
-                $all_wpmudev_sitemeta = $wpdb->get_results($wpdb->prepare(
-                    "SELECT meta_key, site_id, LENGTH(meta_value) as value_length FROM {$wpdb->sitemeta} WHERE meta_key LIKE %s LIMIT 10",
-                    'wpmudev%'
-                ));
-                if (!empty($all_wpmudev_sitemeta)) {
-                    clean_sweep_log_message("🔍 WPMU DEV sitemeta in wp_sitemeta table:", 'info');
-                    foreach ($all_wpmudev_sitemeta as $meta) {
-                        clean_sweep_log_message("  - {$meta->meta_key} (site_id={$meta->site_id}): {$meta->value_length} chars", 'info');
+                    $options_key = $wpdb->get_var("SELECT option_value FROM {$wpdb->options} WHERE option_name = 'wpmudev_apikey' LIMIT 1");
+                    if (!empty($options_key)) {
+                        $api_key = $options_key;
+                        clean_sweep_log_message("🔑 Found WPMU DEV API key in wp_options table (converted site)", 'info');
                     }
-                } else {
-                    clean_sweep_log_message("🔍 No WPMU DEV sitemeta found in wp_sitemeta table", 'info');
-                }
-
-                // Raw SQL check as fallback
-                try {
-                    $raw_sitemeta = $wpdb->get_var("SELECT meta_value FROM {$wpdb->sitemeta} WHERE meta_key = 'wpmudev_apikey' LIMIT 1");
-                    clean_sweep_log_message("🔍 Raw SQL sitemeta check: " . (!empty($raw_sitemeta) ? "found (" . strlen($raw_sitemeta) . " chars)" : "NOT found"), 'info');
-
-                    $raw_options = $wpdb->get_var("SELECT option_value FROM {$wpdb->options} WHERE option_name = 'wpmudev_apikey' LIMIT 1");
-                    clean_sweep_log_message("🔍 Raw SQL options check: " . (!empty($raw_options) ? "found (" . strlen($raw_options) . " chars)" : "NOT found"), 'info');
-                } catch (Exception $e) {
-                    clean_sweep_log_message("❌ Raw SQL check failed: " . $e->getMessage(), 'error');
                 }
             }
         } catch (Exception $e) {
-            clean_sweep_log_message("❌ Error during direct DB query: " . $e->getMessage(), 'error');
+            clean_sweep_log_message("❌ Error getting API key from database: " . $e->getMessage(), 'error');
         }
 
-        // Use sitemeta key if available, otherwise fallback to options table
-        $api_key = !empty($site_api_key) ? $site_api_key : $option_api_key;
-
+        // Define the constant with the found key
         if (!empty($api_key) && !defined('WPMUDEV_APIKEY')) {
             define('WPMUDEV_APIKEY', $api_key);
             clean_sweep_log_message("🔑 Defined WPMUDEV_APIKEY constant for multisite compatibility", 'info');
         } elseif (empty($api_key)) {
             clean_sweep_log_message("❌ No WPMU DEV API key found in database", 'error');
+        }
+
+        // Update the WordPress function variables for consistency (even though we don't use them)
+        if (!empty($api_key)) {
+            $site_api_key = $api_key;  // For backward compatibility with existing code
         }
     }
 
