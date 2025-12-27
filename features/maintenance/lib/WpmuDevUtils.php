@@ -48,12 +48,19 @@ function clean_sweep_is_wpmudev_available() {
         $site_api_key = get_site_option('wpmudev_apikey');     // wp_sitemeta (normal multisite)
         $option_api_key = get_option('wpmudev_apikey');        // wp_options (converted sites)
 
+        // Debug: Log key status without exposing sensitive data
+        $site_key_length = !empty($site_api_key) ? strlen($site_api_key) : 0;
+        $option_key_length = !empty($option_api_key) ? strlen($option_api_key) : 0;
+        clean_sweep_log_message("🔍 API Key Check - sitemeta: " . ($site_key_length > 0 ? "{$site_key_length} chars" : "empty") . ", options: " . ($option_key_length > 0 ? "{$option_key_length} chars" : "empty"), 'info');
+
         // Use sitemeta key if available, otherwise fallback to options table
         $api_key = !empty($site_api_key) ? $site_api_key : $option_api_key;
 
         if (!empty($api_key) && !defined('WPMUDEV_APIKEY')) {
             define('WPMUDEV_APIKEY', $api_key);
             clean_sweep_log_message("🔑 Defined WPMUDEV_APIKEY constant for multisite compatibility", 'info');
+        } elseif (empty($api_key)) {
+            clean_sweep_log_message("❌ No WPMU DEV API key found in database", 'error');
         }
     }
 
