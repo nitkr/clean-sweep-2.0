@@ -53,6 +53,52 @@ function clean_sweep_is_wpmudev_available() {
         $option_key_length = !empty($option_api_key) ? strlen($option_api_key) : 0;
         clean_sweep_log_message("🔍 API Key Check - sitemeta: " . ($site_key_length > 0 ? "{$site_key_length} chars" : "empty") . ", options: " . ($option_key_length > 0 ? "{$option_key_length} chars" : "empty"), 'info');
 
+        // Debug: Direct database query to see what's actually stored
+        try {
+            global $wpdb;
+            if ($wpdb) {
+                // Check wp_sitemeta for wpmudev_apikey
+                $sitemeta_result = $wpdb->get_row($wpdb->prepare(
+                    "SELECT meta_value FROM {$wpdb->sitemeta} WHERE meta_key = %s AND site_id = %d",
+                    'wpmudev_apikey', 1
+                ));
+                clean_sweep_log_message("🔍 Direct DB Query - wp_sitemeta wpmudev_apikey: " . (!empty($sitemeta_result) ? "found (" . strlen($sitemeta_result->meta_value) . " chars)" : "NOT found"), 'info');
+
+                // Check wp_options for wpmudev_apikey
+                $options_result = $wpdb->get_row($wpdb->prepare(
+                    "SELECT option_value FROM {$wpdb->options} WHERE option_name = %s",
+                    'wpmudev_apikey'
+                ));
+                clean_sweep_log_message("🔍 Direct DB Query - wp_options wpmudev_apikey: " . (!empty($options_result) ? "found (" . strlen($options_result->option_value) . " chars)" : "NOT found"), 'info');
+
+                // Check for any wpmudev-related options
+                $all_wpmudev_options = $wpdb->get_results($wpdb->prepare(
+                    "SELECT option_name, LENGTH(option_value) as value_length FROM {$wpdb->options} WHERE option_name LIKE %s LIMIT 5",
+                    'wpmudev%'
+                ));
+                if (!empty($all_wpmudev_options)) {
+                    clean_sweep_log_message("🔍 WPMU DEV options in wp_options:", 'info');
+                    foreach ($all_wpmudev_options as $opt) {
+                        clean_sweep_log_message("  - {$opt->option_name}: {$opt->value_length} chars", 'info');
+                    }
+                }
+
+                // Check for any wpmudev-related sitemeta
+                $all_wpmudev_sitemeta = $wpdb->get_results($wpdb->prepare(
+                    "SELECT meta_key, LENGTH(meta_value) as value_length FROM {$wpdb->sitemeta} WHERE meta_key LIKE %s LIMIT 5",
+                    'wpmudev%'
+                ));
+                if (!empty($all_wpmudev_sitemeta)) {
+                    clean_sweep_log_message("🔍 WPMU DEV sitemeta in wp_sitemeta:", 'info');
+                    foreach ($all_wpmudev_sitemeta as $meta) {
+                        clean_sweep_log_message("  - {$meta->meta_key}: {$meta->value_length} chars", 'info');
+                    }
+                }
+            }
+        } catch (Exception $e) {
+            clean_sweep_log_message("❌ Error during direct DB query: " . $e->getMessage(), 'error');
+        }
+
         // Use sitemeta key if available, otherwise fallback to options table
         $api_key = !empty($site_api_key) ? $site_api_key : $option_api_key;
 
