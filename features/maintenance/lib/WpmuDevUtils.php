@@ -96,14 +96,21 @@ function clean_sweep_is_wpmudev_available() {
         }
     }
 
-    // Check API key status
-    if (!isset(WPMUDEV_Dashboard::$api)) {
+    // Check API key status - Use our own validation since plugin's has_key() is unreliable
+    $has_key = false;
+
+    // If we successfully found and defined the API key, consider it authenticated
+    if (defined('WPMUDEV_APIKEY') && !empty(WPMUDEV_APIKEY)) {
+        $has_key = true;
+        clean_sweep_log_message("✅ Authentication successful - API key found and defined", 'info');
+    } elseif (isset(WPMUDEV_Dashboard::$api)) {
+        // Fallback to plugin's method if our method didn't work
+        $has_key = WPMUDEV_Dashboard::$api->has_key();
+        clean_sweep_log_message("🔑 WPMUDEV_Dashboard::\$api->has_key(): " . ($has_key ? 'TRUE' : 'FALSE'), 'info');
+    } else {
         clean_sweep_log_message("❌ WPMUDEV_Dashboard::\$api not available", 'error');
         return false;
     }
-
-    $has_key = WPMUDEV_Dashboard::$api->has_key();
-    clean_sweep_log_message("🔑 WPMUDEV_Dashboard::\$api->has_key(): " . ($has_key ? 'TRUE' : 'FALSE'), 'info');
 
     // If target is multisite but API key check fails, try alternative authentication methods
     if (!$has_key && $target_is_multisite) {
