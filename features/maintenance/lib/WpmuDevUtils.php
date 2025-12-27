@@ -42,6 +42,21 @@ function clean_sweep_is_wpmudev_available() {
     $recovery_is_multisite = is_multisite();
     clean_sweep_log_message("🏗️ Recovery environment multisite: " . ($recovery_is_multisite ? 'YES' : 'NO'), 'info');
 
+    // Handle API key location for multisite backward compatibility
+    // When sites are converted from single to multisite, API key may still be in wp_options
+    if ($target_is_multisite) {
+        $site_api_key = get_site_option('wpmudev_apikey');     // wp_sitemeta (normal multisite)
+        $option_api_key = get_option('wpmudev_apikey');        // wp_options (converted sites)
+
+        // Use sitemeta key if available, otherwise fallback to options table
+        $api_key = !empty($site_api_key) ? $site_api_key : $option_api_key;
+
+        if (!empty($api_key) && !defined('WPMUDEV_APIKEY')) {
+            define('WPMUDEV_APIKEY', $api_key);
+            clean_sweep_log_message("🔑 Defined WPMUDEV_APIKEY constant for multisite compatibility", 'info');
+        }
+    }
+
     // Check API key status
     if (!isset(WPMUDEV_Dashboard::$api)) {
         clean_sweep_log_message("❌ WPMUDEV_Dashboard::\$api not available", 'error');
