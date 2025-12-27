@@ -34,27 +34,13 @@ function clean_sweep_is_wpmudev_available() {
         clean_sweep_log_message("✅ WPMUDEV_Dashboard class already exists", 'info');
     }
 
-    // Check multisite status
-    $is_multisite = is_multisite();
-    clean_sweep_log_message("📊 Multisite: " . ($is_multisite ? 'YES' : 'NO'), 'info');
+    // Detect if TARGET site is multisite (not recovery environment)
+    $target_is_multisite = clean_sweep_detect_target_multisite();
+    clean_sweep_log_message("🎯 Target site multisite: " . ($target_is_multisite ? 'YES' : 'NO'), 'info');
 
-    // In multisite, also verify the plugin is activated (network or site level)
-    if ($is_multisite) {
-        $network_active = is_plugin_active_for_network('wpmudev-updates/update-notifications.php');
-        $site_active = is_plugin_active('wpmudev-updates/update-notifications.php');
-
-        if (!$network_active && !$site_active) {
-            clean_sweep_log_message("❌ WPMU DEV Dashboard not activated in multisite (neither network nor site level)", 'error');
-            return false;
-        }
-
-        clean_sweep_log_message("✅ WPMU DEV Dashboard activated - Network: " . ($network_active ? 'YES' : 'NO') . ", Site: " . ($site_active ? 'YES' : 'NO'), 'info');
-
-        // Check current site vs main site
-        $current_site_id = get_current_blog_id();
-        $main_site_id = get_main_site_id();
-        clean_sweep_log_message("🏠 Current site ID: {$current_site_id}, Main site ID: {$main_site_id}", 'info');
-    }
+    // Check current environment multisite status
+    $recovery_is_multisite = is_multisite();
+    clean_sweep_log_message("🏗️ Recovery environment multisite: " . ($recovery_is_multisite ? 'YES' : 'NO'), 'info');
 
     // Check API key status
     if (!isset(WPMUDEV_Dashboard::$api)) {
@@ -65,14 +51,36 @@ function clean_sweep_is_wpmudev_available() {
     $has_key = WPMUDEV_Dashboard::$api->has_key();
     clean_sweep_log_message("🔑 WPMUDEV_Dashboard::\$api->has_key(): " . ($has_key ? 'TRUE' : 'FALSE'), 'info');
 
-    // Additional multisite network checks
-    if ($is_multisite && isset(WPMUDEV_Dashboard::$network)) {
-        clean_sweep_log_message("🌐 WPMUDEV_Dashboard::\$network exists", 'info');
-        if (method_exists(WPMUDEV_Dashboard::$network, 'has_key')) {
+    // If target is multisite but API key check fails, try alternative authentication methods
+    if (!$has_key && $target_is_multisite) {
+        clean_sweep_log_message("🔄 Target is multisite but has_key() failed - trying alternative auth methods", 'info');
+
+        // Try network-level authentication if available
+        if (isset(WPMUDEV_Dashboard::$network) && method_exists(WPMUDEV_Dashboard::$network, 'has_key')) {
             $network_has_key = WPMUDEV_Dashboard::$network->has_key();
             clean_sweep_log_message("🔑 WPMUDEV_Dashboard::\$network->has_key(): " . ($network_has_key ? 'TRUE' : 'FALSE'), 'info');
-        } else {
-            clean_sweep_log_message("❌ WPMUDEV_Dashboard::\$network->has_key() method not available", 'warning');
+            if ($network_has_key) {
+                $has_key = true;
+                clean_sweep_log_message("✅ Using network-level authentication", 'info');
+            }
+        }
+
+        // Try to initialize WPMU DEV properly for multisite
+        if (!$has_key && method_exists('WPMUDEV_Dashboard', 'instance')) {
+            try {
+                $dashboard_instance = WPMUDEV_Dashboard::instance();
+                if ($dashboard_instance && isset(WPMUDEV_Dashboard::$api)) {
+                    // Try has_key again after initialization
+                    $has_key_retry = WPMUDEV_Dashboard::$api->has_key();
+                    clean_sweep_log_message("🔑 WPMUDEV_Dashboard::\$api->has_key() (retry): " . ($has_key_retry ? 'TRUE' : 'FALSE'), 'info');
+                    if ($has_key_retry) {
+                        $has_key = true;
+                        clean_sweep_log_message("✅ Authentication successful on retry", 'info');
+                    }
+                }
+            } catch (Exception $e) {
+                clean_sweep_log_message("❌ Error during multisite auth retry: " . $e->getMessage(), 'warning');
+            }
         }
     }
 
@@ -84,6 +92,11 @@ function clean_sweep_is_wpmudev_available() {
                 $projects = WPMUDEV_Dashboard::$site->get_cached_projects();
                 $project_count = is_array($projects) ? count($projects) : 0;
                 clean_sweep_log_message("📦 Available WPMU DEV projects: {$project_count}", 'info');
+
+                // Additional check: if we have projects, authentication is definitely working
+                if ($project_count > 0) {
+                    clean_sweep_log_message("✅ Confirmed authentication - found {$project_count} WPMU DEV projects", 'info');
+                }
             } else {
                 clean_sweep_log_message("❌ WPMUDEV_Dashboard::\$site not available for project check", 'warning');
             }
@@ -99,6 +112,79 @@ function clean_sweep_is_wpmudev_available() {
 
     clean_sweep_log_message("✅ WPMU DEV Dashboard detected and authenticated", 'info');
     return true;
+}
+
+/**
+ * Detect if the target site is multisite by examining its configuration and database
+ *
+ * @return bool True if target site is multisite, false otherwise
+ */
+function clean_sweep_detect_target_multisite() {
+    static $target_multisite_cache = null;
+
+    if ($target_multisite_cache !== null) {
+        return $target_multisite_cache;
+    }
+
+    clean_sweep_log_message("🔍 Detecting target site multisite status...", 'debug');
+
+    // Method 1: Check if MULTISITE constant is defined in target config
+    if (defined('ORIGINAL_WP_CONTENT_DIR')) {
+        $target_config_path = str_replace('/wp-content', '/wp-config.php', ORIGINAL_WP_CONTENT_DIR);
+        if (file_exists($target_config_path)) {
+            $config_content = file_get_contents($target_config_path);
+            if ($config_content !== false && strpos($config_content, "define('MULTISITE', true)") !== false) {
+                clean_sweep_log_message("✅ Target site detected as multisite via wp-config.php", 'debug');
+                return $target_multisite_cache = true;
+            }
+        }
+    }
+
+    // Method 2: Check database for multisite tables
+    try {
+        global $wpdb;
+        if ($wpdb) {
+            $multisite_tables = ['wp_blogs', 'wp_blog_versions', 'wp_registration_log', 'wp_signups', 'wp_site', 'wp_sitemeta'];
+            $found_multisite_tables = 0;
+
+            foreach ($multisite_tables as $table) {
+                // Use table_exists check or direct query
+                $table_name = str_replace('wp_', $wpdb->prefix, $table);
+                $table_exists = $wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $table_name));
+                if ($table_exists) {
+                    $found_multisite_tables++;
+                }
+            }
+
+            if ($found_multisite_tables >= 3) { // Require at least 3 multisite tables to be confident
+                clean_sweep_log_message("✅ Target site detected as multisite via database tables ({$found_multisite_tables} found)", 'debug');
+                return $target_multisite_cache = true;
+            }
+        }
+    } catch (Exception $e) {
+        clean_sweep_log_message("⚠️ Error checking database for multisite tables: " . $e->getMessage(), 'debug');
+    }
+
+    // Method 3: Check sitemeta table (most reliable multisite indicator)
+    try {
+        global $wpdb;
+        if ($wpdb) {
+            $sitemeta_table = $wpdb->get_var($wpdb->prepare("SHOW TABLES LIKE %s", $wpdb->prefix . 'sitemeta'));
+            if ($sitemeta_table) {
+                $site_count = $wpdb->get_var("SELECT COUNT(*) FROM {$wpdb->prefix}sitemeta WHERE meta_key = 'site_name'");
+                if ($site_count > 0) {
+                    clean_sweep_log_message("✅ Target site detected as multisite via sitemeta table", 'debug');
+                    return $target_multisite_cache = true;
+                }
+            }
+        }
+    } catch (Exception $e) {
+        clean_sweep_log_message("⚠️ Error checking sitemeta table: " . $e->getMessage(), 'debug');
+    }
+
+    // Default to single site if we can't determine
+    clean_sweep_log_message("🏠 Target site detected as single site (default)", 'debug');
+    return $target_multisite_cache = false;
 }
 
 /**
