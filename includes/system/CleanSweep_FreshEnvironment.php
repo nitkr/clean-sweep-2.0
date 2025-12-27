@@ -1150,10 +1150,20 @@ EOT;
 
         // Load safe plugins selectively for recovery operations
         $content .= "// Load safe plugins selectively for recovery operations\n";
-        $content .= $this->generateSelectivePluginLoadingCode('wpmu_dev_reinstall');
+        $content .= $this->generateSelectivePluginLoadingCode('analysis');
         $content .= "add_filter('option_active_sitewide_plugins', '__return_empty_array');\n\n";
 
-        $content .= "foreach (wp_get_active_and_valid_plugins() as \$plugin) {\n";
+        // Load both site-activated and network-activated plugins in multisite
+        $content .= "// Load activated plugins (both site and network in multisite)\n";
+        $content .= "\$all_active_plugins = wp_get_active_and_valid_plugins();\n";
+        $content .= "if (is_multisite()) {\n";
+        $content .= "    \$network_plugins = wp_get_active_network_plugins();\n";
+        $content .= "    if (!empty(\$network_plugins)) {\n";
+        $content .= "        \$all_active_plugins = array_merge(\$all_active_plugins, \$network_plugins);\n";
+        $content .= "        \$all_active_plugins = array_unique(\$all_active_plugins);\n";
+        $content .= "    }\n";
+        $content .= "}\n";
+        $content .= "foreach (\$all_active_plugins as \$plugin) {\n";
         $content .= "    wp_register_plugin_realpath(\$plugin);\n";
         $content .= "    include_once \$plugin;\n";
         $content .= "}\n\n";
@@ -1195,15 +1205,15 @@ EOT;
      * Generate selective plugin loading code for wp-settings.php
      * This creates inline PHP code that loads only safe plugins without requiring class instantiation
      *
-     * @param string $operation Operation name (e.g., 'wpmu_dev_reinstall')
+     * @param string $operation Operation name (e.g., 'wpmu_dev_reinstall', 'analysis')
      * @return string PHP code for selective plugin loading
      */
     private function generateSelectivePluginLoadingCode($operation) {
         // Define safe plugins inline (avoiding class instantiation)
         $safe_plugins = [];
 
-        // WPMU DEV Dashboard is required for WPMU DEV operations
-        if ($operation === 'wpmu_dev_reinstall' || $operation === 'premium_plugin_reinstall') {
+        // WPMU DEV Dashboard is required for WPMU DEV operations and authentication checks
+        if ($operation === 'wpmu_dev_reinstall' || $operation === 'premium_plugin_reinstall' || $operation === 'analysis') {
             $safe_plugins['wpmudev_updates'] = [
                 'file' => 'wpmudev-updates/update-notifications.php',
                 'name' => 'WPMU DEV Dashboard'
