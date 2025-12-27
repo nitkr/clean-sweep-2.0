@@ -45,6 +45,13 @@ function clean_sweep_is_wpmudev_available() {
     // Handle API key location for multisite backward compatibility
     // When sites are converted from single to multisite, API key may still be in wp_options
     if ($target_is_multisite) {
+        // Ensure multisite table names are defined even in single-site recovery environment
+        global $wpdb;
+        if (empty($wpdb->sitemeta)) {
+            $wpdb->sitemeta = $wpdb->prefix . 'sitemeta';
+            clean_sweep_log_message("🔧 Defined multisite table names for recovery environment", 'info');
+        }
+
         $site_api_key = get_site_option('wpmudev_apikey');     // wp_sitemeta (normal multisite)
         $option_api_key = get_option('wpmudev_apikey');        // wp_options (converted sites)
 
