@@ -184,10 +184,6 @@ class CleanSweep_PluginReinstaller {
                 }
 
                 clean_sweep_log_message("PluginReinstaller: WordPress.org complete, processing WPMU DEV plugins - Batch start: $batch_start, Size: " . ($batch_size ?? 'all'), 'info');
-                clean_sweep_log_message("PluginReinstaller: DEBUG - WPMU DEV plugins array has " . count($wpmu_dev_plugins) . " items", 'info');
-                foreach ($wpmu_dev_plugins as $key => $data) {
-                    clean_sweep_log_message("PluginReinstaller: DEBUG - WPMU DEV plugin: $key => " . json_encode($data), 'info');
-                }
 
                 // With JavaScript-only batching, process all WPMU DEV plugins at once
                 // No transient-based batching needed since all data is passed with each request
@@ -551,15 +547,11 @@ class CleanSweep_PluginReinstaller {
             $processed++;
             $pid = $plugin_info['wdp_id'] ?? $plugin_info['pid'] ?? null;
 
-            clean_sweep_log_message("🔍 WPMU DEV Reinstall: Starting {$plugin_file} (PID: {$pid})", 'info');
-
             if (!$pid || (int) $pid === 119) {
-                clean_sweep_log_message("⚠️ WPMU DEV Reinstall: Skipping {$plugin_file} - Invalid PID or Dashboard plugin", 'warning');
                 continue;
             }
 
             if (!isset($projects[$pid])) {
-                clean_sweep_log_message("❌ WPMU DEV Reinstall: Project {$pid} not found in WPMU DEV projects cache", 'error');
                 $results['failed'][] = [
                     'name' => $plugin_info['name'] ?? $plugin_file,
                     'slug' => $plugin_file,
@@ -585,38 +577,17 @@ class CleanSweep_PluginReinstaller {
             $is_active_network = is_multisite() && is_plugin_active_for_network($plugin_file);
             $should_reactivate = $is_active_blog || $is_active_network;
 
-            clean_sweep_log_message("🔍 WPMU DEV Reinstall: {$plugin_name} - Blog active: " . ($is_active_blog ? 'YES' : 'NO') . ", Network active: " . ($is_active_network ? 'YES' : 'NO'), 'info');
-
             // Deactivate plugin if active
             if ($is_active_network) {
-                clean_sweep_log_message("🔄 WPMU DEV Reinstall: Deactivating {$plugin_name} (network)", 'info');
-                $deactivate_result = deactivate_plugins($plugin_file, true, true);
-                if (is_wp_error($deactivate_result)) {
-                    clean_sweep_log_message("⚠️ WPMU DEV Reinstall: Network deactivation failed: " . $deactivate_result->get_error_message(), 'warning');
-                }
+                deactivate_plugins($plugin_file, true, true);
             } elseif ($is_active_blog) {
-                clean_sweep_log_message("🔄 WPMU DEV Reinstall: Deactivating {$plugin_name} (blog)", 'info');
-                $deactivate_result = deactivate_plugins($plugin_file, true, false);
-                if (is_wp_error($deactivate_result)) {
-                    clean_sweep_log_message("⚠️ WPMU DEV Reinstall: Blog deactivation failed: " . $deactivate_result->get_error_message(), 'warning');
-                }
+                deactivate_plugins($plugin_file, true, false);
             }
 
             // Delete existing plugin
-            clean_sweep_log_message("🗑️ WPMU DEV Reinstall: Deleting existing {$plugin_name} (PID: {$pid})", 'info');
             $delete_result = WPMUDEV_Dashboard::$upgrader->delete_plugin($pid, true);
 
             if (!$delete_result) {
-                clean_sweep_log_message("❌ WPMU DEV Reinstall: Delete failed for {$plugin_name}", 'error');
-
-                // Check if upgrader has error details
-                if (method_exists(WPMUDEV_Dashboard::$upgrader, 'get_error')) {
-                    $error = WPMUDEV_Dashboard::$upgrader->get_error();
-                    if ($error) {
-                        clean_sweep_log_message("❌ WPMU DEV Reinstall: Delete error - {$error['code']}: {$error['message']}", 'error');
-                    }
-                }
-
                 $results['failed'][] = [
                     'name' => $plugin_name,
                     'slug' => $plugin_file,
@@ -624,19 +595,12 @@ class CleanSweep_PluginReinstaller {
                 ];
                 continue;
             }
-            clean_sweep_log_message("✅ WPMU DEV Reinstall: Successfully deleted {$plugin_name}", 'info');
 
-            // Generate download URL
-            clean_sweep_log_message("🔗 WPMU DEV Reinstall: Generating download URL for {$plugin_name} (PID: {$pid})", 'info');
+            // Generate download URL and download the plugin
             $download_url = WPMUDEV_Dashboard::$api->rest_url_auth('install/' . $pid);
-            clean_sweep_log_message("🔗 WPMU DEV Reinstall: Download URL generated (length: " . strlen($download_url) . ")", 'debug');
-
-            // Download the plugin
-            clean_sweep_log_message("📥 WPMU DEV Reinstall: Downloading {$plugin_name}", 'info');
             $temp_file = download_url($download_url);
 
             if (is_wp_error($temp_file)) {
-                clean_sweep_log_message("❌ WPMU DEV Reinstall: Download failed for {$plugin_name}: " . $temp_file->get_error_message(), 'error');
                 $results['failed'][] = [
                     'name' => $plugin_name,
                     'slug' => $plugin_file,
@@ -644,15 +608,12 @@ class CleanSweep_PluginReinstaller {
                 ];
                 continue;
             }
-            clean_sweep_log_message("✅ WPMU DEV Reinstall: Download successful for {$plugin_name} (file: " . basename($temp_file) . ")", 'info');
 
             // Create target directory
             $target_dir = WP_PLUGIN_DIR . '/' . dirname($plugin_file);
-            clean_sweep_log_message("📁 WPMU DEV Reinstall: Creating target directory: {$target_dir}", 'info');
 
             if (!wp_mkdir_p($target_dir)) {
                 @unlink($temp_file);
-                clean_sweep_log_message("❌ WPMU DEV Reinstall: Failed to create target directory: {$target_dir}", 'error');
                 $results['failed'][] = [
                     'name' => $plugin_name,
                     'slug' => $plugin_file,
@@ -662,12 +623,10 @@ class CleanSweep_PluginReinstaller {
             }
 
             // Extract the ZIP file
-            clean_sweep_log_message("📦 WPMU DEV Reinstall: Extracting {$plugin_name} to plugins directory", 'info');
             $result = unzip_file($temp_file, WP_PLUGIN_DIR);
             @unlink($temp_file); // Clean up temp file
 
             if (is_wp_error($result)) {
-                clean_sweep_log_message("❌ WPMU DEV Reinstall: Extraction failed for {$plugin_name}: " . $result->get_error_message(), 'error');
                 $results['failed'][] = [
                     'name' => $plugin_name,
                     'slug' => $plugin_file,
@@ -675,7 +634,6 @@ class CleanSweep_PluginReinstaller {
                 ];
                 continue;
             }
-            clean_sweep_log_message("✅ WPMU DEV Reinstall: Extraction successful for {$plugin_name}", 'info');
 
             // Success - plugin installed
             $entry = [
@@ -686,33 +644,25 @@ class CleanSweep_PluginReinstaller {
 
             // Reactivate if it was originally active
             if ($should_reactivate) {
-                clean_sweep_log_message("🔄 WPMU DEV Reinstall: Reactivating {$plugin_name}", 'info');
-
                 if ($is_active_network) {
                     $reactivation_result = activate_plugin($plugin_file, '', true, true);
-                    $reactivate_type = 'network';
                 } else {
                     $reactivation_result = activate_plugin($plugin_file, '', false, true);
-                    $reactivate_type = 'blog';
                 }
 
                 if (is_wp_error($reactivation_result)) {
-                    clean_sweep_log_message("⚠️ WPMU DEV Reinstall: {$reactivate_type} reactivation failed: " . $reactivation_result->get_error_message(), 'warning');
                     $entry['status'] .= ' - Reactivation failed';
                 } else {
-                    clean_sweep_log_message("✅ WPMU DEV Reinstall: {$reactivate_type} reactivation successful", 'info');
                     $entry['status'] .= ' - Reactivated';
                 }
             }
 
             $results['successful'][] = $entry;
-            clean_sweep_log_message("🎉 WPMU DEV Reinstall: {$plugin_name} completed successfully", 'success');
 
             // Clear WPMU DEV cache
             if (isset(WPMUDEV_Dashboard::$site)) {
                 WPMUDEV_Dashboard::$site->clear_local_file_cache();
                 WPMUDEV_Dashboard::$site->refresh_local_projects('local');
-                clean_sweep_log_message("🧹 WPMU DEV Reinstall: Cleared and refreshed WPMU DEV cache", 'debug');
             }
         }
 

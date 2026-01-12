@@ -9,6 +9,35 @@
  */
 
 /**
+ * Check if we're currently in recovery mode
+ * Recovery mode is active when the fresh environment is not set up
+ *
+ * @return bool True if in recovery mode, false if main app is loaded
+ */
+function clean_sweep_is_recovery_mode() {
+    // Check if fresh environment directory exists
+    $fresh_env_path = __DIR__ . '/core/fresh';
+    if (!is_dir($fresh_env_path)) {
+        return true; // Recovery mode - fresh environment not set up
+    }
+
+    // Check if canary file exists (indicates successful setup)
+    $canary_file = $fresh_env_path . '/.clean-sweep-canary.php';
+    if (!file_exists($canary_file)) {
+        return true; // Recovery mode - setup not complete
+    }
+
+    // Check if basic WordPress files exist in fresh environment
+    $wp_load = $fresh_env_path . '/wp-load.php';
+    $wp_settings = $fresh_env_path . '/wp-settings.php';
+    if (!file_exists($wp_load) || !file_exists($wp_settings)) {
+        return true; // Recovery mode - WordPress files missing
+    }
+
+    return false; // Main app mode - fresh environment is ready
+}
+
+/**
  * Output HTML header for browser execution
  */
 function clean_sweep_output_html_header() {
@@ -20,9 +49,9 @@ function clean_sweep_output_html_header() {
         echo '<!DOCTYPE html><html><head><title>Clean Sweep - WordPress Malware Cleanup Toolkit' . $title_suffix . '</title>';
         echo '<link rel="stylesheet" href="assets/css/style.css">';
         echo '<script src="assets/script.js"></script>';
-        // Center title only during recovery setup phase (before fresh environment setup completes)
-        $is_setup_phase = !isset($_SESSION['fresh_env_setup_complete']);
-        $title_class = $is_setup_phase ? 'centered-title' : '';
+        // Center title only when Recovery Mode is loaded (fresh environment not set up)
+        $recovery_mode = clean_sweep_is_recovery_mode();
+        $title_class = $recovery_mode ? 'centered-title' : '';
         echo '</head><body><h1 class="' . $title_class . '">🧹 Clean Sweep v ' . CLEAN_SWEEP_VERSION . $badge_html . '</h1>';
 
 

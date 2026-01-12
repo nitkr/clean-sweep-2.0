@@ -100,19 +100,12 @@ class CleanSweep_PluginAnalyzer {
             $skipped_count = count($skipped_plugins);
             $suspicious_count = count($suspicious_files);
 
-            // Debug WPMU DEV plugins
-            clean_sweep_log_message("WPMU DEV Plugin Analysis Debug:", 'info');
-            clean_sweep_log_message("Total WPMU DEV plugins found: {$wpmu_dev_count}", 'info');
-            foreach ($wpmu_dev_plugins as $slug => $plugin_data) {
-                $wdp_id = $plugin_data['wdp_id'] ?? $plugin_data['pid'] ?? 'unknown';
-                $name = $plugin_data['name'] ?? $slug;
-                clean_sweep_log_message("WPMU DEV plugin: {$name} (slug: {$slug}, ID: {$wdp_id})", 'info');
-            }
-
+            // Analysis data is now passed directly with each JavaScript batch request
             // Analysis data is now passed directly with each JavaScript batch request
             // No database storage needed with JavaScript-only batching
 
-            clean_sweep_log_message("=== WordPress Plugin Analysis Completed ===");
+            clean_sweep_log_message("=== Advanced Plugin Analysis Completed ===");
+            clean_sweep_log_message("WordPress.org: {$wp_org_count}, WPMU DEV: {$wpmu_dev_count}, Non-repository: {$non_repo_count}, Suspicious files: {$suspicious_count}");
 
             return [
                 'success' => true,
