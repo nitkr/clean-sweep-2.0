@@ -218,10 +218,29 @@ function startMalwareScan() {
     document.getElementById('malware-progress-text').textContent = 'Initializing malware scanner...';
     document.getElementById('malware-progress-fill').style.width = '0%';
 
-    // Start progress polling after a small delay to ensure file is created
+    // Start progress polling with optimized timing to reduce 404 errors
     setTimeout(() => {
-        malwareProgressInterval = setInterval(pollMalwareProgress, 2000);
-    }, 500);
+        malwareProgressInterval = setInterval(pollMalwareProgress, 3000); // Poll every 3 seconds instead of 2
+
+        // Safety timeout: stop polling after 5 minutes max to prevent infinite polling
+        setTimeout(() => {
+            if (malwareProgressInterval) {
+                clearInterval(malwareProgressInterval);
+                malwareProgressInterval = null;
+
+                // Update UI to show timeout
+                const statusIndicator = document.getElementById('malware-status-indicator');
+                const progressDetails = document.getElementById('malware-progress-details');
+                if (statusIndicator) {
+                    statusIndicator.textContent = 'Timeout';
+                    statusIndicator.className = 'status-indicator status-completed';
+                }
+                if (progressDetails) {
+                    progressDetails.innerHTML = '<div style="color:#856404;">⚠️ Progress polling timed out after 5 minutes. The scan may still be running in the background.</div>';
+                }
+            }
+        }, 300000); // 5 minute timeout
+    }, 2000); // Give scan 2 seconds to start instead of 0.5 seconds
 
     // Submit the request via AJAX
     const formData = new FormData();
