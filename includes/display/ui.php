@@ -535,6 +535,20 @@ twentytwentyfour-child/suspicious-admin.php" style="width:100%;height:120px;font
             .status-indicator.status-processing::before { content: "⏳ "; }
             .status-indicator.status-completed::before { content: "✅ "; }
         </style>';
+
+        // Auto-refresh recovery_token timestamp on page loads (cache-busting enhancement)
+        echo '<script>
+        document.addEventListener("DOMContentLoaded", function() {
+            // Auto-refresh recovery_token timestamp to prevent caching
+            const url = new URL(window.location.href);
+            if (url.searchParams.has("recovery_token")) {
+                // Update timestamp to current time for cache-busting
+                url.searchParams.set("recovery_token", Date.now());
+                // Update URL without causing page reload
+                window.history.replaceState({}, "", url.toString());
+            }
+        });
+        </script>';
     } else {
         // CLI output
         if ($plugin_results) {

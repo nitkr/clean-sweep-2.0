@@ -53,7 +53,7 @@ if (!function_exists('clean_sweep_establish_core_only_baseline')) {
 
         $baseline = [
             'established_at' => time(),
-            'wp_version' => $wp_version ?: (defined('WP_VERSION') ? WP_VERSION : 'unknown'),
+            'wp_version' => $wp_version ?: clean_sweep_get_wordpress_version(),
             'files' => [],
             'directories' => []
         ];
@@ -124,7 +124,7 @@ if (!function_exists('clean_sweep_establish_comprehensive_baseline')) {
 
         $baseline = [
             'established_at' => time(),
-            'wp_version' => $wp_version ?: (defined('WP_VERSION') ? WP_VERSION : 'unknown'),
+            'wp_version' => $wp_version ?: clean_sweep_get_wordpress_version(),
             'mode' => 'comprehensive',
             'files' => [],
             'directories' => []
@@ -132,59 +132,14 @@ if (!function_exists('clean_sweep_establish_comprehensive_baseline')) {
 
         clean_sweep_log_message("🔍 Establishing comprehensive integrity baseline (all WordPress files)", 'info');
 
-        // Comprehensive file baselining - scan ALL directories in wp-content
-        $wp_content_path = $real_site_root . 'wp-content';
-        $directories_to_scan = [];
-
-        if (is_dir($wp_content_path)) {
-            // Get ALL subdirectories in wp-content
-            $wp_content_dirs = glob($wp_content_path . '/*', GLOB_ONLYDIR);
-            foreach ($wp_content_dirs as $dir_path) {
-                $relative_dir = str_replace($real_site_root, '', $dir_path);
-                $directories_to_scan[] = $relative_dir;
-            }
-        }
-
         $total_files = 0;
 
-        // Scan ALL wp-content subdirectories
-        foreach ($directories_to_scan as $dir) {
-            $full_dir_path = $real_site_root . $dir;
-            if (is_dir($full_dir_path)) {
-                $php_files = clean_sweep_get_all_php_files($full_dir_path);
-                foreach ($php_files as $file_path) {
-                    $relative_path = str_replace($real_site_root, '', $file_path);
-                    if (file_exists($file_path) && is_readable($file_path)) {
-                        $baseline['files'][$relative_path] = [
-                            'hash' => hash_file('sha256', $file_path),
-                            'size' => filesize($file_path),
-                            'mtime' => filemtime($file_path),
-                            'exists' => true
-                        ];
-                        $total_files++;
-                    }
-                }
-            }
-        }
-
-        // Also baseline core files for comprehensive monitoring
-        $critical_files = [
-            'wp-config.php',
-            'wp-load.php',
-            'wp-settings.php',
-            'wp-admin/index.php',
-            'wp-admin/admin.php',
-            'wp-includes/version.php',
-            'wp-includes/functions.php',
-            'wp-includes/wp-db.php',
-            '.htaccess',
-            'index.php'
-        ];
-
-        foreach ($critical_files as $file) {
-            $file_path = $real_site_root . $file;
+        // Get ALL WordPress core files (replaces the limited critical files list)
+        $all_core_files = clean_sweep_get_all_core_files($real_site_root);
+        foreach ($all_core_files as $file_path) {
+            $relative_path = str_replace($real_site_root, '', $file_path);
             if (file_exists($file_path) && is_readable($file_path)) {
-                $baseline['files'][$file] = [
+                $baseline['files'][$relative_path] = [
                     'hash' => hash_file('sha256', $file_path),
                     'size' => filesize($file_path),
                     'mtime' => filemtime($file_path),
@@ -194,16 +149,119 @@ if (!function_exists('clean_sweep_establish_comprehensive_baseline')) {
             }
         }
 
-        // For comprehensive mode, track individual files instead of directory counts
-        // This allows pinpointing exactly which files were added/modified/deleted
-        $directories_to_track_files = ['wp-admin', 'wp-includes', 'wp-content/plugins', 'wp-content/themes', 'wp-content/uploads'];
+        // Comprehensive root directory scanning - include ALL monitorable files in root
+        clean_sweep_log_message("🔍 Comprehensive mode: Scanning root directory for all monitorable files", 'debug');
 
-        foreach ($directories_to_track_files as $dir) {
-            $dir_path = $real_site_root . $dir;
-            if (is_dir($dir_path)) {
-                // Get ALL PHP files recursively in this directory
-                $php_files = clean_sweep_get_all_php_files($dir_path);
-                foreach ($php_files as $file_path) {
+        if (is_dir($real_site_root)) {
+            // Get all files directly in root directory (non-recursive)
+            $root_files = scandir($real_site_root);
+            if ($root_files !== false) {
+                foreach ($root_files as $file) {
+                    // Skip directories (they will be handled separately)
+                    if ($file === '.' || $file === '..' || is_dir($real_site_root . $file)) {
+                        continue;
+                    }
+
+                    $file_path = $real_site_root . $file;
+                    $file_extension = strtolower(pathinfo($file_path, PATHINFO_EXTENSION));
+
+                    // Check if this is a monitorable file type
+                    $monitorable_extensions = [
+                        'php', 'js', 'css', 'json', 'svg',
+                        'htaccess', 'htpasswd', 'conf', 'config', 'cfg', 'ini',
+                        'txt', 'md', 'xml',
+                        'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'ico'
+                    ];
+
+                    $is_monitorable = in_array($file_extension, $monitorable_extensions) ||
+                                     in_array($file, ['robots.txt', 'web.config', '.htaccess', '.htpasswd']);
+
+                    if ($is_monitorable && file_exists($file_path) && is_readable($file_path)) {
+                        $baseline['files'][$file] = [
+                            'hash' => hash_file('sha256', $file_path),
+                            'size' => filesize($file_path),
+                            'mtime' => filemtime($file_path),
+                            'exists' => true
+                        ];
+                        $total_files++;
+                        clean_sweep_log_message("✓ Baslined root file: {$file}", 'debug');
+                    }
+                }
+            }
+        }
+
+        // Comprehensive wp-content monitoring - ALL directories and files
+        $wp_content_path = $real_site_root . 'wp-content';
+
+        if (is_dir($wp_content_path)) {
+            // Get ALL directories and subdirectories in wp-content (recursive)
+            $wp_content_dirs = [];
+            $iterator = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($wp_content_path, RecursiveDirectoryIterator::SKIP_DOTS),
+                RecursiveIteratorIterator::SELF_FIRST
+            );
+
+            foreach ($iterator as $item) {
+                if ($item->isDir()) {
+                    $relative_dir = str_replace($real_site_root, '', $item->getPathname());
+                    $wp_content_dirs[] = $relative_dir;
+                }
+            }
+
+            // Also include the wp-content root directory itself
+            $wp_content_dirs[] = 'wp-content';
+
+            // Remove duplicates and sort
+            $wp_content_dirs = array_unique($wp_content_dirs);
+            sort($wp_content_dirs);
+
+            clean_sweep_log_message("🔍 Comprehensive mode: Found " . count($wp_content_dirs) . " wp-content directories to monitor", 'debug');
+
+            // Scan ALL wp-content directories for monitorable files
+            foreach ($wp_content_dirs as $dir) {
+                $full_dir_path = $real_site_root . $dir;
+                if (is_dir($full_dir_path)) {
+                    // Exclude wp-content/uploads/ images for performance (too many files)
+                    $exclude_patterns = ['wp-content/uploads/'];
+                    $monitorable_files = clean_sweep_get_all_monitorable_files($full_dir_path, $exclude_patterns);
+
+                    foreach ($monitorable_files as $file_path) {
+                        $relative_path = str_replace($real_site_root, '', $file_path);
+                        if (file_exists($file_path) && is_readable($file_path)) {
+                            $baseline['files'][$relative_path] = [
+                                'hash' => hash_file('sha256', $file_path),
+                                'size' => filesize($file_path),
+                                'mtime' => filemtime($file_path),
+                                'exists' => true
+                            ];
+                            $total_files++;
+                        }
+                    }
+
+                    // Track directory info with both PHP and total monitorable file counts
+                    $php_files = clean_sweep_get_all_php_files($full_dir_path);
+                    $baseline['directories'][$dir] = [
+                        'php_count' => count($php_files),
+                        'monitorable_count' => count($monitorable_files),
+                        'exists' => true
+                    ];
+                } else {
+                    $baseline['directories'][$dir] = ['exists' => false];
+                }
+            }
+        }
+
+        // Process core directories with same logic as wp-content (all monitorable files)
+        $core_dirs = ['wp-admin', 'wp-includes'];
+        foreach ($core_dirs as $dir) {
+            $full_dir_path = $real_site_root . $dir;
+            if (is_dir($full_dir_path)) {
+                // Use same logic as wp-content directories - get all monitorable files
+                $monitorable_files = clean_sweep_get_all_monitorable_files($full_dir_path, []);
+                $php_files = clean_sweep_get_all_php_files($full_dir_path);
+
+                // Add all monitorable files to baseline
+                foreach ($monitorable_files as $file_path) {
                     $relative_path = str_replace($real_site_root, '', $file_path);
                     if (file_exists($file_path) && is_readable($file_path)) {
                         $baseline['files'][$relative_path] = [
@@ -216,13 +274,87 @@ if (!function_exists('clean_sweep_establish_comprehensive_baseline')) {
                     }
                 }
 
-                // Also track the directory itself
+                // Track directory info with both PHP and total monitorable file counts
                 $baseline['directories'][$dir] = [
                     'php_count' => count($php_files),
+                    'monitorable_count' => count($monitorable_files),
                     'exists' => true
                 ];
             } else {
                 $baseline['directories'][$dir] = ['exists' => false];
+            }
+        }
+
+        // Include ALL existing directories in root in the baseline (prevent false positives)
+        // Exclude common development/security tool directories to avoid noise
+        $excluded_dev_dirs = [
+            'clean-sweep',     // Clean Sweep toolkit directory
+            '.git',           // Git repository
+            'node_modules',   // Node.js dependencies
+            'vendor',         // Composer/PHP dependencies
+            '.vscode',        // VS Code settings
+            '.idea',          // PHPStorm/IntelliJ settings
+            '__pycache__',    // Python cache
+            '.pytest_cache',  // pytest cache
+            'venv',           // Python virtual environment
+            'env',            // Python virtual environment
+            '.env',           // Environment files directory
+            'logs',           // Log files directory (often auto-generated)
+            'tmp',            // Temporary files
+            'temp',           // Temporary files
+            'cache',          // Cache directories
+            '.DS_Store',      // macOS system files
+            'Thumbs.db'       // Windows system files
+        ];
+
+        clean_sweep_log_message("🔍 Comprehensive mode: Including existing root directories in baseline (excluding dev tools)", 'debug');
+
+        if (is_dir($real_site_root)) {
+            // Get all items directly in root directory (non-recursive)
+            $root_items = scandir($real_site_root);
+            if ($root_items !== false) {
+                foreach ($root_items as $item) {
+                    // Skip special entries and files
+                    if ($item === '.' || $item === '..' || !is_dir($real_site_root . $item)) {
+                        continue;
+                    }
+
+                    // Skip excluded development/security tool directories
+                    if (in_array($item, $excluded_dev_dirs)) {
+                        clean_sweep_log_message("⏭️ Skipping excluded directory: {$item}", 'debug');
+                        continue;
+                    }
+
+                    $dir_path = $real_site_root . $item;
+
+                    // Get monitorable files in this directory
+                    $monitorable_files = clean_sweep_get_all_monitorable_files($dir_path, []);
+                    $php_files = clean_sweep_get_all_php_files($dir_path);
+
+                    // Add all monitorable files to baseline
+                    foreach ($monitorable_files as $file_path) {
+                        $relative_path = str_replace($real_site_root, '', $file_path);
+                        if (file_exists($file_path) && is_readable($file_path)) {
+                            $baseline['files'][$relative_path] = [
+                                'hash' => hash_file('sha256', $file_path),
+                                'size' => filesize($file_path),
+                                'mtime' => filemtime($file_path),
+                                'exists' => true
+                            ];
+                            $total_files++;
+                        }
+                    }
+
+                    // Include this directory in baseline to prevent false positives
+                    $baseline['directories'][$item] = [
+                        'php_count' => count($php_files),
+                        'monitorable_count' => count($monitorable_files),
+                        'exists' => true,
+                        'baselined_at_creation' => true // Mark as existing at baseline time
+                    ];
+
+                    clean_sweep_log_message("✓ Baslined existing root directory: {$item} ({$baseline['directories'][$item]['monitorable_count']} monitorable files)", 'debug');
+                }
             }
         }
 
@@ -258,6 +390,182 @@ if (!function_exists('clean_sweep_get_all_php_files')) {
         }
 
         return $php_files;
+    }
+}
+
+if (!function_exists('clean_sweep_get_all_monitorable_files')) {
+    function clean_sweep_get_all_monitorable_files($directory, $exclude_patterns = []) {
+        $monitorable_files = [];
+
+        if (!is_dir($directory)) {
+            return $monitorable_files;
+        }
+
+        // File extensions to monitor for integrity
+        $monitorable_extensions = [
+            // Executable/script files
+            'php', 'js', 'css', 'json', 'svg',
+            // Configuration files
+            'htaccess', 'htpasswd', 'conf', 'config', 'cfg', 'ini',
+            // Text files that can contain malware
+            'txt', 'md', 'xml',
+            // Image files (with smart filtering)
+            'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'ico'
+        ];
+
+        // Special filenames to always monitor (regardless of extension)
+        $special_files = [
+            'robots.txt',
+            'web.config',
+            '.htaccess',
+            '.htpasswd'
+        ];
+
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($directory, RecursiveDirectoryIterator::SKIP_DOTS)
+        );
+
+        foreach ($iterator as $file) {
+            if (!$file->isFile()) {
+                continue;
+            }
+
+            $file_path = $file->getRealPath();
+            $file_name = $file->getFilename();
+            $extension = strtolower($file->getExtension());
+
+            // Check exclude patterns (e.g., exclude wp-content/uploads/ images)
+            $should_exclude = false;
+            foreach ($exclude_patterns as $pattern) {
+                if (strpos($file_path, $pattern) !== false) {
+                    $should_exclude = true;
+                    break;
+                }
+            }
+
+            if ($should_exclude) {
+                continue;
+            }
+
+            // Include files by extension or special filename
+            if (in_array($extension, $monitorable_extensions) || in_array($file_name, $special_files)) {
+                $monitorable_files[] = $file_path;
+            }
+        }
+
+        return $monitorable_files;
+    }
+}
+
+if (!function_exists('clean_sweep_get_all_core_files')) {
+    function clean_sweep_get_all_core_files($site_root) {
+        $core_files = [];
+
+        // Define all WordPress core directories to scan
+        $core_dirs = [
+            'wp-admin',
+            'wp-includes'
+        ];
+
+        // Define root-level core files (PHP files in WordPress root)
+        $root_core_files = [
+            'index.php',
+            'wp-activate.php',
+            'wp-blog-header.php',
+            'wp-comments-post.php',
+            'wp-cron.php',
+            'wp-links-opml.php',
+            'wp-load.php',
+            'wp-login.php',
+            'wp-mail.php',
+            'wp-settings.php',
+            'wp-signup.php',
+            'wp-trackback.php',
+            'xmlrpc.php'
+        ];
+
+        // Add root-level core PHP files
+        foreach ($root_core_files as $file) {
+            $file_path = $site_root . $file;
+            if (file_exists($file_path) && is_readable($file_path)) {
+                $core_files[] = $file_path;
+            }
+        }
+
+        // Add all PHP files from core directories recursively
+        foreach ($core_dirs as $dir) {
+            $dir_path = $site_root . $dir;
+            if (is_dir($dir_path)) {
+                $php_files = clean_sweep_get_all_php_files($dir_path);
+                $core_files = array_merge($core_files, $php_files);
+            }
+        }
+
+        return array_unique($core_files);
+    }
+}
+
+if (!function_exists('clean_sweep_get_wordpress_version')) {
+    function clean_sweep_get_wordpress_version() {
+        $site_root = clean_sweep_detect_site_root();
+        $version_file = $site_root . 'wp-includes/version.php';
+
+        if (file_exists($version_file) && is_readable($version_file)) {
+            // Extract wp_version variable from the file
+            $content = file_get_contents($version_file);
+            if (preg_match('/\$wp_version\s*=\s*[\'"]([^\'"]+)[\'"]\s*;/', $content, $matches)) {
+                return $matches[1];
+            }
+        }
+
+        // Fallback: try to get from loaded WordPress if available
+        if (defined('WP_VERSION')) {
+            return WP_VERSION;
+        }
+
+        return 'unknown';
+    }
+}
+
+if (!function_exists('clean_sweep_get_file_type_description')) {
+    function clean_sweep_get_file_type_description($extension) {
+        $descriptions = [
+            // Executable/script files
+            'php' => 'PHP script',
+            'js' => 'JavaScript',
+            'css' => 'CSS stylesheet',
+            'json' => 'JSON configuration',
+            'svg' => 'SVG vector image',
+
+            // Configuration files
+            'htaccess' => 'Apache configuration',
+            'htpasswd' => 'Apache password',
+            'conf' => 'configuration',
+            'config' => 'configuration',
+            'cfg' => 'configuration',
+            'ini' => 'configuration',
+
+            // Text files
+            'txt' => 'text',
+            'md' => 'markdown',
+            'xml' => 'XML',
+
+            // Image files
+            'jpg' => 'JPEG image',
+            'jpeg' => 'JPEG image',
+            'png' => 'PNG image',
+            'gif' => 'GIF image',
+            'webp' => 'WebP image',
+            'bmp' => 'bitmap image',
+            'tiff' => 'TIFF image',
+            'ico' => 'icon',
+
+            // Special files (by filename)
+            'robots.txt' => 'robots.txt',
+            'web.config' => 'IIS configuration'
+        ];
+
+        return $descriptions[$extension] ?? $extension . ' file';
     }
 }
 
@@ -426,25 +734,23 @@ if (!function_exists('clean_sweep_check_for_reinfection')) {
             }
         }
 
-        // For comprehensive mode, check for NEW files in ALL wp-content directories
+        // For comprehensive mode, check for NEW monitorable files in ALL monitored directories AND root directory
         if (isset($baseline['mode']) && $baseline['mode'] === 'comprehensive') {
-            $wp_content_path = $real_site_root . 'wp-content';
-            $monitored_dirs = ['wp-admin', 'wp-includes']; // Always monitor core dirs
-
-            // Add ALL wp-content subdirectories
-            if (is_dir($wp_content_path)) {
-                $wp_content_dirs = glob($wp_content_path . '/*', GLOB_ONLYDIR);
-                foreach ($wp_content_dirs as $dir_path) {
-                    $relative_dir = str_replace($real_site_root, '', $dir_path);
-                    $monitored_dirs[] = $relative_dir;
-                }
+            // Get ALL directories that were monitored during baseline establishment
+            $monitored_dirs = [];
+            if (isset($baseline['directories']) && is_array($baseline['directories'])) {
+                $monitored_dirs = array_keys($baseline['directories']);
             }
+
+            clean_sweep_log_message("🔍 Comprehensive mode: Checking " . count($monitored_dirs) . " monitored directories for new files", 'debug');
 
             foreach ($monitored_dirs as $dir) {
                 $dir_path = $real_site_root . $dir;
                 if (is_dir($dir_path)) {
-                    // Get all current PHP files in this directory (recursive)
-                    $current_files = clean_sweep_get_all_php_files($dir_path);
+                    // Get all current monitorable files in this directory (recursive)
+                    // Use same exclusion patterns as baseline establishment
+                    $exclude_patterns = ['wp-content/uploads/'];
+                    $current_files = clean_sweep_get_all_monitorable_files($dir_path, $exclude_patterns);
 
                     foreach ($current_files as $file_path) {
                         $relative_path = str_replace($real_site_root, '', $file_path);
@@ -452,15 +758,136 @@ if (!function_exists('clean_sweep_check_for_reinfection')) {
                         // Check if this file exists in baseline
                         if (!isset($baseline['files'][$relative_path])) {
                             // NEW FILE DETECTED - wasn't in baseline!
+                            $file_extension = strtolower(pathinfo($file_path, PATHINFO_EXTENSION));
+                            $file_description = clean_sweep_get_file_type_description($file_extension);
+
                             $violations[] = [
                                 'file' => $relative_path,
                                 'type' => 'created',
-                                'pattern' => 'New PHP file in monitored directory',
+                                'pattern' => "New {$file_description} file in monitored directory",
                                 'match' => 'File exists now but was not in baseline',
                                 'severity' => 'critical',
-                                'description' => 'New PHP file detected in monitored directory - potential malware'
+                                'description' => "New {$file_description} file detected in monitored directory - potential malware"
                             ];
-                            clean_sweep_log_message("🚨 REINFECTION: New PHP file detected - {$relative_path}", 'error');
+                            clean_sweep_log_message("🚨 REINFECTION: New {$file_description} file detected - {$relative_path}", 'error');
+                        }
+                    }
+                }
+            }
+
+            // Also check the WordPress ROOT directory for new files and new directories (critical security enhancement)
+            clean_sweep_log_message("🔍 Comprehensive mode: Checking WordPress root directory for new files and directories", 'debug');
+
+            if (is_dir($real_site_root)) {
+                // Get all items directly in root directory (non-recursive)
+                $root_items = scandir($real_site_root);
+                if ($root_items !== false) {
+                    foreach ($root_items as $item) {
+                        // Skip special entries
+                        if ($item === '.' || $item === '..') {
+                            continue;
+                        }
+
+                        $item_path = $real_site_root . $item;
+
+                        // Check if this is a directory (new directory detection)
+                        if (is_dir($item_path)) {
+                            // Skip known core directories that are already monitored
+                            $known_dirs = ['wp-admin', 'wp-includes', 'wp-content'];
+                            if (in_array($item, $known_dirs)) {
+                                continue;
+                            }
+
+                            // Skip excluded development/security tool directories
+                            $excluded_dev_dirs = [
+                                'clean-sweep',     // Clean Sweep toolkit directory
+                                '.git',           // Git repository
+                                'node_modules',   // Node.js dependencies
+                                'vendor',         // Composer/PHP dependencies
+                                '.vscode',        // VS Code settings
+                                '.idea',          // PHPStorm/IntelliJ settings
+                                '__pycache__',    // Python cache
+                                '.pytest_cache',  // pytest cache
+                                'venv',           // Python virtual environment
+                                'env',            // Python virtual environment
+                                '.env',           // Environment files directory
+                                'logs',           // Log files directory (often auto-generated)
+                                'tmp',            // Temporary files
+                                'temp',           // Temporary files
+                                'cache',          // Cache directories
+                                '.DS_Store',      // macOS system files
+                                'Thumbs.db'       // Windows system files
+                            ];
+                            if (in_array($item, $excluded_dev_dirs)) {
+                                continue;
+                            }
+
+                            // Check if this directory exists in baseline
+                            if (!isset($baseline['directories'][$item])) {
+                                // NEW DIRECTORY DETECTED! Scan all monitorable files within it
+                                clean_sweep_log_message("🚨 REINFECTION: New directory detected in root - {$item}", 'error');
+
+                                $new_dir_files = clean_sweep_get_all_monitorable_files($item_path, []);
+                                foreach ($new_dir_files as $file_path) {
+                                    $relative_path = str_replace($real_site_root, '', $file_path);
+                                    $file_extension = strtolower(pathinfo($file_path, PATHINFO_EXTENSION));
+                                    $file_description = clean_sweep_get_file_type_description($file_extension);
+
+                                    $violations[] = [
+                                        'file' => $relative_path,
+                                        'type' => 'created',
+                                        'pattern' => "New {$file_description} file in new directory",
+                                        'match' => 'File exists in newly created directory',
+                                        'severity' => 'critical',
+                                        'description' => "New {$file_description} file detected in newly created directory '{$item}' - potential malware"
+                                    ];
+                                    clean_sweep_log_message("🚨 REINFECTION: New {$file_description} file in new directory - {$relative_path}", 'error');
+                                }
+
+                                // Also flag the directory itself
+                                if (!empty($new_dir_files)) {
+                                    $violations[] = [
+                                        'file' => $item . '/',
+                                        'type' => 'directory_created',
+                                        'pattern' => 'New directory created in WordPress root',
+                                        'match' => 'Directory was not present during baseline establishment',
+                                        'severity' => 'critical',
+                                        'description' => "New directory '{$item}' created in WordPress root with " . count($new_dir_files) . " monitorable files - potential malware"
+                                    ];
+                                }
+                            }
+                        } else {
+                            // Handle files directly in root
+                            $file_extension = strtolower(pathinfo($item_path, PATHINFO_EXTENSION));
+
+                            // Check if this is a monitorable file type
+                            $monitorable_extensions = [
+                                'php', 'js', 'css', 'json', 'svg',
+                                'htaccess', 'htpasswd', 'conf', 'config', 'cfg', 'ini',
+                                'txt', 'md', 'xml',
+                                'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'ico'
+                            ];
+
+                            $is_monitorable = in_array($file_extension, $monitorable_extensions) ||
+                                             in_array($item, ['robots.txt', 'web.config', '.htaccess', '.htpasswd']);
+
+                            if ($is_monitorable) {
+                                // Check if this root file exists in baseline
+                                if (!isset($baseline['files'][$item])) {
+                                    // NEW FILE DETECTED in root directory!
+                                    $file_description = clean_sweep_get_file_type_description($file_extension);
+
+                                    $violations[] = [
+                                        'file' => $item,
+                                        'type' => 'created',
+                                        'pattern' => "New {$file_description} file in WordPress root directory",
+                                        'match' => 'File exists now but was not in baseline',
+                                        'severity' => 'critical',
+                                        'description' => "New {$file_description} file detected in WordPress root directory - potential malware backdoor"
+                                    ];
+                                    clean_sweep_log_message("🚨 REINFECTION: New {$file_description} file in root directory - {$item}", 'error');
+                                }
+                            }
                         }
                     }
                 }
@@ -729,6 +1156,49 @@ class CleanSweep_Integrity {
     private function verify_signature($data, $signature) {
         $expected_signature = $this->sign_data($data);
         return hash_equals($expected_signature, $signature);
+    }
+
+    /**
+     * Get user-friendly description for file type based on extension
+     */
+    private function get_file_type_description($extension) {
+        $descriptions = [
+            // Executable/script files
+            'php' => 'PHP script',
+            'js' => 'JavaScript',
+            'css' => 'CSS stylesheet',
+            'json' => 'JSON configuration',
+            'svg' => 'SVG vector image',
+
+            // Configuration files
+            'htaccess' => 'Apache configuration',
+            'htpasswd' => 'Apache password',
+            'conf' => 'configuration',
+            'config' => 'configuration',
+            'cfg' => 'configuration',
+            'ini' => 'configuration',
+
+            // Text files
+            'txt' => 'text',
+            'md' => 'markdown',
+            'xml' => 'XML',
+
+            // Image files
+            'jpg' => 'JPEG image',
+            'jpeg' => 'JPEG image',
+            'png' => 'PNG image',
+            'gif' => 'GIF image',
+            'webp' => 'WebP image',
+            'bmp' => 'bitmap image',
+            'tiff' => 'TIFF image',
+            'ico' => 'icon',
+
+            // Special files (by filename)
+            'robots.txt' => 'robots.txt',
+            'web.config' => 'IIS configuration'
+        ];
+
+        return $descriptions[$extension] ?? $extension . ' file';
     }
 
     /**

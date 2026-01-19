@@ -102,6 +102,18 @@ if ($is_ajax_request) {
     ini_set('log_errors', 1);  // Log errors instead of displaying
 }
 
+// AUTO-ADD RECOVERY_TOKEN IF MISSING (Cache-busting enhancement)
+if (!isset($_GET['recovery_token']) && !$is_ajax_request && (!defined('WP_CLI') || !WP_CLI)) {
+    // Build redirect URL with recovery_token parameter
+    $current_uri = $_SERVER['REQUEST_URI'];
+    $separator = strpos($current_uri, '?') !== false ? '&' : '?';
+    $redirect_url = $current_uri . $separator . 'recovery_token=' . time();
+
+    // Perform redirect to add the cache-busting parameter
+    header('Location: ' . $redirect_url, true, 302);
+    exit;
+}
+
 // ============================================================================
 // RECOVERY-ONLY MODE INITIALIZATION
 // ============================================================================
