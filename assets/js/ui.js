@@ -98,8 +98,10 @@ function showCopyFeedback(button, message, color) {
  */
 
 // Threat timeline expand/collapse functionality
-function toggleRiskLevel(riskLevel) {
-    const content = document.getElementById("timeline-" + riskLevel);
+function toggleRiskLevel(riskLevel, type = 'malware') {
+    // Use different ID prefixes for malware vs integrity results
+    const idPrefix = type === 'integrity' ? 'integrity-timeline-' : 'timeline-';
+    const content = document.getElementById(idPrefix + riskLevel);
     const header = content ? content.previousElementSibling : null;
 
     if (content) {
@@ -117,7 +119,7 @@ function toggleRiskLevel(riskLevel) {
             }
         }
     } else {
-        console.error('Timeline content not found for risk level:', riskLevel);
+        console.error('Timeline content not found for risk level:', riskLevel, 'type:', type);
     }
 }
 
@@ -382,11 +384,11 @@ function runIntegrityCheckAsync() {
         return;
     }
 
-    // Show integrity check indicator
-    const securityTab = document.getElementById('security-tab');
-    if (!securityTab) return;
+    // Show integrity check indicator after malware results
+    const existingTimeline = document.querySelector('.threat-timeline');
+    if (!existingTimeline) return;
 
-    // Add integrity check indicator at the top of results
+    // Add integrity check indicator after malware results
     const indicatorHTML = `
         <div id="integrity-check-indicator" style="background:#e7f3ff;border:1px solid #b8daff;padding:15px;border-radius:8px;margin:20px 0;text-align:center;">
             <div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:10px;">
@@ -397,8 +399,8 @@ function runIntegrityCheckAsync() {
         </div>
     `;
 
-    // Insert indicator at the beginning of security tab content
-    securityTab.insertAdjacentHTML('afterbegin', indicatorHTML);
+    // Insert indicator after existing malware results
+    existingTimeline.insertAdjacentHTML('afterend', indicatorHTML);
 
     // Run integrity check via AJAX
     const formData = new FormData();
@@ -532,11 +534,11 @@ function createIntegrityViolationsHTML(violations, totalViolations) {
 
             html += `
                 <div class="threat-presenter" style="margin-bottom:20px;">
-                    <h5 onclick="toggleRiskLevel('${severity}')" style="background:${bgColor};border:1px solid ${borderColor};padding:12px;border-radius:6px;margin:0;cursor:pointer;color:${severityColor};">
+                    <h5 onclick="toggleRiskLevel('${severity}', 'integrity')" style="background:${bgColor};border:1px solid ${borderColor};padding:12px;border-radius:6px;margin:0;cursor:pointer;color:${severityColor};">
                         <span style="float:right;">▶</span>
                         ${severityIcon} ${severityTitle} Violations (${grouped[severity].length})
                     </h5>
-                    <div id="timeline-${severity}" style="display:none;margin-top:10px;">
+                    <div id="integrity-timeline-${severity}" style="display:none;margin-top:10px;">
                         <ul style="list-style:none;padding:0;margin:0;">
             `;
 
