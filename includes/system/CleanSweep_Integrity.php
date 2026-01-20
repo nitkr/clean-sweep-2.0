@@ -720,19 +720,15 @@ if (!function_exists('clean_sweep_check_for_reinfection')) {
                         if ($current_count > $baseline_count) {
                             $new_files = $current_count - $baseline_count;
 
-                            // Debug: Log exactly which PHP files were found
-                            $php_files_list = implode(', ', array_map('basename', $current_php_files));
-                            clean_sweep_log_message("🔍 DEBUG: PHP files detected in {$dir}: {$php_files_list}", 'debug');
-
                             $violations[] = [
                                 'file' => $dir . '/',
                                 'type' => 'directory_modified',
                                 'pattern' => 'Unexpected PHP files in monitored directory',
-                                'match' => "PHP files: {$baseline_count} → {$current_count} (+{$new_files}) | Files: {$php_files_list}",
+                                'match' => "PHP files: {$baseline_count} → {$current_count} (+{$new_files})",
                                 'severity' => 'critical',
                                 'description' => 'Monitored directory gained PHP files since baseline - <span class="integrity-alert">potential malware injection</span>'
                             ];
-                            clean_sweep_log_message("🚨 REINFECTION: Monitored directory gained {$new_files} PHP files - {$dir} | Files: {$php_files_list}", 'error');
+                            clean_sweep_log_message("🚨 REINFECTION: Monitored directory gained {$new_files} PHP files - {$dir}", 'error');
                         }
                     }
                 }

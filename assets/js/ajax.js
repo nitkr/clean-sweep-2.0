@@ -252,8 +252,8 @@ function startCoreReinstall() {
     document.getElementById("core-progress-container").style.display = "block";
     document.querySelector("[onclick='startCoreReinstall()']").style.display = "none";
 
-    // Start progress polling
-    coreProgressInterval = setInterval(pollCoreProgress, 2000);
+    // DO NOT start polling here - wait for backup choice first
+    // Progress polling will start in proceedCoreReinstallWithBackup() or proceedCoreReinstallWithoutBackup()
 
     // First, check disk space and get backup choice
     const formData = new FormData();
@@ -267,16 +267,15 @@ function startCoreReinstall() {
     })
     .then(response => {
         if (response.ok) {
-            // Keep polling - the disk space check response will be handled by updateCoreProgress
+            // Disk space check response will be handled by updateCoreProgress
+            // Polling will start after user makes backup choice
         } else {
-            clearInterval(coreProgressInterval);
             document.getElementById("core-progress-details").innerHTML = '<div style="color:#dc3545;">Error: Failed to start core reinstallation</div>';
             document.getElementById("core-status-indicator").textContent = "Error";
             document.getElementById("core-status-indicator").className = "status-indicator status-completed";
         }
     })
     .catch(error => {
-        clearInterval(coreProgressInterval);
         document.getElementById("core-progress-details").innerHTML = '<div style="color:#dc3545;">Error: ' + error.message + '</div>';
         document.getElementById("core-status-indicator").textContent = "Error";
         document.getElementById("core-status-indicator").className = "status-indicator status-completed";
