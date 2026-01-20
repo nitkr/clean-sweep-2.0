@@ -252,8 +252,7 @@ function startCoreReinstall() {
     document.getElementById("core-progress-container").style.display = "block";
     document.querySelector("[onclick='startCoreReinstall()']").style.display = "none";
 
-    // Start polling immediately to read progress file and display backup choice UI
-    coreProgressInterval = setInterval(pollCoreProgress, 1000); // Poll every 1 second for faster response
+    // NO POLLING HERE - wait for backup choice first to eliminate 404 errors
 
     // First, check disk space and get backup choice
     const formData = new FormData();
@@ -266,18 +265,21 @@ function startCoreReinstall() {
         body: formData
     })
     .then(response => {
-        if (!response.ok) {
-            clearInterval(coreProgressInterval);
-            coreProgressInterval = null;
+        if (response.ok) {
+            // Handle the backup choice response directly (no polling needed)
+            return response.json();
+        } else {
             document.getElementById("core-progress-details").innerHTML = '<div style="color:#dc3545;">Error: Failed to start core reinstallation</div>';
             document.getElementById("core-status-indicator").textContent = "Error";
             document.getElementById("core-status-indicator").className = "status-indicator status-completed";
+            throw new Error('Failed to start core reinstallation');
         }
-        // If response is OK, polling will handle reading the progress file
+    })
+    .then(data => {
+        // Handle backup choice UI directly from AJAX response
+        updateCoreProgress(data);
     })
     .catch(error => {
-        clearInterval(coreProgressInterval);
-        coreProgressInterval = null;
         document.getElementById("core-progress-details").innerHTML = '<div style="color:#dc3545;">Error: ' + error.message + '</div>';
         document.getElementById("core-status-indicator").textContent = "Error";
         document.getElementById("core-status-indicator").className = "status-indicator status-completed";
