@@ -634,7 +634,7 @@ if (!function_exists('clean_sweep_check_for_reinfection')) {
                         'pattern' => 'Core file deletion',
                         'match' => 'File was present in baseline but is now missing',
                         'severity' => 'critical',
-                        'description' => 'Critical WordPress core file was deleted'
+                        'description' => 'Critical WordPress core file was <span class="integrity-alert">deleted</span>'
                     ];
                     clean_sweep_log_message("🚨 REINFECTION: Core file deleted - {$file}", 'error');
                     continue;
@@ -648,7 +648,7 @@ if (!function_exists('clean_sweep_check_for_reinfection')) {
                         'pattern' => 'Unexpected core file',
                         'match' => 'File was not in baseline but now exists',
                         'severity' => 'warning',
-                        'description' => 'Unexpected core file appeared'
+                        'description' => 'Unexpected core file <span class="integrity-alert">appeared</span>'
                     ];
                     clean_sweep_log_message("⚠️ REINFECTION: Suspicious core file created - {$file}", 'warning');
                     continue;
@@ -668,7 +668,7 @@ if (!function_exists('clean_sweep_check_for_reinfection')) {
                             'pattern' => 'Cryptographic hash changed',
                             'match' => "SHA256 integrity violation detected",
                             'severity' => 'critical',
-                            'description' => 'Core file cryptographic integrity compromised - potential reinfection'
+                            'description' => 'Core file cryptographic integrity compromised - <span class="integrity-alert">potential reinfection</span>'
                         ];
                         clean_sweep_log_message("🚨 REINFECTION: Core file integrity compromised - {$file} (hash changed)", 'error');
                     }
@@ -682,7 +682,7 @@ if (!function_exists('clean_sweep_check_for_reinfection')) {
                             'pattern' => 'File size changed',
                             'match' => "Size: {$file_baseline['size']} → {$current_size} (Δ{$size_diff})",
                             'severity' => 'critical',
-                            'description' => 'Core file size changed from baseline - potential reinfection'
+                            'description' => 'Core file size changed from baseline - <span class="integrity-alert">potential reinfection</span>'
                         ];
                         clean_sweep_log_message("🚨 REINFECTION: Core file size changed - {$file} (Δ{$size_diff})", 'error');
                     }
@@ -716,18 +716,23 @@ if (!function_exists('clean_sweep_check_for_reinfection')) {
                     if (isset($dir_baseline['exists']) && $dir_baseline['exists']) {
                         $baseline_count = $dir_baseline['php_count'];
 
-                        // ANY increase in PHP files is suspicious in core directories
+                        // ANY increase in PHP files is suspicious in monitored directories
                         if ($current_count > $baseline_count) {
                             $new_files = $current_count - $baseline_count;
+
+                            // Debug: Log exactly which PHP files were found
+                            $php_files_list = implode(', ', array_map('basename', $current_php_files));
+                            clean_sweep_log_message("🔍 DEBUG: PHP files detected in {$dir}: {$php_files_list}", 'debug');
+
                             $violations[] = [
                                 'file' => $dir . '/',
                                 'type' => 'directory_modified',
-                                'pattern' => 'Unexpected PHP files in core directory',
-                                'match' => "PHP files: {$baseline_count} → {$current_count} (+{$new_files})",
+                                'pattern' => 'Unexpected PHP files in monitored directory',
+                                'match' => "PHP files: {$baseline_count} → {$current_count} (+{$new_files}) | Files: {$php_files_list}",
                                 'severity' => 'critical',
-                                'description' => 'Core directory gained PHP files since baseline - potential malware injection'
+                                'description' => 'Monitored directory gained PHP files since baseline - <span class="integrity-alert">potential malware injection</span>'
                             ];
-                            clean_sweep_log_message("🚨 REINFECTION: Core directory gained {$new_files} PHP files - {$dir}", 'error');
+                            clean_sweep_log_message("🚨 REINFECTION: Monitored directory gained {$new_files} PHP files - {$dir} | Files: {$php_files_list}", 'error');
                         }
                     }
                 }
@@ -767,7 +772,7 @@ if (!function_exists('clean_sweep_check_for_reinfection')) {
                                 'pattern' => "New {$file_description} file in monitored directory",
                                 'match' => 'File exists now but was not in baseline',
                                 'severity' => 'critical',
-                                'description' => "New {$file_description} file detected in monitored directory - potential malware"
+                                'description' => "New {$file_description} file detected in monitored directory - <span class=\"integrity-alert\">potential malware</span>"
                             ];
                             clean_sweep_log_message("🚨 REINFECTION: New {$file_description} file detected - {$relative_path}", 'error');
                         }
@@ -839,7 +844,7 @@ if (!function_exists('clean_sweep_check_for_reinfection')) {
                                         'pattern' => "New {$file_description} file in new directory",
                                         'match' => 'File exists in newly created directory',
                                         'severity' => 'critical',
-                                        'description' => "New {$file_description} file detected in newly created directory '{$item}' - potential malware"
+                                        'description' => "New {$file_description} file detected in newly created directory '{$item}' - <span class=\"integrity-alert\">potential malware</span>"
                                     ];
                                     clean_sweep_log_message("🚨 REINFECTION: New {$file_description} file in new directory - {$relative_path}", 'error');
                                 }
@@ -852,7 +857,7 @@ if (!function_exists('clean_sweep_check_for_reinfection')) {
                                         'pattern' => 'New directory created in WordPress root',
                                         'match' => 'Directory was not present during baseline establishment',
                                         'severity' => 'critical',
-                                        'description' => "New directory '{$item}' created in WordPress root with " . count($new_dir_files) . " monitorable files - potential malware"
+                                        'description' => "New directory '{$item}' created in WordPress root with " . count($new_dir_files) . " monitorable files - <span class=\"integrity-alert\">potential malware</span>"
                                     ];
                                 }
                             }
@@ -883,7 +888,7 @@ if (!function_exists('clean_sweep_check_for_reinfection')) {
                                         'pattern' => "New {$file_description} file in WordPress root directory",
                                         'match' => 'File exists now but was not in baseline',
                                         'severity' => 'critical',
-                                        'description' => "New {$file_description} file detected in WordPress root directory - potential malware backdoor"
+                                        'description' => "New {$file_description} file detected in WordPress root directory - <span class=\"integrity-alert\">potential malware backdoor</span>"
                                     ];
                                     clean_sweep_log_message("🚨 REINFECTION: New {$file_description} file in root directory - {$item}", 'error');
                                 }

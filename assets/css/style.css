@@ -712,6 +712,12 @@ pre {
     font-weight: 600;
 }
 
+/* Integrity Alert Highlighting */
+.integrity-alert {
+    color: #dc3545;
+    font-weight: bold;
+}
+
 /* Responsive Design */
 @media (max-width: 768px) {
     .enhanced-stats-container {
