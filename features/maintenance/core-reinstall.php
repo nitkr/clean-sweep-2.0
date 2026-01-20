@@ -564,7 +564,7 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
         '<li><strong>Version:</strong> ' . htmlspecialchars($wp_version) . '</li>' .
         '<li><strong>Files copied:</strong> ' . $files_copied . '</li>' .
         $backup_info .
-        '<li><strong>Preserved files:</strong> wp-config.php, uploads, themes, plugins</li>' .
+        '<li><strong>Preserved files:</strong> wp-config.php, /wp-content</li>' .
         '</ul>' .
         '<p><strong>Next steps:</strong></p>' .
         '<ul style="margin:10px 0;padding-left:20px;">' .
@@ -595,7 +595,7 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
             } else {
                 echo '<li><strong>Backup:</strong> Skipped as requested</li>';
             }
-            echo '<li><strong>Preserved files:</strong> wp-config.php, uploads, themes, plugins</li>';
+            echo '<li><strong>Preserved files:</strong> wp-config.php, /wp-content</li>';
             echo '</ul>';
             echo '<p><strong>Next steps:</strong></p>';
             echo '<ul style="margin:10px 0;padding-left:20px;">';
