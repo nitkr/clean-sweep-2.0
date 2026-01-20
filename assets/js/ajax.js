@@ -252,8 +252,8 @@ function startCoreReinstall() {
     document.getElementById("core-progress-container").style.display = "block";
     document.querySelector("[onclick='startCoreReinstall()']").style.display = "none";
 
-    // DO NOT start polling here - wait for backup choice first
-    // Progress polling will start in proceedCoreReinstallWithBackup() or proceedCoreReinstallWithoutBackup()
+    // Start polling immediately to read progress file and display backup choice UI
+    coreProgressInterval = setInterval(pollCoreProgress, 1000); // Poll every 1 second for faster response
 
     // First, check disk space and get backup choice
     const formData = new FormData();
@@ -266,16 +266,18 @@ function startCoreReinstall() {
         body: formData
     })
     .then(response => {
-        if (response.ok) {
-            // Disk space check response will be handled by updateCoreProgress
-            // Polling will start after user makes backup choice
-        } else {
+        if (!response.ok) {
+            clearInterval(coreProgressInterval);
+            coreProgressInterval = null;
             document.getElementById("core-progress-details").innerHTML = '<div style="color:#dc3545;">Error: Failed to start core reinstallation</div>';
             document.getElementById("core-status-indicator").textContent = "Error";
             document.getElementById("core-status-indicator").className = "status-indicator status-completed";
         }
+        // If response is OK, polling will handle reading the progress file
     })
     .catch(error => {
+        clearInterval(coreProgressInterval);
+        coreProgressInterval = null;
         document.getElementById("core-progress-details").innerHTML = '<div style="color:#dc3545;">Error: ' + error.message + '</div>';
         document.getElementById("core-status-indicator").textContent = "Error";
         document.getElementById("core-status-indicator").className = "status-indicator status-completed";
@@ -485,13 +487,21 @@ function refreshPluginAnalysis() {
 function proceedCoreReinstallWithBackup() {
     const progressDetails = document.getElementById("core-progress-details");
     const progressText = document.getElementById("core-progress-text");
+    const statusIndicator = document.getElementById("core-status-indicator");
 
     if (progressDetails) {
-        progressDetails.innerHTML = '<div style="color:#28a745;">⏳ Proceeding with core reinstallation with backup...</div>';
+        progressDetails.innerHTML = '<div style="color:#28a745;">⏳ Starting core reinstallation with backup...</div>';
     }
     if (progressText) {
-        progressText.textContent = "Creating backup and proceeding";
+        progressText.textContent = "Preparing backup creation";
     }
+    if (statusIndicator) {
+        statusIndicator.textContent = "Preparing";
+        statusIndicator.className = "status-indicator status-processing";
+    }
+
+    // Start polling immediately before making the request
+    coreProgressInterval = setInterval(pollCoreProgress, 1000); // Faster polling for real-time updates
 
     // Submit request to continue with backup
     const formData = new FormData();
@@ -505,18 +515,28 @@ function proceedCoreReinstallWithBackup() {
         body: formData
     })
     .then(response => {
-        if (response.ok) {
-            // Resume polling to track progress
-            coreProgressInterval = setInterval(pollCoreProgress, 2000);
-        } else {
+        if (!response.ok) {
+            clearInterval(coreProgressInterval);
+            coreProgressInterval = null;
             if (progressDetails) {
                 progressDetails.innerHTML = '<div style="color:#dc3545;">Error: Failed to proceed with backup</div>';
             }
+            if (statusIndicator) {
+                statusIndicator.textContent = "Error";
+                statusIndicator.className = "status-indicator status-completed";
+            }
         }
+        // Polling continues to track the actual progress
     })
     .catch(error => {
+        clearInterval(coreProgressInterval);
+        coreProgressInterval = null;
         if (progressDetails) {
             progressDetails.innerHTML = '<div style="color:#dc3545;">Error: ' + error.message + '</div>';
+        }
+        if (statusIndicator) {
+            statusIndicator.textContent = "Error";
+            statusIndicator.className = "status-indicator status-completed";
         }
     });
 }
@@ -525,13 +545,21 @@ function proceedCoreReinstallWithBackup() {
 function proceedCoreReinstallWithoutBackup() {
     const progressDetails = document.getElementById("core-progress-details");
     const progressText = document.getElementById("core-progress-text");
+    const statusIndicator = document.getElementById("core-status-indicator");
 
     if (progressDetails) {
-        progressDetails.innerHTML = '<div style="color:#28a745;">⏳ Proceeding with core reinstallation without backup as requested...</div>';
+        progressDetails.innerHTML = '<div style="color:#28a745;">⏳ Starting core reinstallation without backup...</div>';
     }
     if (progressText) {
-        progressText.textContent = "Continuing without backup";
+        progressText.textContent = "Preparing installation";
     }
+    if (statusIndicator) {
+        statusIndicator.textContent = "Preparing";
+        statusIndicator.className = "status-indicator status-processing";
+    }
+
+    // Start polling immediately before making the request
+    coreProgressInterval = setInterval(pollCoreProgress, 1000); // Faster polling for real-time updates
 
     // Submit request to continue without backup
     const formData = new FormData();
@@ -545,18 +573,28 @@ function proceedCoreReinstallWithoutBackup() {
         body: formData
     })
     .then(response => {
-        if (response.ok) {
-            // Resume polling to track progress
-            coreProgressInterval = setInterval(pollCoreProgress, 2000);
-        } else {
+        if (!response.ok) {
+            clearInterval(coreProgressInterval);
+            coreProgressInterval = null;
             if (progressDetails) {
                 progressDetails.innerHTML = '<div style="color:#dc3545;">Error: Failed to proceed without backup</div>';
             }
+            if (statusIndicator) {
+                statusIndicator.textContent = "Error";
+                statusIndicator.className = "status-indicator status-completed";
+            }
         }
+        // Polling continues to track the actual progress
     })
     .catch(error => {
+        clearInterval(coreProgressInterval);
+        coreProgressInterval = null;
         if (progressDetails) {
             progressDetails.innerHTML = '<div style="color:#dc3545;">Error: ' + error.message + '</div>';
+        }
+        if (statusIndicator) {
+            statusIndicator.textContent = "Error";
+            statusIndicator.className = "status-indicator status-completed";
         }
     });
 }
