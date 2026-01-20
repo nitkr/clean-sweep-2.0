@@ -79,6 +79,10 @@ class CleanSweep_Application {
                 $this->handle_scan_malware();
                 break;
 
+            case 'run_integrity_check_async':
+                $this->handle_run_integrity_check_async();
+                break;
+
             case 'load_more_threats':
                 $this->handle_load_more_threats();
                 break;
@@ -721,6 +725,40 @@ class CleanSweep_Application {
             }
         }
         exit;
+    }
+
+    private function handle_run_integrity_check_async() {
+        // AJAX request - run integrity check asynchronously after malware scan completion
+        try {
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+
+            // Run integrity check (may take time with large baselines)
+            clean_sweep_log_message("🔍 Running asynchronous integrity check after malware scan", 'info');
+            $integrity_violations = clean_sweep_check_for_reinfection();
+
+            // Return JSON response with integrity violations
+            header('Content-Type: application/json; charset=utf-8', true);
+            echo json_encode([
+                'success' => true,
+                'violations' => $integrity_violations,
+                'total_violations' => count($integrity_violations),
+                'message' => count($integrity_violations) > 0 ?
+                    "Found " . count($integrity_violations) . " integrity violations" :
+                    "No integrity violations detected"
+            ], JSON_UNESCAPED_UNICODE);
+            exit;
+        } catch (Exception $e) {
+            while (ob_get_level() > 0) {
+                ob_end_clean();
+            }
+
+            // Return error response
+            header('Content-Type: application/json; charset=utf-8', true);
+            echo json_encode(['success' => false, 'error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
     }
 
     private function handle_load_more_threats() {

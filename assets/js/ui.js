@@ -290,6 +290,9 @@ function startMalwareScan() {
                 securityTab.innerHTML = data.html;
             }
 
+            // START ASYNC INTEGRITY CHECK (run after malware scan completes)
+            runIntegrityCheckAsync();
+
             // Hide the progress container
             const progressContainer = document.getElementById('malware-progress-container');
             if (progressContainer) {
@@ -369,6 +372,236 @@ function updateMalwareProgress(data) {
         clearInterval(malwareProgressInterval);
         malwareProgressInterval = null;
     }
+}
+
+// Asynchronous integrity check after malware scan completion
+function runIntegrityCheckAsync() {
+    // Check if comprehensive monitoring is enabled
+    if (typeof comprehensiveEnabled !== 'undefined' && !comprehensiveEnabled) {
+        // Skip integrity check if comprehensive monitoring is disabled
+        return;
+    }
+
+    // Show integrity check indicator
+    const securityTab = document.getElementById('security-tab');
+    if (!securityTab) return;
+
+    // Add integrity check indicator at the top of results
+    const indicatorHTML = `
+        <div id="integrity-check-indicator" style="background:#e7f3ff;border:1px solid #b8daff;padding:15px;border-radius:8px;margin:20px 0;text-align:center;">
+            <div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:10px;">
+                <div class="spinner" style="width:16px;height:16px;border:2px solid #007bff;border-top:2px solid transparent;border-radius:50%;animation:spin 1s linear infinite;"></div>
+                <strong style="color:#084c7d;">🔍 Running File Integrity Check...</strong>
+            </div>
+            <p style="margin:0;color:#084c7d;font-size:14px;">This may take a moment for large sites with comprehensive monitoring enabled.</p>
+        </div>
+    `;
+
+    // Insert indicator at the beginning of security tab content
+    securityTab.insertAdjacentHTML('afterbegin', indicatorHTML);
+
+    // Run integrity check via AJAX
+    const formData = new FormData();
+    formData.append('action', 'run_integrity_check_async');
+
+    fetch(window.location.href, {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => {
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.indexOf("application/json") !== -1) {
+            return response.json();
+        } else {
+            return response.text().then(text => {
+                const preview = text.substring(0, 500).replace(/\s+/g, ' ').trim();
+                throw new Error('Server returned HTML instead of JSON. Error content: ' + preview);
+            });
+        }
+    })
+    .then(data => {
+        // Remove the indicator
+        const indicator = document.getElementById('integrity-check-indicator');
+        if (indicator) {
+            indicator.remove();
+        }
+
+        if (data.success) {
+            // Append integrity results to existing results
+            appendIntegrityResults(data.violations, data.total_violations);
+        } else {
+            // Show error
+            showIntegrityError('Failed to run integrity check: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        // Remove indicator and show error
+        const indicator = document.getElementById('integrity-check-indicator');
+        if (indicator) {
+            indicator.remove();
+        }
+        showIntegrityError('Integrity check failed: ' + error.message);
+    });
+}
+
+// Append integrity violations to existing malware scan results
+function appendIntegrityResults(violations, totalViolations) {
+    // Find existing threat timeline
+    const existingTimeline = document.querySelector('.threat-timeline');
+    if (!existingTimeline) {
+        // If no threat timeline exists, create one
+        createIntegrityResultsSection(violations, totalViolations);
+        return;
+    }
+
+    if (!violations || violations.length === 0) {
+        // No integrity violations - just add a success message
+        const successHTML = `
+            <div class="integrity-success" style="background:#d1ecf1;border:1px solid #bee5eb;padding:15px;border-radius:8px;margin:20px 0;text-align:center;">
+                <div style="color:#0c5460;font-weight:bold;margin-bottom:5px;">✅ File Integrity Check Complete</div>
+                <div style="color:#0c5460;">No integrity violations detected. All monitored files are intact.</div>
+            </div>
+        `;
+        existingTimeline.insertAdjacentHTML('afterend', successHTML);
+        return;
+    }
+
+    // Create integrity violations section
+    const integrityHTML = createIntegrityViolationsHTML(violations, totalViolations);
+
+    // Insert after existing threat timeline
+    existingTimeline.insertAdjacentHTML('afterend', integrityHTML);
+
+    // Update total threat count if it exists
+    updateTotalThreatCount(totalViolations);
+}
+
+// Create new results section for integrity-only results
+function createIntegrityResultsSection(violations, totalViolations) {
+    const securityTab = document.getElementById('security-tab');
+    if (!securityTab) return;
+
+    let resultsHTML = '';
+
+    if (!violations || violations.length === 0) {
+        resultsHTML = `
+            <div class="integrity-success" style="background:#d1ecf1;border:1px solid #bee5eb;padding:20px;border-radius:8px;margin:20px 0;text-align:center;">
+                <h4 style="margin:0 0 15px 0;color:#0c5460;">✅ File Integrity Check Complete</h4>
+                <p style="margin:0;color:#0c5460;font-size:16px;">No integrity violations detected. All monitored files are intact.</p>
+            </div>
+        `;
+    } else {
+        resultsHTML = createIntegrityViolationsHTML(violations, totalViolations);
+    }
+
+    securityTab.insertAdjacentHTML('beforeend', resultsHTML);
+}
+
+// Create HTML for integrity violations
+function createIntegrityViolationsHTML(violations, totalViolations) {
+    let html = `
+        <div class="threat-timeline integrity-timeline" style="margin:20px 0;">
+            <h4 style="background:#fff3cd;border:1px solid #ffeaa7;padding:15px;border-radius:8px;margin-bottom:20px;text-align:center;">
+                🔐 File Integrity Violations (${totalViolations} found)
+            </h4>
+            <div class="threat-grid">
+    `;
+
+    // Group violations by severity
+    const grouped = {
+        critical: [],
+        warning: [],
+        info: []
+    };
+
+    violations.forEach(violation => {
+        const severity = violation.severity || 'info';
+        if (grouped[severity]) {
+            grouped[severity].push(violation);
+        }
+    });
+
+    // Display each severity level
+    ['critical', 'warning', 'info'].forEach(severity => {
+        if (grouped[severity].length > 0) {
+            const severityTitle = severity.charAt(0).toUpperCase() + severity.slice(1);
+            const severityIcon = severity === 'critical' ? '🔴' : severity === 'warning' ? '🟡' : 'ℹ️';
+            const severityColor = severity === 'critical' ? '#721c24' : severity === 'warning' ? '#856404' : '#0c5460';
+            const bgColor = severity === 'critical' ? '#f8d7da' : severity === 'warning' ? '#fff3cd' : '#d1ecf1';
+            const borderColor = severity === 'critical' ? '#f5c6cb' : severity === 'warning' ? '#ffeaa7' : '#bee5eb';
+
+            html += `
+                <div class="threat-presenter" style="margin-bottom:20px;">
+                    <h5 onclick="toggleRiskLevel('${severity}')" style="background:${bgColor};border:1px solid ${borderColor};padding:12px;border-radius:6px;margin:0;cursor:pointer;color:${severityColor};">
+                        <span style="float:right;">▶</span>
+                        ${severityIcon} ${severityTitle} Violations (${grouped[severity].length})
+                    </h5>
+                    <div id="timeline-${severity}" style="display:none;margin-top:10px;">
+                        <ul style="list-style:none;padding:0;margin:0;">
+            `;
+
+            grouped[severity].forEach(violation => {
+                html += `
+                    <li style="background:white;padding:15px;border-radius:6px;margin:8px 0;border:1px solid #dee2e6;">
+                        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
+                            <strong style="color:${severityColor};">${violation.file || 'Unknown file'}</strong>
+                            <button onclick="copyThreatDetails(this)" data-section="integrity" data-file="${violation.file || ''}" data-pattern="${violation.pattern || ''}" style="background:#6c757d;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:12px;">📋 Copy</button>
+                        </div>
+                        <div style="color:#666;font-size:14px;margin-bottom:5px;">
+                            <strong>Pattern:</strong> ${violation.pattern || 'N/A'}
+                        </div>
+                        <div style="color:#666;font-size:13px;">
+                            ${violation.description || violation.match || 'Integrity violation detected'}
+                        </div>
+                    </li>
+                `;
+            });
+
+            html += `
+                        </ul>
+                    </div>
+                </div>
+            `;
+        }
+    });
+
+    html += `
+            </div>
+        </div>
+    `;
+
+    return html;
+}
+
+// Update total threat count display
+function updateTotalThreatCount(integrityViolations) {
+    // Find existing threat count displays and update them
+    const threatHeaders = document.querySelectorAll('h4');
+    threatHeaders.forEach(header => {
+        if (header.textContent.includes('Total Threats Found:')) {
+            const currentMatch = header.textContent.match(/Total Threats Found:\s*(\d+)/);
+            if (currentMatch) {
+                const currentTotal = parseInt(currentMatch[1]);
+                const newTotal = currentTotal + integrityViolations;
+                header.textContent = header.textContent.replace(/\d+/, newTotal);
+            }
+        }
+    });
+}
+
+// Show integrity check error
+function showIntegrityError(message) {
+    const securityTab = document.getElementById('security-tab');
+    if (!securityTab) return;
+
+    const errorHTML = `
+        <div class="integrity-error" style="background:#f8d7da;border:1px solid #f5c6cb;padding:15px;border-radius:8px;margin:20px 0;text-align:center;">
+            <div style="color:#721c24;font-weight:bold;margin-bottom:5px;">❌ Integrity Check Failed</div>
+            <div style="color:#721c24;">${message}</div>
+        </div>
+    `;
+
+    securityTab.insertAdjacentHTML('afterbegin', errorHTML);
 }
 
 // Threat result pagination for large scans with modern UI
