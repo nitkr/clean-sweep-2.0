@@ -298,7 +298,7 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
             echo json_encode(['disk_space_warning' => $disk_check]);
             exit;
         } else {
-            // Sufficient disk space - show backup choice
+            // Sufficient disk space - create progress file for polling (original working approach)
             $progress_data = [
                 'status' => 'backup_choice',
                 'progress' => 0,
@@ -306,10 +306,7 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
                 'disk_check' => $disk_check
             ];
             clean_sweep_write_progress_file($progress_file, $progress_data);
-            // Return JSON response for AJAX
-            header('Content-Type: application/json');
-            echo json_encode(['backup_choice' => $disk_check]);
-            exit;
+            // Let JavaScript polling read the progress file (no JSON response needed)
         }
     }
 
@@ -551,14 +548,6 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
         }
     } else {
         clean_sweep_log_message("⚠️ Core baseline function not available", 'warning');
-    }
-
-    clean_sweep_log_message("WordPress core re-installation completed successfully");
-    clean_sweep_log_message("Files copied: $files_copied");
-    if ($core_backup_zip) {
-        clean_sweep_log_message("Backup ZIP location: $core_backup_zip");
-    } else {
-        clean_sweep_log_message("Backup: Skipped as requested by user");
     }
 
     // Update final progress status

@@ -39,11 +39,14 @@ function clean_sweep_display_toolkit_interface($plugin_results = null, $malware_
 
         // Version selector - automatically detect latest version
         $version_options = clean_sweep_get_wordpress_version_options();
+        if (empty($version_options)) {
+            $version_options = ['6.8.3']; // Fallback version if API fails
+        }
         echo '<div style="margin:20px 0;">';
         echo '<label for="wp-version" style="font-weight:bold;margin-right:10px;">Select WordPress Version:</label>';
         echo '<select id="wp-version" class="version-select">';
         foreach ($version_options as $version) {
-            $selected = ($version === $version_options[0]) ? ' selected' : '';
+            $selected = ($version === ($version_options[0] ?? '6.8.3')) ? ' selected' : '';
             echo '<option value="' . htmlspecialchars($version) . '"' . $selected . '>' . htmlspecialchars($version) . '</option>';
         }
         echo '</select>';

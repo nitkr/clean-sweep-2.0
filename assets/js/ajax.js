@@ -252,9 +252,7 @@ function startCoreReinstall() {
     document.getElementById("core-progress-container").style.display = "block";
     document.querySelector("[onclick='startCoreReinstall()']").style.display = "none";
 
-    // NO POLLING HERE - wait for backup choice first to eliminate 404 errors
-
-    // First, check disk space and get backup choice
+    // Make AJAX request to start the process
     const formData = new FormData();
     formData.append('action', 'reinstall_core');
     formData.append('wp_version', version);
@@ -265,19 +263,15 @@ function startCoreReinstall() {
         body: formData
     })
     .then(response => {
-        if (response.ok) {
-            // Handle the backup choice response directly (no polling needed)
-            return response.json();
-        } else {
+        if (!response.ok) {
             document.getElementById("core-progress-details").innerHTML = '<div style="color:#dc3545;">Error: Failed to start core reinstallation</div>';
             document.getElementById("core-status-indicator").textContent = "Error";
             document.getElementById("core-status-indicator").className = "status-indicator status-completed";
-            throw new Error('Failed to start core reinstallation');
         }
-    })
-    .then(data => {
-        // Handle backup choice UI directly from AJAX response
-        updateCoreProgress(data);
+        // Start polling after 5-second delay to let PHP create progress file
+        setTimeout(() => {
+            coreProgressInterval = setInterval(pollCoreProgress, 1000);
+        }, 5000); // 5 second delay eliminates 404 errors on big sites
     })
     .catch(error => {
         document.getElementById("core-progress-details").innerHTML = '<div style="color:#dc3545;">Error: ' + error.message + '</div>';
