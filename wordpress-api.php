@@ -29,8 +29,8 @@ function clean_sweep_get_latest_wordpress_version() {
         }
     }
 
-    // Fallback versions if API fails
-    return '6.8.3'; // Current known latest as fallback
+    // Fallback: use current WordPress version if API fails
+    return get_bloginfo('version');
 }
 
 /**

@@ -186,6 +186,11 @@ function clean_sweep_get_active_plugins_list() {
 function clean_sweep_write_progress_file($progress_file, $data) {
     if (!$progress_file) return;
 
+    // Add .progress extension if not already present
+    if (substr($progress_file, -9) !== '.progress') {
+        $progress_file .= '.progress';
+    }
+
     // Store in PROGRESS_DIR (logs/ directory) for web access during operations
     $file_path = PROGRESS_DIR . $progress_file;
 
@@ -285,4 +290,127 @@ function clean_sweep_progress_heartbeat($progress_file, $data, &$last_heartbeat)
         clean_sweep_memory_cleanup();
         clean_sweep_reset_execution_time();
     }
+}
+
+/**
+ * Clean Sweep - Secure Download Function
+ * Standalone implementation that doesn't depend on WordPress admin code
+ * Downloads a file from URL to a temporary location
+ *
+ * @param string $url The URL to download from
+ * @param int $timeout Timeout in seconds (default 300)
+ * @return string|WP_Error Path to downloaded file or WP_Error on failure
+ */
+function clean_sweep_download_url($url, $timeout = 300) {
+    // Ensure temp directory exists
+    if (!is_dir(TEMP_DIR)) {
+        mkdir(TEMP_DIR, 0755, true);
+    }
+
+    // Create temporary file
+    $temp_file = tempnam(TEMP_DIR, 'clean_sweep_download_');
+
+    // Initialize cURL
+    $ch = curl_init($url);
+    if (!$ch) {
+        return new WP_Error('curl_init_failed', 'Failed to initialize cURL');
+    }
+
+    // Set cURL options
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, false);
+    curl_setopt($ch, CURLOPT_FILE, fopen($temp_file, 'w'));
+    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
+    curl_setopt($ch, CURLOPT_TIMEOUT, $timeout);
+    curl_setopt($ch, CURLOPT_USERAGENT, 'Clean Sweep WordPress Recovery Tool');
+
+    // Execute download
+    $result = curl_exec($ch);
+    $error = curl_error($ch);
+    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    // Check for errors
+    if ($result === false) {
+        unlink($temp_file);
+        return new WP_Error('download_failed', 'Download failed: ' . $error);
+    }
+
+    if ($http_code !== 200) {
+        unlink($temp_file);
+        return new WP_Error('http_error', 'HTTP error: ' . $http_code);
+    }
+
+    // Verify file was created and has content
+    if (!file_exists($temp_file) || filesize($temp_file) === 0) {
+        if (file_exists($temp_file)) {
+            unlink($temp_file);
+        }
+        return new WP_Error('empty_file', 'Downloaded file is empty');
+    }
+
+    clean_sweep_log_message("Successfully downloaded file to: $temp_file", 'info');
+    return $temp_file;
+}
+
+/**
+ * Clean Sweep - Secure Unzip Function
+ * Standalone implementation using ZipArchive that doesn't depend on WordPress admin code
+ *
+ * @param string $zip_file Path to ZIP file
+ * @param string $destination Destination directory
+ * @return bool|WP_Error True on success or WP_Error on failure
+ */
+function clean_sweep_unzip_file($zip_file, $destination) {
+    // Validate inputs
+    if (!file_exists($zip_file)) {
+        return new WP_Error('file_not_found', 'ZIP file does not exist: ' . $zip_file);
+    }
+
+    if (!is_readable($zip_file)) {
+        return new WP_Error('file_not_readable', 'ZIP file is not readable: ' . $zip_file);
+    }
+
+    if (!is_dir($destination)) {
+        if (!mkdir($destination, 0755, true)) {
+            return new WP_Error('mkdir_failed', 'Failed to create destination directory: ' . $destination);
+        }
+    }
+
+    if (!is_writable($destination)) {
+        return new WP_Error('dir_not_writable', 'Destination directory is not writable: ' . $destination);
+    }
+
+    // Open ZIP file
+    $zip = new ZipArchive();
+    $result = $zip->open($zip_file);
+
+    if ($result !== true) {
+        $error_messages = [
+            ZipArchive::ER_EXISTS => 'File already exists',
+            ZipArchive::ER_INCONS => 'ZIP archive inconsistent',
+            ZipArchive::ER_INVAL => 'Invalid argument',
+            ZipArchive::ER_MEMORY => 'Memory allocation failure',
+            ZipArchive::ER_NOENT => 'No such file',
+            ZipArchive::ER_NOZIP => 'Not a ZIP archive',
+            ZipArchive::ER_OPEN => 'Cannot open file',
+            ZipArchive::ER_READ => 'Read error',
+            ZipArchive::ER_SEEK => 'Seek error'
+        ];
+
+        $error_msg = isset($error_messages[$result]) ? $error_messages[$result] : 'Unknown ZIP error: ' . $result;
+        return new WP_Error('zip_open_failed', 'Failed to open ZIP file: ' . $error_msg);
+    }
+
+    // Extract files
+    if (!$zip->extractTo($destination)) {
+        $zip->close();
+        return new WP_Error('extract_failed', 'Failed to extract ZIP file to: ' . $destination);
+    }
+
+    $zip->close();
+
+    clean_sweep_log_message("Successfully extracted ZIP file to: $destination", 'info');
+    return true;
 }

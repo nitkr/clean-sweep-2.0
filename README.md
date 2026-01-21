@@ -126,6 +126,16 @@ clean-sweep/
 │       ├── ui.js            # UI interactions and tabbed interface
 │       ├── upload.js        # File upload and extraction handling
 │       └── reinstall.js     # Plugin and core re-installation logic
+├── core/
+│   ├── clean-sweep-bootstrap.php
+│   ├── recovery/
+│   │   ├── recovery-wp-load.php
+│   │   ├── recovery-wp-config.php
+│   │   └── recovery-wp-settings.php
+│   ├── version.php
+│   ├── wp-config-sample.php
+│   ├── wp-load.php
+│   └── wp-settings.php
 ├── features/
 │   ├── maintenance/
 │   │   ├── core-reinstall.php   # WordPress core file re-installation
@@ -179,6 +189,9 @@ clean-sweep/
 - **AJAX Communication**: Secure client-server communication
 - **Input Sanitization**: All user inputs validated and sanitized
 - **Error Containment**: Operations fail safely without data loss
+- **Bootstrap Shield**: Multi-layer WordPress bootstrap protection with recovery modes
+- **Recovery Bootstrap**: Automatic fallback to clean WordPress environment for corrupted sites
+- **File Integrity Monitoring**: Hash-based detection of core file modifications
 
 ## 🔧 Architecture
 
@@ -194,6 +207,7 @@ This project is licensed under the **GNU General Public License Version 2** (GPL
 - **Test first**: Use on development/staging environments when possible
 - **Monitor closely**: Watch progress and logs during execution
 - **Clean up**: Always use the cleanup tool to remove the toolkit when finished
+- **Structural integrity**: For sites with severely corrupted core files (missing wp-settings.php, broken wp-config.php), Clean Sweep may be unable to load. In such cases, manual WordPress repair or restoration from backup is recommended before using Clean Sweep.
 
 ## 🐛 Troubleshooting
 

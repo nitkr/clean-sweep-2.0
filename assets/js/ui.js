@@ -98,8 +98,10 @@ function showCopyFeedback(button, message, color) {
  */
 
 // Threat timeline expand/collapse functionality
-function toggleRiskLevel(riskLevel) {
-    const content = document.getElementById("timeline-" + riskLevel);
+function toggleRiskLevel(riskLevel, type = 'malware') {
+    // Use different ID prefixes for malware vs integrity results
+    const idPrefix = type === 'integrity' ? 'integrity-timeline-' : 'timeline-';
+    const content = document.getElementById(idPrefix + riskLevel);
     const header = content ? content.previousElementSibling : null;
 
     if (content) {
@@ -117,7 +119,7 @@ function toggleRiskLevel(riskLevel) {
             }
         }
     } else {
-        console.error('Timeline content not found for risk level:', riskLevel);
+        console.error('Timeline content not found for risk level:', riskLevel, 'type:', type);
     }
 }
 
@@ -218,10 +220,29 @@ function startMalwareScan() {
     document.getElementById('malware-progress-text').textContent = 'Initializing malware scanner...';
     document.getElementById('malware-progress-fill').style.width = '0%';
 
-    // Start progress polling after a small delay to ensure file is created
+    // Start progress polling with optimized timing to reduce 404 errors
     setTimeout(() => {
-        malwareProgressInterval = setInterval(pollMalwareProgress, 2000);
-    }, 500);
+        malwareProgressInterval = setInterval(pollMalwareProgress, 3000); // Poll every 3 seconds instead of 2
+
+        // Safety timeout: stop polling after 5 minutes max to prevent infinite polling
+        setTimeout(() => {
+            if (malwareProgressInterval) {
+                clearInterval(malwareProgressInterval);
+                malwareProgressInterval = null;
+
+                // Update UI to show timeout
+                const statusIndicator = document.getElementById('malware-status-indicator');
+                const progressDetails = document.getElementById('malware-progress-details');
+                if (statusIndicator) {
+                    statusIndicator.textContent = 'Timeout';
+                    statusIndicator.className = 'status-indicator status-completed';
+                }
+                if (progressDetails) {
+                    progressDetails.innerHTML = '<div style="color:#856404;">⚠️ Progress polling timed out after 5 minutes. The scan may still be running in the background.</div>';
+                }
+            }
+        }, 300000); // 5 minute timeout
+    }, 2000); // Give scan 2 seconds to start instead of 0.5 seconds
 
     // Submit the request via AJAX
     const formData = new FormData();
@@ -257,17 +278,22 @@ function startMalwareScan() {
         }
     })
     .then(data => {
+
+
         // Process completed - stop polling
         clearInterval(malwareProgressInterval);
         malwareProgressInterval = null;
 
         // Show results
         if (data.success && data.html) {
-            // Update the malware tab content with the rendered HTML
-            const malwareTab = document.getElementById('malware-tab');
-            if (malwareTab) {
-                malwareTab.innerHTML = data.html;
+            // Update the security tab content with the rendered HTML
+            const securityTab = document.getElementById('security-tab');
+            if (securityTab) {
+                securityTab.innerHTML = data.html;
             }
+
+            // START ASYNC INTEGRITY CHECK (run after malware scan completes)
+            runIntegrityCheckAsync();
 
             // Hide the progress container
             const progressContainer = document.getElementById('malware-progress-container');
@@ -350,6 +376,236 @@ function updateMalwareProgress(data) {
     }
 }
 
+// Asynchronous integrity check after malware scan completion
+function runIntegrityCheckAsync() {
+    // Check if comprehensive monitoring is enabled
+    if (typeof comprehensiveEnabled !== 'undefined' && !comprehensiveEnabled) {
+        // Skip integrity check if comprehensive monitoring is disabled
+        return;
+    }
+
+    // Show integrity check indicator after malware results
+    const existingTimeline = document.querySelector('.threat-timeline');
+    if (!existingTimeline) return;
+
+    // Add integrity check indicator after malware results
+    const indicatorHTML = `
+        <div id="integrity-check-indicator" style="background:#e7f3ff;border:1px solid #b8daff;padding:15px;border-radius:8px;margin:20px 0;text-align:center;">
+            <div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:10px;">
+                <div class="spinner" style="width:16px;height:16px;border:2px solid #007bff;border-top:2px solid transparent;border-radius:50%;animation:spin 1s linear infinite;"></div>
+                <strong style="color:#084c7d;">🔍 Running File Integrity Check...</strong>
+            </div>
+            <p style="margin:0;color:#084c7d;font-size:14px;">This may take a moment for large sites with comprehensive monitoring enabled.</p>
+        </div>
+    `;
+
+    // Insert indicator after existing malware results
+    existingTimeline.insertAdjacentHTML('afterend', indicatorHTML);
+
+    // Run integrity check via AJAX
+    const formData = new FormData();
+    formData.append('action', 'run_integrity_check_async');
+
+    fetch(window.location.href, {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => {
+        const contentType = response.headers.get("content-type");
+        if (contentType && contentType.indexOf("application/json") !== -1) {
+            return response.json();
+        } else {
+            return response.text().then(text => {
+                const preview = text.substring(0, 500).replace(/\s+/g, ' ').trim();
+                throw new Error('Server returned HTML instead of JSON. Error content: ' + preview);
+            });
+        }
+    })
+    .then(data => {
+        // Remove the indicator
+        const indicator = document.getElementById('integrity-check-indicator');
+        if (indicator) {
+            indicator.remove();
+        }
+
+        if (data.success) {
+            // Append integrity results to existing results
+            appendIntegrityResults(data.violations, data.total_violations);
+        } else {
+            // Show error
+            showIntegrityError('Failed to run integrity check: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        // Remove indicator and show error
+        const indicator = document.getElementById('integrity-check-indicator');
+        if (indicator) {
+            indicator.remove();
+        }
+        showIntegrityError('Integrity check failed: ' + error.message);
+    });
+}
+
+// Append integrity violations to existing malware scan results
+function appendIntegrityResults(violations, totalViolations) {
+    // Find existing threat timeline
+    const existingTimeline = document.querySelector('.threat-timeline');
+    if (!existingTimeline) {
+        // If no threat timeline exists, create one
+        createIntegrityResultsSection(violations, totalViolations);
+        return;
+    }
+
+    if (!violations || violations.length === 0) {
+        // No integrity violations - just add a success message
+        const successHTML = `
+            <div class="integrity-success" style="background:#d1ecf1;border:1px solid #bee5eb;padding:15px;border-radius:8px;margin:20px 0;text-align:center;">
+                <div style="color:#0c5460;font-weight:bold;margin-bottom:5px;">✅ File Integrity Check Complete</div>
+                <div style="color:#0c5460;">No integrity violations detected. All monitored files are intact.</div>
+            </div>
+        `;
+        existingTimeline.insertAdjacentHTML('afterend', successHTML);
+        return;
+    }
+
+    // Create integrity violations section
+    const integrityHTML = createIntegrityViolationsHTML(violations, totalViolations);
+
+    // Insert after existing threat timeline
+    existingTimeline.insertAdjacentHTML('afterend', integrityHTML);
+
+    // Update total threat count if it exists
+    updateTotalThreatCount(totalViolations);
+}
+
+// Create new results section for integrity-only results
+function createIntegrityResultsSection(violations, totalViolations) {
+    const securityTab = document.getElementById('security-tab');
+    if (!securityTab) return;
+
+    let resultsHTML = '';
+
+    if (!violations || violations.length === 0) {
+        resultsHTML = `
+            <div class="integrity-success" style="background:#d1ecf1;border:1px solid #bee5eb;padding:20px;border-radius:8px;margin:20px 0;text-align:center;">
+                <h4 style="margin:0 0 15px 0;color:#0c5460;">✅ File Integrity Check Complete</h4>
+                <p style="margin:0;color:#0c5460;font-size:16px;">No integrity violations detected. All monitored files are intact.</p>
+            </div>
+        `;
+    } else {
+        resultsHTML = createIntegrityViolationsHTML(violations, totalViolations);
+    }
+
+    securityTab.insertAdjacentHTML('beforeend', resultsHTML);
+}
+
+// Create HTML for integrity violations
+function createIntegrityViolationsHTML(violations, totalViolations) {
+    let html = `
+        <div class="threat-timeline integrity-timeline" style="margin:20px 0;">
+            <h4 style="background:#fff3cd;border:1px solid #ffeaa7;padding:15px;border-radius:8px;margin-bottom:20px;text-align:center;">
+                🔐 File Integrity Violations (${totalViolations} found)
+            </h4>
+            <div class="threat-grid">
+    `;
+
+    // Group violations by severity
+    const grouped = {
+        critical: [],
+        warning: [],
+        info: []
+    };
+
+    violations.forEach(violation => {
+        const severity = violation.severity || 'info';
+        if (grouped[severity]) {
+            grouped[severity].push(violation);
+        }
+    });
+
+    // Display each severity level
+    ['critical', 'warning', 'info'].forEach(severity => {
+        if (grouped[severity].length > 0) {
+            const severityTitle = severity.charAt(0).toUpperCase() + severity.slice(1);
+            const severityIcon = severity === 'critical' ? '🔴' : severity === 'warning' ? '🟡' : 'ℹ️';
+            const severityColor = severity === 'critical' ? '#721c24' : severity === 'warning' ? '#856404' : '#0c5460';
+            const bgColor = severity === 'critical' ? '#f8d7da' : severity === 'warning' ? '#fff3cd' : '#d1ecf1';
+            const borderColor = severity === 'critical' ? '#f5c6cb' : severity === 'warning' ? '#ffeaa7' : '#bee5eb';
+
+            html += `
+                <div class="threat-presenter" style="margin-bottom:20px;">
+                    <h5 onclick="toggleRiskLevel('${severity}', 'integrity')" style="background:${bgColor};border:1px solid ${borderColor};padding:12px;border-radius:6px;margin:0;cursor:pointer;color:${severityColor};">
+                        <span style="float:right;">▶</span>
+                        ${severityIcon} ${severityTitle} Violations (${grouped[severity].length})
+                    </h5>
+                    <div id="integrity-timeline-${severity}" style="display:none;margin-top:10px;">
+                        <ul style="list-style:none;padding:0;margin:0;">
+            `;
+
+            grouped[severity].forEach(violation => {
+                html += `
+                    <li style="background:white;padding:15px;border-radius:6px;margin:8px 0;border:1px solid #dee2e6;">
+                        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">
+                            <strong style="color:${severityColor};">${violation.file || 'Unknown file'}</strong>
+                            <button onclick="copyThreatDetails(this)" data-section="integrity" data-file="${violation.file || ''}" data-pattern="${violation.pattern || ''}" style="background:#6c757d;color:white;border:none;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:12px;">📋 Copy</button>
+                        </div>
+                        <div style="color:#666;font-size:14px;margin-bottom:5px;">
+                            <strong>Pattern:</strong> ${violation.pattern || 'N/A'}
+                        </div>
+                        <div style="color:#666;font-size:13px;">
+                            ${violation.description || violation.match || 'Integrity violation detected'}
+                        </div>
+                    </li>
+                `;
+            });
+
+            html += `
+                        </ul>
+                    </div>
+                </div>
+            `;
+        }
+    });
+
+    html += `
+            </div>
+        </div>
+    `;
+
+    return html;
+}
+
+// Update total threat count display
+function updateTotalThreatCount(integrityViolations) {
+    // Find existing threat count displays and update them
+    const threatHeaders = document.querySelectorAll('h4');
+    threatHeaders.forEach(header => {
+        if (header.textContent.includes('Total Threats Found:')) {
+            const currentMatch = header.textContent.match(/Total Threats Found:\s*(\d+)/);
+            if (currentMatch) {
+                const currentTotal = parseInt(currentMatch[1]);
+                const newTotal = currentTotal + integrityViolations;
+                header.textContent = header.textContent.replace(/\d+/, newTotal);
+            }
+        }
+    });
+}
+
+// Show integrity check error
+function showIntegrityError(message) {
+    const securityTab = document.getElementById('security-tab');
+    if (!securityTab) return;
+
+    const errorHTML = `
+        <div class="integrity-error" style="background:#f8d7da;border:1px solid #f5c6cb;padding:15px;border-radius:8px;margin:20px 0;text-align:center;">
+            <div style="color:#721c24;font-weight:bold;margin-bottom:5px;">❌ Integrity Check Failed</div>
+            <div style="color:#721c24;">${message}</div>
+        </div>
+    `;
+
+    securityTab.insertAdjacentHTML('afterbegin', errorHTML);
+}
+
 // Threat result pagination for large scans with modern UI
 let currentLoading = false;
 
@@ -393,11 +649,11 @@ function loadNextThreatPage(requestId, page, perPage) {
     })
     .then(data => {
         if (data.success) {
-            // Insert new threats into the threat categories structure
-            insertThreatsIntoCategories(data.html, requestId, page);
+            // Replace threat timeline with new page content
+            replaceThreatTimelineWithPage(data.html, requestId, page);
 
-            // Update pagination UI
-            updatePaginationUI(data, page, perPage, requestId);
+            // Update pagination UI with proper navigation
+            updatePaginationControls(data, page, perPage, requestId);
         } else {
             showPaginationError('Error loading next page: ' + (data.error || 'Unknown error'));
         }
@@ -417,147 +673,35 @@ function loadNextThreatPage(requestId, page, perPage) {
     });
 }
 
-// Load all remaining threats
-function loadAllRemainingThreats(requestId) {
-    if (currentLoading) return;
 
-    currentLoading = true;
-    const btn = document.querySelector('button[onclick*="loadAllRemainingThreats"]');
-    if (!btn) {
-        console.error('Load all remaining button not found');
-        currentLoading = false;
+
+// Replace threat timeline with new page content for proper pagination
+function replaceThreatTimelineWithPage(htmlContent, requestId, page) {
+    // Find the existing threat timeline
+    const threatTimeline = document.querySelector('.threat-timeline');
+    if (!threatTimeline) {
+        console.error('Threat timeline not found');
         return;
     }
 
-    const originalText = btn.textContent;
-    btn.textContent = '⏳ Loading All Remaining Threats...';
-    btn.disabled = true;
-
-    // Start with page 2 and load 100 threats per page until no more
-    loadAllRemainingRecursive(requestId, 2, 100);
-}
-
-// Recursive function to load all remaining threats
-function loadAllRemainingRecursive(requestId, page, perPage) {
-    const formData = new FormData();
-    formData.append('action', 'load_more_threats');
-    formData.append('request_id', requestId);
-    formData.append('page', page);
-    formData.append('per_page', perPage);
-    formData.append('progress_file', 'pagination_' + Date.now() + '.progress');
-
-    fetch(window.location.href, {
-        method: 'POST',
-        body: formData
-    })
-    .then(response => {
-        const contentType = response.headers.get("content-type");
-        if (contentType && contentType.indexOf("application/json") !== -1) {
-            return response.json();
-        } else {
-            return response.text().then(text => {
-                const preview = text.substring(0, 500).replace(/\s+/g, ' ').trim();
-                throw new Error('Server returned HTML instead of JSON. Error content: ' + preview);
-            });
-        }
-    })
-    .then(data => {
-        if (data.success) {
-            // Insert new threats
-            insertThreatsIntoCategories(data.html, requestId);
-
-            if (data.has_more) {
-                // Continue loading next page
-                loadAllRemainingRecursive(requestId, page + 1, perPage);
-            } else {
-                // Finished loading all threats
-                const btn = document.querySelector('button[onclick*="loadAllRemainingThreats"]');
-                if (btn) {
-                    btn.textContent = '✅ All Threats Loaded!';
-                    btn.disabled = true;
-                    btn.style.background = '#28a745';
-                }
-
-                // Update pagination info
-                updatePaginationUI(data, page, perPage, requestId, true);
-
-                // Show completion message
-                const paginationContainer = document.getElementById('threat-pagination');
-                if (paginationContainer) {
-                    const completionMsg = document.createElement('div');
-                    completionMsg.style.cssText = 'background:#d4edda;border:1px solid #c3e6cb;padding:15px;border-radius:8px;margin:15px 0;color:#155724;text-align:center;';
-                    completionMsg.innerHTML = '<h5>🎉 All Threats Loaded!</h5><p style="margin:5px 0 0 0;">Complete threat analysis ready for review.</p>';
-                    paginationContainer.appendChild(completionMsg);
-                }
-            }
-        } else {
-            // Stop loading on error
-            console.error('Error loading page', page, ':', data.error);
-            const btn = document.querySelector('button[onclick*="loadAllRemainingThreats"]');
-            if (btn) {
-                btn.textContent = '❌ Loading Stopped';
-                btn.disabled = false;
-            }
-            showPaginationError('Stopped loading at page ' + page + ': ' + (data.error || 'Unknown error'));
-        }
-    })
-    .catch(error => {
-        console.error('Pagination error:', error);
-        const btn = document.querySelector('button[onclick*="loadAllRemainingThreats"]');
-        if (btn) {
-            btn.textContent = '❌ Error Loading';
-            btn.disabled = false;
-        }
-        showPaginationError('Error loading page ' + page + ': ' + error.message);
-        currentLoading = false;
-    });
-}
-
-// Insert threats into existing timeline structure - FIXED for <li> elements
-function insertThreatsIntoCategories(htmlContent, requestId, page = 2) {
+    // Parse the HTML content
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = htmlContent;
 
-    // Find the container for additional threats
-    const additionalContainer = document.getElementById('additional-threats-container');
-    if (!additionalContainer) {
-        console.error('Additional threats container not found');
-        return;
-    }
-
-    // Get all threat <li> elements from the response
-    const threatItems = tempDiv.querySelectorAll('li');
-    if (threatItems.length === 0) {
-        console.error('No threat items found in HTML response');
-        return;
-    }
-
-    // Create a wrapper for the new threats
-    const newThreats_wrapper = document.createElement('div');
-    newThreats_wrapper.style.cssText = 'background:#f8f9fa;border:1px solid #dee2e6;padding:20px;border-radius:8px;margin:30px 0;';
-    newThreats_wrapper.innerHTML = `
-        <h4 style="margin:0 0 20px 0;color:#495057;">📄 Additional Threats (Page ${page})</h4>
-        <ul style="list-style:none;padding:0;margin:0;">
-            ${Array.from(threatItems).map(li => li.outerHTML).join('')}
-        </ul>
+    // Create new paginated threat timeline
+    const newTimelineHTML = `
+        <div class="threat-timeline" style="margin:20px 0;">
+            <h4 style="background:#e7f0ff;border:1px solid #b3d9ff;padding:15px;border-radius:8px;margin-bottom:20px;text-align:center;">
+                📄 Threat Results - Page ${page}
+            </h4>
+            ${Array.from(tempDiv.children).map(child => child.outerHTML).join('')}
+        </div>
     `;
 
-    // Append to the additional threats container
-    additionalContainer.appendChild(newThreats_wrapper);
+    // Replace the existing timeline
+    threatTimeline.outerHTML = newTimelineHTML;
 
-    // Update the "loaded X of Y" counter if present
-    const paginationContainer = document.getElementById('threat-pagination');
-    if (paginationContainer) {
-        const statElement = Array.from(paginationContainer.querySelectorAll('strong')).find(el =>
-            el.textContent.match(/^\d+$/)
-        );
-        if (statElement) {
-            const newTotal = parseInt(statElement.textContent) + threatItems.length;
-            statElement.textContent = newTotal;
-        }
-    }
-
-    console.log(`✅ Appended ${threatItems.length} threat items to additional container`);
+    console.log(`✅ Replaced threat timeline with page ${page} content`);
 }
 
 // Find existing threat presenter by risk level
@@ -584,39 +728,69 @@ function findExistingPresenter(riskLevel) {
     return null;
 }
 
-// Update pagination UI after loading
-function updatePaginationUI(data, currentPage, perPage, requestId, allLoaded = false) {
-    const paginationContainer = document.getElementById('threat-pagination');
-    if (!paginationContainer) return;
+// Update pagination controls with proper navigation
+function updatePaginationControls(data, currentPage, perPage, requestId) {
+    const totalPages = Math.ceil(data.total_available / perPage);
 
-    // Update page counter
-    const pageInfo = paginationContainer.querySelector('div strong:first-child');
-    if (pageInfo && data.total_loaded) {
-        pageInfo.textContent = data.total_loaded;
+    // Find the pagination header
+    const paginationHeader = document.querySelector('.threat-pagination-header');
+    if (!paginationHeader) {
+        console.error('Pagination header not found');
+        return;
     }
 
-    // Update next page button
-    const nextBtn = document.querySelector('button[onclick*="loadNextThreatPage"]');
-    if (nextBtn) {
-        if (allLoaded || !data.has_more) {
-            nextBtn.style.display = 'none';
-        } else {
-            nextBtn.textContent = '▶️ Load Next Page';
-            nextBtn.disabled = false;
-        }
-    }
+    // Replace with proper navigation controls
+    paginationHeader.innerHTML = `
+        <h4 style="margin:0 0 15px 0;color:#084c7d;">🔄 Threat Results Navigation</h4>
+        <div style="display:flex;justify-content:center;align-items:center;gap:15px;margin-bottom:15px;flex-wrap:wrap;">
+            <button class="pagination-btn" ${currentPage <= 1 ? 'disabled' : ''}
+                    onclick="loadThreatPage('${requestId}', ${currentPage - 1}, ${perPage})"
+                    style="background:#007bff;color:white;border:none;padding:12px 20px;font-size:14px;border-radius:6px;cursor:pointer;min-width:120px;">
+                ◀️ Previous
+            </button>
+
+            <span style="font-size:16px;font-weight:bold;color:#495057;">
+                Page ${currentPage} of ${totalPages}
+            </span>
+
+            <button class="pagination-btn" ${!data.has_more ? 'disabled' : ''}
+                    onclick="loadNextThreatPage('${requestId}', ${currentPage + 1}, ${perPage})"
+                    style="background:#007bff;color:white;border:none;padding:12px 20px;font-size:14px;border-radius:6px;cursor:pointer;min-width:120px;">
+                Next ▶️
+            </button>
+        </div>
+
+        <div style="font-size:14px;color:#495057;margin-bottom:10px;text-align:center;">
+            <strong>${data.total_loaded || (currentPage * perPage)}</strong> threats shown of <strong>${data.total_available}</strong> total
+        </div>
+
+        <div style="background:#fff3cd;border:1px solid #ffeaa7;padding:10px;border-radius:4px;font-size:13px;color:#856404;text-align:center;">
+            💡 <strong>Navigation:</strong> Use Previous/Next buttons to browse threat pages
+        </div>
+    `;
+}
+
+// Load specific threat page (for Previous button)
+function loadThreatPage(requestId, page, perPage) {
+    if (page < 1) return;
+
+    loadNextThreatPage(requestId, page, perPage);
 }
 
 // Show pagination error
 function showPaginationError(message) {
-    const paginationContainer = document.getElementById('threat-pagination');
-    if (!paginationContainer) return;
+    // Show error in the pagination header or additional threats container
+    const headerContainer = document.querySelector('.threat-pagination-header');
+    const additionalContainer = document.getElementById('additional-threats-container');
+    const targetContainer = headerContainer || additionalContainer;
+
+    if (!targetContainer) return;
 
     const errorDiv = document.createElement('div');
     errorDiv.style.cssText = 'background:#f8d7da;border:1px solid #f5c6cb;padding:15px;border-radius:8px;margin:15px 0;color:#721c24;text-align:center;';
     errorDiv.innerHTML = '<strong>❌ Error Loading Threats</strong><br>' + message;
 
-    paginationContainer.appendChild(errorDiv);
+    targetContainer.appendChild(errorDiv);
 
     // Auto-hide error after 10 seconds
     setTimeout(() => {
