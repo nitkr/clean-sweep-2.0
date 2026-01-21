@@ -244,7 +244,18 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
 
     // Handle user's backup choice
     if ($create_backup) {
-        // User chose to create backup - check if we have sufficient space
+        // User chose to create backup - immediately update progress file to prevent duplicate UI display
+        if ($progress_file) {
+            $progress_data = [
+                'status' => 'initializing',
+                'progress' => 5,
+                'message' => 'Starting core reinstallation with backup...',
+                'details' => ''
+            ];
+            clean_sweep_write_progress_file($progress_file, $progress_data);
+        }
+        
+        // Check if we have sufficient space
         if (!$disk_check['success'] || $disk_check['space_status'] === 'insufficient') {
             $error_msg = 'Cannot create backup - insufficient disk space';
             clean_sweep_log_message($error_msg, 'error');
@@ -265,43 +276,68 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
         }
         clean_sweep_log_message("User requested backup creation - proceeding", 'info');
     } elseif ($proceed_without_backup) {
-        // User chose to skip backup
+        // User chose to skip backup - immediately update progress file to prevent duplicate UI display
+        if ($progress_file) {
+            $progress_data = [
+                'status' => 'initializing',
+                'progress' => 5,
+                'message' => 'Starting core reinstallation without backup...',
+                'details' => ''
+            ];
+            clean_sweep_write_progress_file($progress_file, $progress_data);
+        }
+        
         clean_sweep_log_message("User chose to proceed without backup", 'warning');
     } elseif ($progress_file) {
-        // Phase 1: Return JSON response for backup choice UI (hybrid approach)
-        if (!$disk_check['success']) {
-            // Disk space check failed
-            header('Content-Type: application/json');
-            echo json_encode([
-                'status' => 'disk_space_error',
-                'progress' => 0,
-                'message' => 'Disk space check failed',
-                'disk_check' => $disk_check,
-                'details' => '<div style="color:#dc3545;">Error: ' . $disk_check['message'] . '</div>'
-            ]);
-            exit;
-        } elseif ($disk_check['space_status'] === 'insufficient') {
-            // Insufficient disk space - show warning
-            header('Content-Type: application/json');
-            echo json_encode([
-                'status' => 'disk_space_warning',
-                'progress' => 0,
-                'message' => 'Insufficient disk space for backup',
-                'disk_check' => $disk_check,
-                'can_proceed_without_backup' => true
-            ]);
-            exit;
-        } else {
-            // Sufficient disk space - return backup choice JSON for UI
-            header('Content-Type: application/json');
-            echo json_encode([
-                'status' => 'backup_choice',
-                'progress' => 0,
-                'message' => 'Choose backup option for core reinstallation',
-                'disk_check' => $disk_check
-            ]);
-            exit; // Stop here - let JavaScript show UI and start polling after user choice
-        }
+    // Phase 1: Return JSON response for backup choice UI (hybrid approach)
+    if (!$disk_check['success']) {
+        // Disk space check failed
+        // Create progress file FIRST to prevent 404 errors when polling starts
+        $progress_data = [
+            'status' => 'disk_space_error',
+            'progress' => 0,
+            'message' => 'Disk space check failed',
+            'disk_check' => $disk_check,
+            'details' => '<div style="color:#dc3545;">Error: ' . $disk_check['message'] . '</div>'
+        ];
+        clean_sweep_write_progress_file($progress_file, $progress_data);
+        
+        // Then return JSON response
+        header('Content-Type: application/json');
+        echo json_encode($progress_data);
+        exit;
+    } elseif ($disk_check['space_status'] === 'insufficient') {
+        // Insufficient disk space - show warning
+        // Create progress file FIRST to prevent 404 errors when polling starts
+        $progress_data = [
+            'status' => 'disk_space_warning',
+            'progress' => 0,
+            'message' => 'Insufficient disk space for backup',
+            'disk_check' => $disk_check,
+            'can_proceed_without_backup' => true
+        ];
+        clean_sweep_write_progress_file($progress_file, $progress_data);
+        
+        // Then return JSON response
+        header('Content-Type: application/json');
+        echo json_encode($progress_data);
+        exit;
+    } else {
+        // Sufficient disk space - return backup choice JSON for UI
+        // Create progress file FIRST to prevent 404 errors when polling starts
+        $progress_data = [
+            'status' => 'backup_choice',
+            'progress' => 0,
+            'message' => 'Choose backup option for core reinstallation',
+            'disk_check' => $disk_check
+        ];
+        clean_sweep_write_progress_file($progress_file, $progress_data);
+        
+        // Then return JSON response
+        header('Content-Type: application/json');
+        echo json_encode($progress_data);
+        exit; // Stop here - let JavaScript show UI and start polling after user choice
+    }
     }
 
     // For non-AJAX requests, proceed with backup creation if sufficient space (unless user explicitly chose no backup)

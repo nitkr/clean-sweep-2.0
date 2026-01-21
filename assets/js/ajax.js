@@ -241,8 +241,12 @@ function updatePluginProgress(data) {
 // Core reinstallation with AJAX progress tracking
 let coreProgressInterval = null;
 let coreProgressFile = null;
+let userHasMadeBackupChoice = false; // Track if user has selected backup option to prevent duplicate UI
 
 function startCoreReinstall() {
+    // Reset the backup choice flag for new reinstall session
+    userHasMadeBackupChoice = false;
+    
     const version = document.getElementById("wp-version").value;
 
     // Generate unique progress file name
@@ -252,7 +256,7 @@ function startCoreReinstall() {
     document.getElementById("core-progress-container").style.display = "block";
     document.querySelector("[onclick='startCoreReinstall()']").style.display = "none";
 
-    // Make AJAX request to start the process
+    // Phase 1: Get disk space info and backup choice via JSON response
     const formData = new FormData();
     formData.append('action', 'reinstall_core');
     formData.append('wp_version', version);
@@ -263,15 +267,18 @@ function startCoreReinstall() {
         body: formData
     })
     .then(response => {
-        if (!response.ok) {
+        if (response.ok) {
+            return response.json(); // Expect JSON response with backup choice
+        } else {
             document.getElementById("core-progress-details").innerHTML = '<div style="color:#dc3545;">Error: Failed to start core reinstallation</div>';
             document.getElementById("core-status-indicator").textContent = "Error";
             document.getElementById("core-status-indicator").className = "status-indicator status-completed";
+            throw new Error('Failed to start core reinstallation');
         }
-        // Start polling after 5-second delay to let PHP create progress file
-        setTimeout(() => {
-            coreProgressInterval = setInterval(pollCoreProgress, 1000);
-        }, 5000); // 5 second delay eliminates 404 errors on big sites
+    })
+    .then(data => {
+        // Display backup choice UI from JSON response
+        updateCoreProgress(data);
     })
     .catch(error => {
         document.getElementById("core-progress-details").innerHTML = '<div style="color:#dc3545;">Error: ' + error.message + '</div>';
@@ -322,6 +329,17 @@ function updateCoreProgress(data) {
 
     // Special handling for disk space warnings and backup choice
     if (data.status === 'disk_space_warning' || data.status === 'disk_space_error' || data.status === 'backup_choice' || (data.disk_check && data.disk_check.show_choice)) {
+        // Prevent duplicate UI display: skip if user already made a choice or status has moved forward
+        if (userHasMadeBackupChoice || 
+            data.status === 'initializing' || 
+            data.status === 'backing_up' || 
+            data.status === 'downloading' ||
+            data.status === 'extracting' ||
+            data.status === 'installing') {
+            // Don't render backup UI - either user made choice or process is ongoing
+            return;
+        }
+        
         console.log('💾 Core reinstall: Showing backup choice UI');
 
         if (statusIndicator) {
@@ -481,6 +499,9 @@ function refreshPluginAnalysis() {
 
 // Handle proceeding with core reinstallation with backup
 function proceedCoreReinstallWithBackup() {
+    // Mark that user has made their backup choice to prevent duplicate UI display
+    userHasMadeBackupChoice = true;
+    
     const progressDetails = document.getElementById("core-progress-details");
     const progressText = document.getElementById("core-progress-text");
     const statusIndicator = document.getElementById("core-status-indicator");
@@ -539,6 +560,9 @@ function proceedCoreReinstallWithBackup() {
 
 // Handle proceeding with core reinstallation without backup
 function proceedCoreReinstallWithoutBackup() {
+    // Mark that user has made their backup choice to prevent duplicate UI display
+    userHasMadeBackupChoice = true;
+    
     const progressDetails = document.getElementById("core-progress-details");
     const progressText = document.getElementById("core-progress-text");
     const statusIndicator = document.getElementById("core-status-indicator");
