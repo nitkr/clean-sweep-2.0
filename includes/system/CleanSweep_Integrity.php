@@ -665,8 +665,8 @@ if (!function_exists('clean_sweep_check_for_reinfection')) {
                         $violations[] = [
                             'file' => $file,
                             'type' => 'modified',
-                            'pattern' => 'Cryptographic hash changed',
-                            'match' => "SHA256 integrity violation detected",
+                            'pattern' => 'File content modified',
+                            'match' => "File integrity compromised - content has changed",
                             'severity' => 'critical',
                             'description' => 'Core file cryptographic integrity compromised - <span class="integrity-alert">potential reinfection</span>'
                         ];
@@ -984,7 +984,17 @@ class CleanSweep_Integrity {
             return ['error' => 'Invalid baseline structure'];
         }
 
-        clean_sweep_log_message("📥 Baseline imported and verified successfully", 'info');
+        // SAVE the imported baseline to local file for future comparisons
+        $json = json_encode($baseline, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+        if (file_put_contents($this->baseline_file, $json) !== false) {
+            chmod($this->baseline_file, 0644);
+            clean_sweep_log_message("✅ Imported baseline saved to local file for integrity monitoring", 'info');
+        } else {
+            clean_sweep_log_message("❌ Failed to save imported baseline to local file", 'error');
+            return ['error' => 'Failed to save imported baseline locally'];
+        }
+
+        clean_sweep_log_message("📥 Baseline imported, verified, and saved successfully", 'info');
 
         return [
             'success' => true,

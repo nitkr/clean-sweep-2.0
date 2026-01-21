@@ -17,14 +17,8 @@ class CleanSweep_RecoveryBootstrap {
         $this->fresh_env = new CleanSweep_FreshEnvironment();
         $this->is_ajax = $is_ajax;
 
-        // DEBUG: Check REAL SITE ROOT core files after recovery completion
+        // Check REAL SITE ROOT core files after recovery completion
         // Use site root detection instead of relative paths
-        $site_root = $this->detectSiteRoot();
-        $file_php = $site_root . 'wp-admin/includes/file.php';
-        $upgrader_php = $site_root . 'wp-admin/includes/class-wp-upgrader.php';
-        clean_sweep_log_message("DEBUG: After recovery completion - real site root exists: " . (is_dir($site_root) ? 'YES' : 'NO'), 'debug');
-        clean_sweep_log_message("DEBUG: After recovery completion - real file.php exists: " . (file_exists($file_php) ? 'YES' : 'NO'), 'debug');
-        clean_sweep_log_message("DEBUG: After recovery completion - real class-wp-upgrader.php exists: " . (file_exists($upgrader_php) ? 'YES' : 'NO'), 'debug');
     }
 
     /**
@@ -78,16 +72,7 @@ class CleanSweep_RecoveryBootstrap {
             if (!isset($clean_sweep_functions)) {
                 // Create functions object - WordPress DB connection already available
                 $clean_sweep_functions = new CleanSweep_Functions(null);
-                clean_sweep_log_message("✅ Global functions object created for application handlers", 'debug');
             }
-
-            // DEBUG: Check /core/fresh state after recovery completion
-            $fresh_dir = __DIR__ . '/../../core/fresh';
-            $file_php = $fresh_dir . '/wp-admin/includes/file.php';
-            $upgrader_php = $fresh_dir . '/wp-admin/includes/class-wp-upgrader.php';
-            clean_sweep_log_message("DEBUG: After recovery completion - /core/fresh exists: " . (is_dir($fresh_dir) ? 'YES' : 'NO'), 'debug');
-            clean_sweep_log_message("DEBUG: After recovery completion - file.php exists: " . (file_exists($file_php) ? 'YES' : 'NO'), 'debug');
-            clean_sweep_log_message("DEBUG: After recovery completion - class-wp-upgrader.php exists: " . (file_exists($upgrader_php) ? 'YES' : 'NO'), 'debug');
 
             return true;
         } else {
@@ -492,24 +477,20 @@ class CleanSweep_RecoveryBootstrap {
 
         // Clear PHP filesystem cache
         clearstatcache();
-        clean_sweep_log_message("✅ PHP stat cache cleared", 'debug');
 
         // Clear OPcache if available
         if (function_exists('opcache_reset')) {
             opcache_reset();
-            clean_sweep_log_message("✅ OPcache cleared", 'debug');
         }
 
         // Clear APCu cache if available (modern PHP 7+)
         if (function_exists('apcu_clear_cache')) {
             apcu_clear_cache();
-            clean_sweep_log_message("✅ APCu cache cleared", 'debug');
         }
 
         // Clear any custom caches
         if (isset($GLOBALS['wp_object_cache']) && is_object($GLOBALS['wp_object_cache'])) {
             $GLOBALS['wp_object_cache']->flush();
-            clean_sweep_log_message("✅ WordPress object cache cleared", 'debug');
         }
 
         // Clear server-specific caches

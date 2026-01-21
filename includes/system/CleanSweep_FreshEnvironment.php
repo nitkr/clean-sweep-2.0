@@ -50,10 +50,8 @@ class CleanSweep_FreshEnvironment {
         // CHECK 2: Filesystem cache clearing + canary file check
         // CRITICAL: Clear FastCGI filesystem cache to bypass stale file detection
         clearstatcache();
-        clean_sweep_log_message("🧹 [{$context}] Cleared FastCGI filesystem cache (clearstatcache)", 'debug');
 
         $canary_path = $this->fresh_dir . '/.clean-sweep-canary.php';
-        clean_sweep_log_message("🔍 [{$context}] Checking for canary file at: {$canary_path}", 'debug');
         
         if (file_exists($canary_path)) {
             clean_sweep_log_message("✅ [{$context}] Canary file found - fresh environment setup is COMPLETE", 'info');
@@ -62,13 +60,10 @@ class CleanSweep_FreshEnvironment {
         clean_sweep_log_message("⚠️ [{$context}] Canary file NOT found - setup may be incomplete", 'debug');
 
         // CHECK 2: Fallback validation - check if directory and key files exist
-        clean_sweep_log_message("🔍 [{$context}] Fallback: Checking fresh directory structure", 'debug');
-
         if (!is_dir($this->fresh_dir)) {
             clean_sweep_log_message("❌ [{$context}] Fresh directory does not exist: " . $this->fresh_dir, 'error');
             return false;
         }
-        clean_sweep_log_message("✅ [{$context}] Fresh directory exists", 'debug');
 
         // Check essential WordPress files
         $required_files = [
@@ -85,7 +80,6 @@ class CleanSweep_FreshEnvironment {
                 return false;
             }
         }
-        clean_sweep_log_message("✅ [{$context}] All required files exist", 'debug');
 
         // Check essential directories
         $required_dirs = [
@@ -100,13 +94,9 @@ class CleanSweep_FreshEnvironment {
                 return false;
             }
         }
-        clean_sweep_log_message("✅ [{$context}] All required directories exist", 'debug');
 
         // Check marker file
         if (!file_exists($this->marker_file)) {
-            clean_sweep_log_message("⚠️ [{$context}] Marker file missing: " . $this->marker_file, 'debug');
-            clean_sweep_log_message("🔄 [{$context}] Creating marker file for existing fresh environment", 'debug');
-
             $marker_data = [
                 'created' => time(),
                 'method' => 'existing',
@@ -118,17 +108,11 @@ class CleanSweep_FreshEnvironment {
                 clean_sweep_log_message("❌ [{$context}] Failed to create marker file!", 'error');
                 return false;
             }
-
-            clean_sweep_log_message("✅ [{$context}] Created marker file successfully", 'debug');
-        } else {
-            clean_sweep_log_message("✅ [{$context}] Marker file exists", 'debug');
         }
 
         // Verify integrity if hash file exists
         if (file_exists($this->integrity_file)) {
-            clean_sweep_log_message("🔍 [{$context}] Integrity file exists, verifying...", 'debug');
             $integrity_valid = $this->verifyIntegrity();
-            clean_sweep_log_message("✅ [{$context}] Integrity check: " . ($integrity_valid ? 'PASSED' : 'FAILED'), 'debug');
             return $integrity_valid;
         }
 
@@ -1228,16 +1212,14 @@ EOT;
             return "add_filter('option_active_plugins', '__return_empty_array');\n";
         }
 
-        // Generate selective plugin loading code with debugging
+        // Generate selective plugin loading code
         $code = "// Selective plugin loading for operation: {$operation}\n";
-        $code .= "clean_sweep_log_message('🔍 DEBUG: Selective plugin loading initialized for operation: {$operation}', 'error');\n";
 
         // Create array of safe plugin files
         $safe_files = array_column($safe_plugins, 'file');
         $code .= "add_filter('option_active_plugins', function(\$plugins) {\n";
         $code .= "    \$safe_plugins = " . var_export($safe_files, true) . ";\n";
         $code .= "    \$filtered = array_intersect(\$plugins, \$safe_plugins);\n";
-        $code .= "    clean_sweep_log_message('🔍 DEBUG: Active plugins filtered from ' . count(\$plugins) . ' to ' . count(\$filtered) . ' safe plugins', 'error');\n";
         $code .= "    return \$filtered;\n";
         $code .= "});\n\n";
 
@@ -1262,38 +1244,16 @@ EOT;
         $code .= "    define('LOGGED_IN_COOKIE', 'wordpress_logged_in_' . md5(site_url()));\n";
         $code .= "}\n";
 
-        // Explicitly load safe plugins with detailed debugging
-        $code .= "// Explicitly load required safe plugins with debugging\n";
+        // Explicitly load safe plugins
+        $code .= "// Explicitly load required safe plugins\n";
         foreach ($safe_plugins as $plugin_key => $plugin_config) {
             $code .= "// Loading safe plugin: {$plugin_config['name']} ({$plugin_config['file']})\n";
             $code .= "if (file_exists(WP_PLUGIN_DIR . '/{$plugin_config['file']}')) {\n";
-            $code .= "    clean_sweep_log_message('✅ DEBUG: Safe plugin file exists: {$plugin_config['file']}', 'error');\n";
-            $code .= "    clean_sweep_log_message('🔍 DEBUG: WP_PLUGIN_URL = ' . WP_PLUGIN_URL, 'error');\n";
-            $code .= "    clean_sweep_log_message('🔍 DEBUG: WPMU_PLUGIN_URL = ' . WPMU_PLUGIN_URL, 'error');\n";
-            $code .= "    \$before_load = class_exists('WPMUDEV_Dashboard') ? 'YES' : 'NO';\n";
-            $code .= "    clean_sweep_log_message('🔍 DEBUG: WPMUDEV_Dashboard class before load: ' . \$before_load, 'error');\n";
             $code .= "    include_once WP_PLUGIN_DIR . '/{$plugin_config['file']}';\n";
-            $code .= "    \$after_load = class_exists('WPMUDEV_Dashboard') ? 'YES' : 'NO';\n";
-            $code .= "    clean_sweep_log_message('✅ DEBUG: Loaded safe plugin: {$plugin_config['name']} - WPMUDEV_Dashboard class after load: ' . \$after_load, 'error');\n";
-            $code .= "    if (\$after_load === 'YES') {\n";
-            $code .= "        clean_sweep_log_message('🎉 DEBUG: WPMU DEV Dashboard class successfully loaded!', 'error');\n";
-            $code .= "    } else {\n";
-            $code .= "        clean_sweep_log_message('❌ DEBUG: WPMU DEV Dashboard class NOT loaded after including plugin', 'error');\n";
-            $code .= "    }\n";
-            $code .= "} else {\n";
-            $code .= "    clean_sweep_log_message('❌ DEBUG: Safe plugin file NOT found: {$plugin_config['file']}', 'error');\n";
             $code .= "}\n";
         }
 
-        // Add final check after all plugins loaded
-        $code .= "\n// Final check after all plugins loaded\n";
-        $code .= "clean_sweep_log_message('🔍 DEBUG: Final WPMU DEV availability check after plugin loading', 'error');\n";
-        $code .= "if (function_exists('clean_sweep_is_wpmudev_available')) {\n";
-        $code .= "    \$available = clean_sweep_is_wpmudev_available() ? 'YES' : 'NO';\n";
-        $code .= "    clean_sweep_log_message('🔍 DEBUG: WPMU DEV availability after loading: ' . \$available, 'error');\n";
-        $code .= "} else {\n";
-        $code .= "    clean_sweep_log_message('❌ DEBUG: clean_sweep_is_wpmudev_available function not available', 'error');\n";
-        $code .= "}\n\n";
+        $code .= "\n";
 
         return $code;
     }
@@ -1306,39 +1266,25 @@ EOT;
         // Calculate site root directory (where Clean Sweep is installed)
         $site_dir = dirname(dirname(dirname(__DIR__)));
 
-        // DEBUG: Log path resolution details
-        clean_sweep_log_message("🔍 DEBUG: defineSitePaths() called", 'error');
-        clean_sweep_log_message("🔍 DEBUG: __DIR__ = " . __DIR__, 'error');
-        clean_sweep_log_message("🔍 DEBUG: Calculated site_dir = " . $site_dir, 'error');
-        clean_sweep_log_message("🔍 DEBUG: Looking for wp-config.php at: " . $site_dir . '/wp-config.php', 'error');
-
         // Check if wp-config.php exists at the calculated location
         $wp_config_path = $site_dir . '/wp-config.php';
         if (file_exists($wp_config_path)) {
-            clean_sweep_log_message("✅ DEBUG: wp-config.php FOUND at: " . $wp_config_path, 'error');
-
             // Define site path constants
             if (!defined('SITE_ABSPATH')) {
                 define('SITE_ABSPATH', $site_dir . '/');
-                clean_sweep_log_message("📍 DEBUG: Defined SITE_ABSPATH = " . SITE_ABSPATH, 'error');
             }
 
             if (!defined('SITE_WP_CONTENT_DIR')) {
                 define('SITE_WP_CONTENT_DIR', $site_dir . '/wp-content/');
-                clean_sweep_log_message("📍 DEBUG: Defined SITE_WP_CONTENT_DIR = " . SITE_WP_CONTENT_DIR, 'error');
             }
 
             if (!defined('SITE_WP_PLUGIN_DIR')) {
                 define('SITE_WP_PLUGIN_DIR', $site_dir . '/wp-content/plugins/');
-                clean_sweep_log_message("📍 DEBUG: Defined SITE_WP_PLUGIN_DIR = " . SITE_WP_PLUGIN_DIR, 'error');
             }
 
             if (!defined('SITE_WP_UPLOAD_DIR')) {
                 define('SITE_WP_UPLOAD_DIR', $site_dir . '/wp-content/uploads/');
-                clean_sweep_log_message("📍 DEBUG: Defined SITE_WP_UPLOAD_DIR = " . SITE_WP_UPLOAD_DIR, 'error');
             }
-
-            clean_sweep_log_message("✅ SUCCESS: All SITE_ constants defined successfully", 'error');
         } else {
             clean_sweep_log_message("❌ FAILURE: wp-config.php NOT found at: " . $wp_config_path, 'error');
             clean_sweep_log_message("❌ FAILURE: Directory exists: " . (is_dir($site_dir) ? 'YES' : 'NO'), 'error');
@@ -1353,7 +1299,6 @@ EOT;
 
             foreach ($alternatives as $alt_path) {
                 if (file_exists($alt_path)) {
-                    clean_sweep_log_message("🔍 DEBUG: wp-config.php found at alternative location: " . $alt_path, 'error');
                     break;
                 }
             }
@@ -1367,22 +1312,14 @@ EOT;
      * This ensures that WP_CONTENT_DIR and other constants point to the infected site
      */
     private function overrideWordPressConstants() {
-        clean_sweep_log_message("🔄 DEBUG: overrideWordPressConstants() called", 'error');
-
         if (defined('ORIGINAL_WP_CONTENT_DIR')) {
             // Override WordPress constants to point to original site BEFORE WordPress defines them
             if (!defined('WP_CONTENT_DIR')) {
                 define('WP_CONTENT_DIR', ORIGINAL_WP_CONTENT_DIR);
-                clean_sweep_log_message("✅ DEBUG: Successfully overrode WP_CONTENT_DIR = " . WP_CONTENT_DIR, 'error');
-            } else {
-                clean_sweep_log_message("❌ DEBUG: WP_CONTENT_DIR already defined: " . WP_CONTENT_DIR, 'error');
             }
 
             if (!defined('WP_PLUGIN_DIR')) {
                 define('WP_PLUGIN_DIR', ORIGINAL_WP_PLUGIN_DIR);
-                clean_sweep_log_message("✅ DEBUG: Successfully overrode WP_PLUGIN_DIR = " . WP_PLUGIN_DIR, 'error');
-            } else {
-                clean_sweep_log_message("❌ DEBUG: WP_PLUGIN_DIR already defined: " . WP_PLUGIN_DIR, 'error');
             }
 
             clean_sweep_log_message("🔄 Successfully overrode WordPress constants for recovery mode BEFORE WordPress loads", 'info');
