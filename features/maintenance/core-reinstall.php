@@ -601,7 +601,6 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
         '<p><strong>Next steps:</strong></p>' .
         '<ul style="margin:10px 0;padding-left:20px;">' .
         '<li>Check your website to ensure everything works correctly</li>' .
-        '<li>Re-activate any plugins that were deactivated</li>' .
         '<li>Clear any caching plugins</li>' .
         '<li>Test all website functionality</li>' .
         '</ul>' .
@@ -632,7 +631,6 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
             echo '<p><strong>Next steps:</strong></p>';
             echo '<ul style="margin:10px 0;padding-left:20px;">';
             echo '<li>Check your website to ensure everything works correctly</li>';
-            echo '<li>Re-activate any plugins that were deactivated</li>';
             echo '<li>Clear any caching plugins</li>';
             echo '<li>Test all website functionality</li>';
             echo '</ul>';
