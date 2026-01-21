@@ -772,7 +772,7 @@ function updateReinstallProgress(data) {
 function establishBaseline() {
     const statusDiv = document.getElementById('baseline-status-messages');
     if (statusDiv) {
-        statusDiv.innerHTML = '<div style="color:#007bff;">🔄 Establishing baseline...</div>';
+        statusDiv.innerHTML = '<div style="color:#007bff;">🔄 Establishing baseline... Please wait while we scan and hash all monitored files. This may take longer for large sites.</div>';
     }
 
     const formData = new FormData();

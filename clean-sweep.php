@@ -60,8 +60,7 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
-// DEBUG: Log session information for troubleshooting
-clean_sweep_log_message("🔍 SESSION DEBUG: ID = " . session_id() . ", Fresh Env Flag = " . ($_SESSION['fresh_env_setup_complete'] ?? 'NOT SET') . ", Status = " . session_status(), 'error');
+
 
 // Check if this is an AJAX request (has progress_file OR action parameter) - BULLETPROOF DETECTION
 $is_ajax_request = false;
@@ -100,6 +99,18 @@ if ($is_ajax_request) {
     // Additional safeguards
     ini_set('html_errors', 0); // Prevent HTML in error messages
     ini_set('log_errors', 1);  // Log errors instead of displaying
+}
+
+// AUTO-ADD RECOVERY_TOKEN IF MISSING (Cache-busting enhancement)
+if (!isset($_GET['recovery_token']) && !$is_ajax_request && (!defined('WP_CLI') || !WP_CLI)) {
+    // Build redirect URL with recovery_token parameter
+    $current_uri = $_SERVER['REQUEST_URI'];
+    $separator = strpos($current_uri, '?') !== false ? '&' : '?';
+    $redirect_url = $current_uri . $separator . 'recovery_token=' . time();
+
+    // Perform redirect to add the cache-busting parameter
+    header('Location: ' . $redirect_url, true, 302);
+    exit;
 }
 
 // ============================================================================

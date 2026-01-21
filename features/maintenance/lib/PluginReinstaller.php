@@ -184,10 +184,6 @@ class CleanSweep_PluginReinstaller {
                 }
 
                 clean_sweep_log_message("PluginReinstaller: WordPress.org complete, processing WPMU DEV plugins - Batch start: $batch_start, Size: " . ($batch_size ?? 'all'), 'info');
-                clean_sweep_log_message("PluginReinstaller: DEBUG - WPMU DEV plugins array has " . count($wpmu_dev_plugins) . " items", 'info');
-                foreach ($wpmu_dev_plugins as $key => $data) {
-                    clean_sweep_log_message("PluginReinstaller: DEBUG - WPMU DEV plugin: $key => " . json_encode($data), 'info');
-                }
 
                 // With JavaScript-only batching, process all WPMU DEV plugins at once
                 // No transient-based batching needed since all data is passed with each request
@@ -556,6 +552,11 @@ class CleanSweep_PluginReinstaller {
             }
 
             if (!isset($projects[$pid])) {
+                $results['failed'][] = [
+                    'name' => $plugin_info['name'] ?? $plugin_file,
+                    'slug' => $plugin_file,
+                    'status' => 'Project not found in WPMU DEV'
+                ];
                 continue;
             }
 
@@ -571,17 +572,22 @@ class CleanSweep_PluginReinstaller {
                 ]);
             }
 
+            // Check activation status
             $is_active_blog = is_plugin_active($plugin_file);
             $is_active_network = is_multisite() && is_plugin_active_for_network($plugin_file);
             $should_reactivate = $is_active_blog || $is_active_network;
 
+            // Deactivate plugin if active
             if ($is_active_network) {
                 deactivate_plugins($plugin_file, true, true);
             } elseif ($is_active_blog) {
                 deactivate_plugins($plugin_file, true, false);
             }
 
-            if (!WPMUDEV_Dashboard::$upgrader->delete_plugin($pid, true)) {
+            // Delete existing plugin
+            $delete_result = WPMUDEV_Dashboard::$upgrader->delete_plugin($pid, true);
+
+            if (!$delete_result) {
                 $results['failed'][] = [
                     'name' => $plugin_name,
                     'slug' => $plugin_file,
@@ -590,6 +596,7 @@ class CleanSweep_PluginReinstaller {
                 continue;
             }
 
+            // Generate download URL and download the plugin
             $download_url = WPMUDEV_Dashboard::$api->rest_url_auth('install/' . $pid);
             $temp_file = download_url($download_url);
 
@@ -597,12 +604,14 @@ class CleanSweep_PluginReinstaller {
                 $results['failed'][] = [
                     'name' => $plugin_name,
                     'slug' => $plugin_file,
-                    'status' => 'Download failed'
+                    'status' => 'Download failed: ' . $temp_file->get_error_message()
                 ];
                 continue;
             }
 
+            // Create target directory
             $target_dir = WP_PLUGIN_DIR . '/' . dirname($plugin_file);
+
             if (!wp_mkdir_p($target_dir)) {
                 @unlink($temp_file);
                 $results['failed'][] = [
@@ -613,42 +622,47 @@ class CleanSweep_PluginReinstaller {
                 continue;
             }
 
+            // Extract the ZIP file
             $result = unzip_file($temp_file, WP_PLUGIN_DIR);
-            @unlink($temp_file);
+            @unlink($temp_file); // Clean up temp file
 
             if (is_wp_error($result)) {
                 $results['failed'][] = [
                     'name' => $plugin_name,
                     'slug' => $plugin_file,
-                    'status' => 'Extraction failed'
+                    'status' => 'Extraction failed: ' . $result->get_error_message()
                 ];
-            } else {
-                $entry = [
-                    'name' => $plugin_name,
-                    'slug' => $plugin_file,
-                    'status' => 'Re-installed successfully (WPMU DEV)'
-                ];
+                continue;
+            }
 
-                if ($should_reactivate) {
-                    if ($is_active_network) {
-                        $reactivation_result = activate_plugin($plugin_file, '', true, true);
-                    } else {
-                        $reactivation_result = activate_plugin($plugin_file, '', false, true);
-                    }
+            // Success - plugin installed
+            $entry = [
+                'name' => $plugin_name,
+                'slug' => $plugin_file,
+                'status' => 'Re-installed successfully (WPMU DEV)'
+            ];
 
-                    if (is_wp_error($reactivation_result)) {
-                        $entry['status'] .= ' - Reactivation failed';
-                    } else {
-                        $entry['status'] .= ' - Reactivated';
-                    }
+            // Reactivate if it was originally active
+            if ($should_reactivate) {
+                if ($is_active_network) {
+                    $reactivation_result = activate_plugin($plugin_file, '', true, true);
+                } else {
+                    $reactivation_result = activate_plugin($plugin_file, '', false, true);
                 }
 
-                $results['successful'][] = $entry;
-
-                if (isset(WPMUDEV_Dashboard::$site)) {
-                    WPMUDEV_Dashboard::$site->clear_local_file_cache();
-                    WPMUDEV_Dashboard::$site->refresh_local_projects('local');
+                if (is_wp_error($reactivation_result)) {
+                    $entry['status'] .= ' - Reactivation failed';
+                } else {
+                    $entry['status'] .= ' - Reactivated';
                 }
+            }
+
+            $results['successful'][] = $entry;
+
+            // Clear WPMU DEV cache
+            if (isset(WPMUDEV_Dashboard::$site)) {
+                WPMUDEV_Dashboard::$site->clear_local_file_cache();
+                WPMUDEV_Dashboard::$site->refresh_local_projects('local');
             }
         }
 

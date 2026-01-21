@@ -244,7 +244,18 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
 
     // Handle user's backup choice
     if ($create_backup) {
-        // User chose to create backup - check if we have sufficient space
+        // User chose to create backup - immediately update progress file to prevent duplicate UI display
+        if ($progress_file) {
+            $progress_data = [
+                'status' => 'initializing',
+                'progress' => 5,
+                'message' => 'Starting core reinstallation with backup...',
+                'details' => ''
+            ];
+            clean_sweep_write_progress_file($progress_file, $progress_data);
+        }
+        
+        // Check if we have sufficient space
         if (!$disk_check['success'] || $disk_check['space_status'] === 'insufficient') {
             $error_msg = 'Cannot create backup - insufficient disk space';
             clean_sweep_log_message($error_msg, 'error');
@@ -256,48 +267,77 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
                     'details' => '<div style="color:#dc3545;">Error: ' . ($disk_check['warning'] ?? $disk_check['message']) . '</div>'
                 ];
                 clean_sweep_write_progress_file($progress_file, $progress_data);
+                // Return JSON response for AJAX
+                header('Content-Type: application/json');
+                echo json_encode(['success' => false, 'message' => $error_msg, 'disk_check' => $disk_check]);
+                exit;
             }
             return ['success' => false, 'message' => $error_msg, 'disk_check' => $disk_check];
         }
         clean_sweep_log_message("User requested backup creation - proceeding", 'info');
     } elseif ($proceed_without_backup) {
-        // User chose to skip backup
+        // User chose to skip backup - immediately update progress file to prevent duplicate UI display
+        if ($progress_file) {
+            $progress_data = [
+                'status' => 'initializing',
+                'progress' => 5,
+                'message' => 'Starting core reinstallation without backup...',
+                'details' => ''
+            ];
+            clean_sweep_write_progress_file($progress_file, $progress_data);
+        }
+        
         clean_sweep_log_message("User chose to proceed without backup", 'warning');
     } elseif ($progress_file) {
-        // For AJAX requests without a user choice, return disk space information first
-        if (!$disk_check['success']) {
-            // Disk space check failed
-            $progress_data = [
-                'status' => 'disk_space_error',
-                'progress' => 0,
-                'message' => 'Disk space check failed',
-                'disk_check' => $disk_check,
-                'details' => '<div style="color:#dc3545;">Error: ' . $disk_check['message'] . '</div>'
-            ];
-            clean_sweep_write_progress_file($progress_file, $progress_data);
-            return ['success' => false, 'message' => $disk_check['message'], 'disk_check' => $disk_check];
-        } elseif ($disk_check['space_status'] === 'insufficient') {
-            // Insufficient disk space - show warning
-            $progress_data = [
-                'status' => 'disk_space_warning',
-                'progress' => 0,
-                'message' => 'Insufficient disk space for backup',
-                'disk_check' => $disk_check,
-                'can_proceed_without_backup' => true // Allow proceeding without backup
-            ];
-            clean_sweep_write_progress_file($progress_file, $progress_data);
-            return ['disk_space_warning' => $disk_check];
-        } else {
-            // Sufficient disk space - show backup choice
-            $progress_data = [
-                'status' => 'backup_choice',
-                'progress' => 0,
-                'message' => 'Choose backup option for core reinstallation',
-                'disk_check' => $disk_check
-            ];
-            clean_sweep_write_progress_file($progress_file, $progress_data);
-            return ['backup_choice' => $disk_check];
-        }
+    // Phase 1: Return JSON response for backup choice UI (hybrid approach)
+    if (!$disk_check['success']) {
+        // Disk space check failed
+        // Create progress file FIRST to prevent 404 errors when polling starts
+        $progress_data = [
+            'status' => 'disk_space_error',
+            'progress' => 0,
+            'message' => 'Disk space check failed',
+            'disk_check' => $disk_check,
+            'details' => '<div style="color:#dc3545;">Error: ' . $disk_check['message'] . '</div>'
+        ];
+        clean_sweep_write_progress_file($progress_file, $progress_data);
+        
+        // Then return JSON response
+        header('Content-Type: application/json');
+        echo json_encode($progress_data);
+        exit;
+    } elseif ($disk_check['space_status'] === 'insufficient') {
+        // Insufficient disk space - show warning
+        // Create progress file FIRST to prevent 404 errors when polling starts
+        $progress_data = [
+            'status' => 'disk_space_warning',
+            'progress' => 0,
+            'message' => 'Insufficient disk space for backup',
+            'disk_check' => $disk_check,
+            'can_proceed_without_backup' => true
+        ];
+        clean_sweep_write_progress_file($progress_file, $progress_data);
+        
+        // Then return JSON response
+        header('Content-Type: application/json');
+        echo json_encode($progress_data);
+        exit;
+    } else {
+        // Sufficient disk space - return backup choice JSON for UI
+        // Create progress file FIRST to prevent 404 errors when polling starts
+        $progress_data = [
+            'status' => 'backup_choice',
+            'progress' => 0,
+            'message' => 'Choose backup option for core reinstallation',
+            'disk_check' => $disk_check
+        ];
+        clean_sweep_write_progress_file($progress_file, $progress_data);
+        
+        // Then return JSON response
+        header('Content-Type: application/json');
+        echo json_encode($progress_data);
+        exit; // Stop here - let JavaScript show UI and start polling after user choice
+    }
     }
 
     // For non-AJAX requests, proceed with backup creation if sufficient space (unless user explicitly chose no backup)
@@ -540,14 +580,6 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
         clean_sweep_log_message("⚠️ Core baseline function not available", 'warning');
     }
 
-    clean_sweep_log_message("WordPress core re-installation completed successfully");
-    clean_sweep_log_message("Files copied: $files_copied");
-    if ($core_backup_zip) {
-        clean_sweep_log_message("Backup ZIP location: $core_backup_zip");
-    } else {
-        clean_sweep_log_message("Backup: Skipped as requested by user");
-    }
-
     // Update final progress status
     $progress_data['status'] = 'complete';
     $progress_data['progress'] = 100;
@@ -564,12 +596,11 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
         '<li><strong>Version:</strong> ' . htmlspecialchars($wp_version) . '</li>' .
         '<li><strong>Files copied:</strong> ' . $files_copied . '</li>' .
         $backup_info .
-        '<li><strong>Preserved files:</strong> wp-config.php, uploads, themes, plugins</li>' .
+        '<li><strong>Preserved files:</strong> wp-config.php, /wp-content</li>' .
         '</ul>' .
         '<p><strong>Next steps:</strong></p>' .
         '<ul style="margin:10px 0;padding-left:20px;">' .
         '<li>Check your website to ensure everything works correctly</li>' .
-        '<li>Re-activate any plugins that were deactivated</li>' .
         '<li>Clear any caching plugins</li>' .
         '<li>Test all website functionality</li>' .
         '</ul>' .
@@ -595,12 +626,11 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
             } else {
                 echo '<li><strong>Backup:</strong> Skipped as requested</li>';
             }
-            echo '<li><strong>Preserved files:</strong> wp-config.php, uploads, themes, plugins</li>';
+            echo '<li><strong>Preserved files:</strong> wp-config.php, /wp-content</li>';
             echo '</ul>';
             echo '<p><strong>Next steps:</strong></p>';
             echo '<ul style="margin:10px 0;padding-left:20px;">';
             echo '<li>Check your website to ensure everything works correctly</li>';
-            echo '<li>Re-activate any plugins that were deactivated</li>';
             echo '<li>Clear any caching plugins</li>';
             echo '<li>Test all website functionality</li>';
             echo '</ul>';
