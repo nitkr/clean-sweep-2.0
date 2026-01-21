@@ -256,6 +256,10 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
                     'details' => '<div style="color:#dc3545;">Error: ' . ($disk_check['warning'] ?? $disk_check['message']) . '</div>'
                 ];
                 clean_sweep_write_progress_file($progress_file, $progress_data);
+                // Return JSON response for AJAX
+                header('Content-Type: application/json');
+                echo json_encode(['success' => false, 'message' => $error_msg, 'disk_check' => $disk_check]);
+                exit;
             }
             return ['success' => false, 'message' => $error_msg, 'disk_check' => $disk_check];
         }
@@ -275,7 +279,10 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
                 'details' => '<div style="color:#dc3545;">Error: ' . $disk_check['message'] . '</div>'
             ];
             clean_sweep_write_progress_file($progress_file, $progress_data);
-            return ['success' => false, 'message' => $disk_check['message'], 'disk_check' => $disk_check];
+            // Return JSON response for AJAX
+            header('Content-Type: application/json');
+            echo json_encode(['success' => false, 'message' => $disk_check['message'], 'disk_check' => $disk_check]);
+            exit;
         } elseif ($disk_check['space_status'] === 'insufficient') {
             // Insufficient disk space - show warning
             $progress_data = [
@@ -286,7 +293,10 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
                 'can_proceed_without_backup' => true // Allow proceeding without backup
             ];
             clean_sweep_write_progress_file($progress_file, $progress_data);
-            return ['disk_space_warning' => $disk_check];
+            // Return JSON response for AJAX
+            header('Content-Type: application/json');
+            echo json_encode(['disk_space_warning' => $disk_check]);
+            exit;
         } else {
             // Sufficient disk space - show backup choice
             $progress_data = [
@@ -296,7 +306,10 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
                 'disk_check' => $disk_check
             ];
             clean_sweep_write_progress_file($progress_file, $progress_data);
-            return ['backup_choice' => $disk_check];
+            // Return JSON response for AJAX
+            header('Content-Type: application/json');
+            echo json_encode(['backup_choice' => $disk_check]);
+            exit;
         }
     }
 
