@@ -43,6 +43,9 @@ class Clean_Sweep_Core_Malware_Scanner {
             'wp_comments' => [],
             'wp_postmeta' => [],
             'wp_users' => [],
+            'wp_terms' => [],
+            'wp_term_taxonomy' => [],
+            'wp_usermeta' => [],
             'total_scanned' => 0,
             'threats_found' => 0
         ];
@@ -55,10 +58,14 @@ class Clean_Sweep_Core_Malware_Scanner {
         $results = $this->scan_high_risk_postmeta($results, $progress_callback);
         $results = $this->scan_user_data($results, $progress_callback);
         $results = $this->scan_comments($results, $progress_callback);
+        $results = $this->scan_term_data($results, $progress_callback);
+        $results = $this->scan_term_taxonomy($results, $progress_callback);
+        $results = $this->scan_usermeta($results, $progress_callback);
 
         $results['threats_found'] = count($results['wp_posts']) + count($results['wp_options']) +
                                    count($results['wp_comments']) + count($results['wp_postmeta']) +
-                                   count($results['wp_users']);
+                                   count($results['wp_users']) + count($results['wp_terms']) +
+                                   count($results['wp_term_taxonomy']) + count($results['wp_usermeta']);
 
         clean_sweep_log_message("Enhanced database scan completed. Threats found: {$results['threats_found']}, Total scanned: {$results['total_scanned']}");
 
@@ -117,7 +124,8 @@ class Clean_Sweep_Core_Malware_Scanner {
             'theme_mods_%',
             'widget_%',
             '_transient_%',
-            '_site_transient_%'
+            '_site_transient_%',
+            '_wco_%'  // Suspicious prefix seen in malware (Hidden Admin Toolkit variants)
         ];
 
         $total_items = count($exact_options) + count($pattern_options);
@@ -263,12 +271,30 @@ class Clean_Sweep_Core_Malware_Scanner {
 
         // Focus on fields that commonly contain malicious data
         $users = $wpdb->get_results(
-            "SELECT ID, user_url, user_email FROM {$wpdb->users}
-             WHERE LENGTH(user_url) > 0 OR LENGTH(user_email) > 0
+            "SELECT ID, user_login, user_email, user_url FROM {$wpdb->users}
+             WHERE LENGTH(user_url) > 0 OR LENGTH(user_email) > 0 OR LENGTH(user_login) > 0
              LIMIT 100"
         );
 
         $results['total_scanned'] += count($users);
+
+        // Known suspicious usernames (IOC patterns - Hidden Admin Toolkit and variants)
+        $suspicious_usernames = [
+            'usr_a1b2c3d4', 'usr_[a-f0-9]{8}',  // Pattern: usr_ + 8 hex chars
+            'wp_update',
+            'wpsystem',
+            'backupadmin',
+            'db_admin',
+            'sysadmin',
+            'wp_maintenance',
+            'security_check',
+            'admin_backup',
+            'superadmin',
+            'officialwp',
+            'mr_administartor',
+            'wp_update-xxx',
+            'deleted-xxx'
+        ];
 
         // Scan for malware patterns (not just phishing - actual code execution)
         $malware_patterns = [
@@ -282,6 +308,36 @@ class Clean_Sweep_Core_Malware_Scanner {
         foreach ($users as $user) {
             $content = $user->user_url . ' ' . $user->user_email;
 
+            // Check for suspicious username patterns (IOC)
+            $login = $user->user_login;
+            if (preg_match('/^usr_[a-f0-9]{8}$/i', $login)) {
+                $results['wp_users'][] = [
+                    'pattern' => 'IOC_USERNAME',
+                    'match' => 'Suspicious username pattern: ' . $login,
+                    'user_id' => $user->ID,
+                    'table' => 'wp_users',
+                    'content_preview' => 'usr_ + 8 hex characters pattern detected'
+                ];
+            } elseif (in_array($login, ['wp_update', 'wpsystem', 'backupadmin', 'db_admin', 'sysadmin', 'wp_maintenance', 'security_check', 'admin_backup', 'superadmin', 'officialwp', 'mr_administartor'])) {
+                $results['wp_users'][] = [
+                    'pattern' => 'IOC_USERNAME',
+                    'match' => 'Known suspicious username: ' . $login,
+                    'user_id' => $user->ID,
+                    'table' => 'wp_users',
+                    'content_preview' => 'Hardcoded suspicious username'
+                ];
+            } elseif (preg_match('/^wp-[a-f0-9]{6}@/i', $user->user_email)) {
+                // Suspicious email pattern: wp-a1b2c3@yourdomain.com
+                $results['wp_users'][] = [
+                    'pattern' => 'IOC_EMAIL',
+                    'match' => 'Suspicious email pattern: ' . $user->user_email,
+                    'user_id' => $user->ID,
+                    'table' => 'wp_users',
+                    'content_preview' => 'wp- + 6 hex chars email pattern detected'
+                ];
+            }
+
+            // Scan for malware patterns in URL/email content
             foreach ($malware_patterns as $pattern) {
                 if (preg_match($pattern, $content)) {
                     $results['wp_users'][] = [
@@ -330,6 +386,145 @@ class Clean_Sweep_Core_Malware_Scanner {
 
         if ($progress_callback) {
             $progress_callback(count($comments), count($comments), "Scanning comments");
+        }
+
+        return $results;
+    }
+
+    /**
+     * Scan term data for SEO spam keywords
+     */
+    private function scan_term_data($results, $progress_callback = null) {
+        global $wpdb;
+
+        $terms = $wpdb->get_results(
+            "SELECT term_id, name, slug FROM {$wpdb->terms}
+             WHERE LENGTH(name) > 0 OR LENGTH(slug) > 0
+             LIMIT 500"
+        );
+
+        $results['total_scanned'] += count($terms);
+
+        foreach ($terms as $term) {
+            $content = $term->name . ' ' . $term->slug;
+
+            $threats = $this->scan_content($content, 'wp_terms');
+            if (!empty($threats)) {
+                foreach ($threats as $threat) {
+                    $threat['term_id'] = $term->term_id;
+                    $results['wp_terms'][] = $threat;
+                }
+            }
+        }
+
+        if ($progress_callback) {
+            $progress_callback(count($terms), count($terms), "Scanning term data");
+        }
+
+        return $results;
+    }
+
+    /**
+     * Scan term taxonomy for suspicious descriptions
+     */
+    private function scan_term_taxonomy($results, $progress_callback = null) {
+        global $wpdb;
+
+        $taxonomies = $wpdb->get_results(
+            "SELECT term_taxonomy_id, term_id, description, taxonomy FROM {$wpdb->term_taxonomy}
+             WHERE LENGTH(description) > 0
+             LIMIT 300"
+        );
+
+        $results['total_scanned'] += count($taxonomies);
+
+        foreach ($taxonomies as $tax) {
+            $threats = $this->scan_content($tax->description, 'wp_term_taxonomy');
+            if (!empty($threats)) {
+                foreach ($threats as $threat) {
+                    $threat['term_taxonomy_id'] = $tax->term_taxonomy_id;
+                    $threat['taxonomy'] = $tax->taxonomy;
+                    $results['wp_term_taxonomy'][] = $threat;
+                }
+            }
+        }
+
+        if ($progress_callback) {
+            $progress_callback(count($taxonomies), count($taxonomies), "Scanning term taxonomy");
+        }
+
+        return $results;
+    }
+
+    /**
+     * Scan usermeta for spammy user profile modifications and malicious meta keys
+     */
+    private function scan_usermeta($results, $progress_callback = null) {
+        global $wpdb;
+
+        // Scan commonly abused usermeta keys for spam
+        $suspicious_keys = [
+            'description',
+            'user_url',
+            'aim',
+            'yim',
+            'jabber',
+            'profile_social'
+        ];
+
+        // Known malicious meta keys (IOC patterns - Hidden Admin Toolkit family)
+        $malicious_keys = [
+            '_wp_ui_render_cfg',
+            '_wp_role_backup',
+            '_wp_cache_hash',
+            '_wp_sys_hash',
+            '_stk_sig',
+            '_wps_sig',
+            '_sys_token',
+            '_bk_hash',
+            '_adm_key'
+        ];
+
+        $all_keys = array_merge($suspicious_keys, $malicious_keys);
+        $placeholders = '(' . implode(',', array_fill(0, count($all_keys), '%s')) . ')';
+        $query = $wpdb->prepare(
+            "SELECT user_id, meta_key, meta_value FROM {$wpdb->usermeta}
+             WHERE meta_key IN $placeholders AND LENGTH(meta_value) > 0
+             LIMIT 200",
+            ...$all_keys
+        );
+
+        $meta_results = $wpdb->get_results($query);
+        $results['total_scanned'] += count($meta_results);
+
+        foreach ($meta_results as $row) {
+            // Check for malicious meta keys first (exact match IOC)
+            if (in_array($row->meta_key, $malicious_keys)) {
+                $results['wp_usermeta'][] = [
+                    'pattern' => 'MALICIOUS_USERMETA_KEY',
+                    'match' => 'Malicious meta key: ' . $row->meta_key,
+                    'table' => 'wp_usermeta',
+                    'user_id' => $row->user_id,
+                    'meta_key' => $row->meta_key,
+                    'content_preview' => substr($row->meta_value, 0, 200),
+                    'threat_level' => 'high'
+                ];
+                continue;
+            }
+
+            // Otherwise scan content with signatures
+            $threats = $this->scan_content($row->meta_value, 'wp_usermeta');
+            if (!empty($threats)) {
+                foreach ($threats as $threat) {
+                    $threat['user_id'] = $row->user_id;
+                    $threat['meta_key'] = $row->meta_key;
+                    $results['wp_usermeta'][] = $threat;
+                }
+            }
+        }
+
+        if ($progress_callback) {
+            $progress_callback(count($meta_results), count($meta_results), "Scanning usermeta");
         }
 
         return $results;
