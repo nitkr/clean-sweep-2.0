@@ -787,8 +787,15 @@ class Clean_Sweep_Core_Malware_Scanner {
         // Remove leading/trailing slashes and normalize
         $path = trim($input_path, '/');
 
-        // Use original site ABSPATH in recovery mode for path validation
-        $wordpress_root = defined('ORIGINAL_ABSPATH') ? ORIGINAL_ABSPATH : ABSPATH;
+        // Determine the correct site root for path validation
+        // In recovery mode, SITE_ABSPATH points to the actual infected site
+        // ABSPATH points to core/fresh/ which is the clean WordPress used for safe execution
+        if (defined('SITE_ABSPATH')) {
+            $wordpress_root = SITE_ABSPATH;
+        } else {
+            // Fallback: use parent of ABSPATH (which is the project root where wp-content actually lives)
+            $wordpress_root = dirname(ABSPATH);
+        }
 
         // Convert relative paths to absolute paths within WordPress root
         if (!str_starts_with($path, $wordpress_root)) {
