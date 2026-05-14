@@ -29,6 +29,8 @@ class CleanSweep_Functions {
 
     private $db;
 
+    private $integrity_manager = null;
+
     public function __construct($db = null) {
         $this->db = $db;
         $this->init_functions();
