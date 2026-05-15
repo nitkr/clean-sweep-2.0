@@ -549,6 +549,9 @@ EOT;
         clean_sweep_log_message("   → Operations target: " . WP_CONTENT_DIR, 'info');
         clean_sweep_log_message("🎉 Recovery mode ready!", 'info');
 
+        // Define site path constants for scanning operations (allows scanning specific files/folders)
+        $this->defineSitePaths();
+
         return true;
     }
 
