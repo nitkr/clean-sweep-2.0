@@ -117,7 +117,11 @@ class Clean_Sweep_Core_Malware_Scanner {
             'active_plugins',
             'cron',
             'recently_activated',
-            'rewrite_rules'
+            'rewrite_rules',
+            'wpcode_snippets',
+            'ihaf_insert_header',
+            'ihaf_insert_footer',
+            'themes_css'
         ];
 
         $pattern_options = [
@@ -125,7 +129,9 @@ class Clean_Sweep_Core_Malware_Scanner {
             'widget_%',
             '_transient_%',
             '_site_transient_%',
-            '_wco_%'  // Suspicious prefix seen in malware (Hidden Admin Toolkit variants)
+            '_wco_%',  // Suspicious prefix seen in malware (Hidden Admin Toolkit variants)
+            'footer_script_%',
+            'header_script_%'
         ];
 
         $total_items = count($exact_options) + count($pattern_options);
