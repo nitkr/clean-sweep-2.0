@@ -223,6 +223,22 @@ class Clean_Sweep_Core_Malware_Scanner {
     }
 
     /**
+     * Check if a string matches any of the given regex patterns
+     *
+     * @param string $string  The string to test
+     * @param array  $patterns Array of regex patterns
+     * @return bool True if any pattern matches
+     */
+    private function matches_any_pattern($string, array $patterns) {
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $string)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Scan high-risk postmeta entries
      */
     private function scan_high_risk_postmeta($results, $progress_callback = null) {
@@ -284,22 +300,30 @@ class Clean_Sweep_Core_Malware_Scanner {
 
         $results['total_scanned'] += count($users);
 
-        // Known suspicious usernames (IOC patterns - Hidden Admin Toolkit and variants)
+        // Known suspicious EXACT usernames (matched via in_array)
+        // Single source of truth - used by the check below
         $suspicious_usernames = [
-            'usr_a1b2c3d4', 'usr_[a-f0-9]{8}',  // Pattern: usr_ + 8 hex chars
+            'pwsadmin',                  // similar to wpsystem/sysadmin family
+            'seobackup',                 // Plugin-3ca704e1 family backdoor user
             'wp_update',
             'wpsystem',
-            'backupadmin',
-            'db_admin',
             'sysadmin',
-            'wp_maintenance',
-            'security_check',
-            'admin_backup',
             'superadmin',
             'officialwp',
             'mr_administartor',
-            'wp_update-xxx',
-            'deleted-xxx'
+            'backupadmin',
+            'admin_backup',
+            'db_admin',
+            'wp_maintenance',
+            'security_check',
+        ];
+
+        // Known suspicious username REGEX PATTERNS (matched via preg_match)
+        // Kept separate from exact-match list - in_array cannot do regex
+        $suspicious_username_patterns = [
+            '/^usr_[a-f0-9]{8}$/i',         // usr_ + 8 hex chars (Hidden Admin Toolkit)
+            '/^wp_update-[a-z0-9]{3,}$/i',  // wp_update-xxx variants
+            '/^deleted-[a-z0-9]{3,}$/i',    // deleted-xxx variants
         ];
 
         // Scan for malware patterns (not just phishing - actual code execution)
@@ -316,15 +340,19 @@ class Clean_Sweep_Core_Malware_Scanner {
 
             // Check for suspicious username patterns (IOC)
             $login = $user->user_login;
-            if (preg_match('/^usr_[a-f0-9]{8}$/i', $login)) {
+
+            // Check 1: Regex pattern match (was previously hardcoded, now uses array)
+            if ($this->matches_any_pattern($login, $suspicious_username_patterns)) {
                 $results['wp_users'][] = [
-                    'pattern' => 'IOC_USERNAME',
+                    'pattern' => 'IOC_USERNAME_PATTERN',
                     'match' => 'Suspicious username pattern: ' . $login,
                     'user_id' => $user->ID,
                     'table' => 'wp_users',
-                    'content_preview' => 'usr_ + 8 hex characters pattern detected'
+                    'content_preview' => 'Username matches known malicious IOC pattern'
                 ];
-            } elseif (in_array($login, ['wp_update', 'wpsystem', 'backupadmin', 'db_admin', 'sysadmin', 'wp_maintenance', 'security_check', 'admin_backup', 'superadmin', 'officialwp', 'mr_administartor'])) {
+            }
+            // Check 2: Exact-match suspicious username (uses array as single source of truth)
+            elseif (in_array($login, $suspicious_usernames, true)) {
                 $results['wp_users'][] = [
                     'pattern' => 'IOC_USERNAME',
                     'match' => 'Known suspicious username: ' . $login,
@@ -332,7 +360,9 @@ class Clean_Sweep_Core_Malware_Scanner {
                     'table' => 'wp_users',
                     'content_preview' => 'Hardcoded suspicious username'
                 ];
-            } elseif (preg_match('/^wp-[a-f0-9]{6}@/i', $user->user_email)) {
+            }
+            // Check 3: Suspicious email pattern
+            elseif (preg_match('/^wp-[a-f0-9]{6}@/i', $user->user_email)) {
                 // Suspicious email pattern: wp-a1b2c3@yourdomain.com
                 $results['wp_users'][] = [
                     'pattern' => 'IOC_EMAIL',
