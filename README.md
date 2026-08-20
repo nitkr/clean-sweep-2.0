@@ -1,201 +1,111 @@
 # Clean Sweep
 
-A drop-in WordPress **malware cleanup toolkit**. Copy the folder onto an infected site, work from the browser, then delete Clean Sweep when the site is stable.
+<p align="center">
+  Drop-in WordPress <strong>malware cleanup toolkit</strong>. Copy the folder onto an infected site, work from the browser, then delete it when the site is stable.
+</p>
 
-It is a recovery cockpit: scan files and the database, turn on live watch, audit users and cron, replace core / plugins / themes, seal integrity, then remove itself.
+<p align="center">
+  Version 2.0
+  ·
+  <a href="docs/README.md">Documentation</a>
+  ·
+  <a href="docs/start.md">Quick start</a>
+  ·
+  <a href="docs/guide.md">Guide</a>
+  ·
+  <a href="docs/troubleshooting.md">Troubleshooting</a>
+</p>
 
-Version 2.0.
+<p align="center">
+  <img src="demo.png" alt="Clean Sweep dashboard — last results, suggested cleanup path, and tools" width="880">
+</p>
 
-![Clean Sweep dashboard — last results, suggested cleanup path, and tools](demo.png)
+<p align="center"><sub>Dashboard after a visit: last results, suggested cleanup path, and Scanner / Security / Core / Extensions / Users / Cron in the sidebar.</sub></p>
 
-<p align="center"><sub>Dashboard after a visit: last results, suggested cleanup path, Scanner / Security / Core / Extensions / Users / Cron in the sidebar.</sub></p>
-
----
-
-## Contents
-
-- [What it is](#what-it-is)
-- [What it does](#what-it-does)
-- [Suggested order](#suggested-order)
-- [Quick start](#quick-start)
-- [Requirements](#requirements)
-- [Using the UI](#using-the-ui)
-- [Recovery mode](#recovery-mode)
-- [Safety](#safety)
-- [Layout](#layout)
-- [Frontend build](#frontend-build)
-- [Troubleshooting](#troubleshooting)
-- [License](#license)
-
----
-
-## What it is
-
-Clean Sweep is **not** a security plugin you leave installed. It is a toolkit you drop next to `wp-config.php`, use until the site is clean, then **Remove Clean Sweep**.
-
-Findings are for inspection. File hits open in the editor. Package reinstall is the main cleanup action. There is no one-click quarantine of a single finding.
-
-Empty dashboard cards are normal: “Not run yet” means that tool has no last result to show. Malware and vulnerability checks restore the last run after a refresh.
-
----
-
-## What it does
-
-| Area | Tool | What you get |
-| --- | --- | --- |
-| Scan | **Scanner** | Signature scan of files and the database, WordPress.org checksums, package verification. Profiles: Quick, Standard (default), Deep. Pause / resume on shared hosts. Review hits on the same screen. |
-| Scan | **Vulnerabilities** | Separate WPVulnerability.com check for known CVEs. Use it to decide what to replace, not as a malware verdict. Last check restores after refresh. |
-| Watch | **Security** | Live file watch (optional must-use agent), snapshots, integrity seal after cleanup. |
-| Replace | **Core files** | Reinstall WordPress core. Keeps `wp-config.php` and `wp-content`. |
-| Replace | **Extensions** | Analyze plugins/themes. Reinstall from WordPress.org or WPMU DEV (backup first). Flags likely fake / impersonating packages (stolen .org slug or decoy plugin). Already-active packages stay active. |
-| Replace | **Upload** | Upload a clean ZIP to plugins, themes, uploads, or a custom path. New uploaded packages stay inactive. |
-| Audit | **Users** | Hidden admins, weak hashes, application passwords, sessions. Demote, delete, revoke app passwords, destroy sessions. |
-| Audit | **Cron** | WP-Cron and Action Scheduler. Delete events, clear hooks, cancel Action Scheduler jobs. |
-| Done | **Remove Clean Sweep** | Deletes the toolkit folder, live-watch agent, visit data, and scan cron leftovers. |
-
-**Recovery mode.** If WordPress is too broken to load, Clean Sweep can bootstrap a clean environment and still run.
-
----
-
-## Suggested order
-
-Typical order on a compromised site. Skip steps that do not apply. The dashboard **Suggested cleanup path** follows this list.
-
-1. Scan for malware and review hits (uploads and shells first; soft matches are often false positives).
-2. Turn on live file watch so reinfection during reinstalls is visible.
-3. Audit users and access.
-4. Audit cron and persistence.
-5. Check known vulnerabilities if you need CVE context before replacing packages.
-6. Replace compromised core, plugins, and themes (or upload a clean ZIP).
-7. Seal integrity after cleanup.
-8. Remove Clean Sweep when the site is stable.
+> Not a plugin you leave installed. Drop it next to `wp-config.php`, clean the site, then **Remove Clean Sweep**.
 
 ---
 
 ## Quick start
 
-From this repository (Code → Download ZIP), or a clone:
+The GitHub zip is a run tree: `assets/dist/` is already built. You do not need `npm` on the site.
 
-1. Put the folder in the WordPress root, next to `wp-config.php`. Name it `clean-sweep/` (or keep the extracted folder name, as long as it sits in the root).
-2. Open `https://yoursite.com/clean-sweep/` or `clean-sweep.php`. Use **`index.php`**, not the static `index.html`.
-3. Start from the **dashboard**, or open Scanner / Users / Cron directly from the sidebar.
+1. Put the folder in the WordPress root, next to `wp-config.php` (name it `clean-sweep/` or keep the extracted name).
+2. Open `https://yoursite.com/clean-sweep/` — use **`index.php`**, not `index.html`.
+3. Start from the **dashboard**, or open Scanner / Users / Cron from the sidebar.
 4. Keep the **Scanner** tab open during long scans so auto-resume can continue.
 5. When finished, use **Remove Clean Sweep**.
 
-The GitHub zip is a run tree: `assets/dist/` is already built. You do not need `npm` or `node_modules` to use it on a site.
+PHP 8.0+ · WordPress 6.0+ · write access to the install. Full list: [Quick start](docs/start.md).
 
 ---
 
-## Requirements
+## Documentation
 
-- PHP 8.0 or newer
-- WordPress 6.0 or newer
-- Write access to the WordPress install
-- Network access for WordPress.org (and WPMU DEV, if you reinstall those plugins)
-- ZipArchive (or WordPress unzip) for package work
+Click a page. Every docs page has the same top links so you can jump without coming back here.
 
-Shared hosting is supported. Quick and Standard use smaller batches and checkpoints. Deep scans on restricted hosts will pause often; keep the Scanner tab open so the run can continue.
-
----
-
-## Using the UI
-
-The screenshot above is the **dashboard**: last results (malware, vulnerabilities, users, cron, security), a suggested path, and the same tools as the left sidebar.
-
-| Sidebar | Use it for |
-| --- | --- |
-| **Dashboard** | Status of last runs and where to go next |
-| **Scanner** | Malware scan + vulnerability check |
-| **Security** | Live watch, snapshots, seal integrity |
-| **Core files** | Reinstall WordPress core |
-| **Extensions** | Analyze / reinstall plugins and themes |
-| **Upload** | Install a clean ZIP |
-| **Users** | Access audit |
-| **Cron** | Scheduled-task audit |
-| **Remove Clean Sweep** | Delete the toolkit when done |
-
-Scanner results restore after a page refresh (malware via last scan, vulnerabilities for 48 hours). Users and Cron cards are from the current session until you run those tools again.
-
----
-
-## Recovery mode
-
-If core is so broken that Clean Sweep cannot bootstrap (missing `wp-settings.php`, unreadable `wp-config.php`), repair WordPress or restore a backup first. When bootstrap still works, Clean Sweep can run an isolated environment under `core/fresh/`.
-
----
-
-## Safety
-
-- Take a full site and database backup before you start.
-- Prefer a staging copy when you can.
-- Reinstalls back up first, then replace. Already-active plugins and themes stay active. New uploaded packages stay inactive.
-- Change admin passwords and review users after cleanup.
-- **Remove Clean Sweep when you are done.** Leaving it on a production site is a risk.
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h3><a href="docs/README.md">Docs home</a></h3>
+      <p>Index of the manual — run it, then change it.</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3><a href="docs/start.md">Quick start</a></h3>
+      <p>Install on a WordPress root, requirements, what empty dashboard cards mean.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3><a href="docs/guide.md">Using Clean Sweep</a></h3>
+      <p>Sidebar map, each tool, and the suggested cleanup path the dashboard follows.</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3><a href="docs/safety.md">Safety</a></h3>
+      <p>Backup first, how reinstalls behave, remove the toolkit when you are done.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3><a href="docs/troubleshooting.md">Troubleshooting</a></h3>
+      <p>WordPress not found, paused scans, reinstall failures, recovery mode, logs.</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3><a href="docs/develop.md">Source &amp; UI build</a></h3>
+      <p>Tree layout, rebuild <code>assets/dist/</code>, <a href="features/security/signatures/README.md">signature packs</a>.</p>
+    </td>
+  </tr>
+</table>
 
 ---
 
-## Layout
+## What it does
 
-```
-clean-sweep/
-├── clean-sweep.php          # Entry point
-├── index.php                # Same as clean-sweep.php (use this, not index.html)
-├── config.php
-├── utils.php
-├── ui.php                   # HTML shell for the built UI
-├── wordpress-api.php
-├── api/                     # JSON endpoints (malware, users, cron, …)
-├── assets/dist/             # Built UI (clean-sweep.js / .css)
-├── src/                     # Svelte UI source (for rebuilding the UI)
-├── core/                    # Isolated bootstrap / recovery copies
-├── features/
-│   ├── maintenance/         # Core, plugin, theme reinstall
-│   ├── security/            # Scanner, signatures, user/cron audits
-│   └── utilities/           # Safe ZIP extract / install
-├── includes/system/         # Runtime (visit engine, integrity, filesystem)
-├── backups/                 # Operation backups and visit state (runtime)
-└── logs/                    # Logs, progress, scan work queue (runtime)
-```
+| | Tool | |
+| --- | --- | --- |
+| Scan | **Scanner** | Files + database signatures, checksums. Quick / Standard / Deep. |
+| Scan | **Vulnerabilities** | Known CVEs — context for what to replace, not a malware verdict. |
+| Watch | **Security** | Live file watch, snapshots, integrity seal. |
+| Replace | **Core / Extensions / Upload** | Reinstall core, plugins, themes, or upload a clean ZIP. |
+| Audit | **Users / Cron** | Hidden admins, sessions, WP-Cron and Action Scheduler. |
+| Done | **Remove Clean Sweep** | Deletes the toolkit and leftover agents / visit data. |
 
-PHP classes use the `CleanSweep_` prefix. Functions and constants use `clean_sweep_` / `CLEAN_SWEEP_`.
-
-Runtime needs the sealed signature pack at `features/security/signatures/versions/current.csig`. Signature authoring (not in this zip) is documented in `features/security/signatures/README.md`.
+Extensions also flags likely fake / impersonating packages (stolen WordPress.org slug or decoy plugin).
 
 ---
 
-## Frontend build
+## Suggested order
 
-The browser loads `assets/dist/`. You only need this if you change the UI:
+Skip steps that do not apply. Same list as the dashboard **Suggested cleanup path**.
 
-```bash
-npm install
-npm run build
-```
+1. Scan for malware (uploads and shells first; soft matches are often false positives).
+2. Turn on live file watch.
+3. Audit users, then cron.
+4. Check known vulnerabilities if you need CVE context.
+5. Replace compromised core / plugins / themes.
+6. Seal integrity, then **Remove Clean Sweep**.
 
-`npm run dev` is Vite for local UI work. The PHP app still serves the built files.
-
----
-
-## Troubleshooting
-
-**Could not find WordPress / wp-load.php**  
-The folder must sit in the WordPress root, next to `wp-config.php`.
-
-**Directory not writable**  
-The web user needs write access to `wp-content`, plugins, themes, and the Clean Sweep `backups/` and `logs/` folders.
-
-**Scan pauses or the progress bar sits still**  
-On shared hosts the scan yields on purpose. Keep the Scanner tab open. Use Resume if it stopped.
-
-**Download or reinstall failed**  
-Need outbound HTTPS to WordPress.org (and WPMU DEV if you use those plugins).
-
-**Recovery setup never finishes**  
-Check `logs/` and disk space. The fresh environment lives under `core/fresh/` and needs room to unpack WordPress.
-
-Logs: `logs/clean-sweep-log-YYYY-MM-DD-HH-II-SS.txt`  
-Operation backups: `backups/`  
-Visit state: `backups/cs_visit_*.json`
+Details: [Using Clean Sweep](docs/guide.md).
 
 ---
 
