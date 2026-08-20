@@ -14,12 +14,34 @@
 function clean_sweep_get_latest_wordpress_version() {
     $api_url = 'https://api.wordpress.org/core/version-check/1.7/';
 
-    // Try to fetch from API
-    $response = wp_remote_get($api_url, ['timeout' => 10]);
+    // Try WordPress function first
+    if (function_exists('wp_remote_get')) {
+        $response = wp_remote_get($api_url, ['timeout' => 10]);
 
-    if (!is_wp_error($response) && wp_remote_retrieve_response_code($response) === 200) {
-        $data = json_decode(wp_remote_retrieve_body($response), true);
+        if (!is_wp_error($response) && wp_remote_retrieve_response_code($response) === 200) {
+            $data = json_decode(wp_remote_retrieve_body($response), true);
 
+            if ($data && isset($data['offers']) && is_array($data['offers'])) {
+                foreach ($data['offers'] as $offer) {
+                    if (isset($offer['response']) && $offer['response'] === 'latest' && isset($offer['version'])) {
+                        return $offer['version'];
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback: Use direct cURL if wp_remote_get fails or isn't available
+    $ch = curl_init($api_url);
+    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+    $response_body = curl_exec($ch);
+    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($http_code === 200 && $response_body) {
+        $data = json_decode($response_body, true);
         if ($data && isset($data['offers']) && is_array($data['offers'])) {
             foreach ($data['offers'] as $offer) {
                 if (isset($offer['response']) && $offer['response'] === 'latest' && isset($offer['version'])) {
@@ -34,48 +56,56 @@ function clean_sweep_get_latest_wordpress_version() {
 }
 
 /**
- * Generate WordPress version options for dropdown with complete version numbers
+ * Generate WordPress version options with complete version numbers
+ * Returns the 4 most recent WordPress versions with their full patch numbers
  */
 function clean_sweep_get_wordpress_version_options() {
     $api_url = 'https://api.wordpress.org/core/version-check/1.7/';
+    $response_body = null;
 
-    // Try to fetch all available versions from API
-    $response = wp_remote_get($api_url, ['timeout' => 10]);
+    // Try WordPress function first
+    if (function_exists('wp_remote_get')) {
+        $response = wp_remote_get($api_url, ['timeout' => 10]);
 
-    if (!is_wp_error($response) && wp_remote_retrieve_response_code($response) === 200) {
-        $data = json_decode(wp_remote_retrieve_body($response), true);
+        if (!is_wp_error($response) && wp_remote_retrieve_response_code($response) === 200) {
+            $response_body = wp_remote_retrieve_body($response);
+        }
+    }
+
+    // Fallback: Use direct cURL if wp_remote_get fails or isn't available
+    if (empty($response_body)) {
+        $ch = curl_init($api_url);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+        $response_body = curl_exec($ch);
+        curl_close($ch);
+    }
+
+    if ($response_body) {
+        $data = json_decode($response_body, true);
 
         if ($data && isset($data['offers']) && is_array($data['offers'])) {
-            $versions_by_minor = [];
+            $all_versions = [];
 
-            // Group versions by major.minor and find latest patch for each
+            // Collect ALL versions from the API
             foreach ($data['offers'] as $offer) {
-                if (isset($offer['version']) && isset($offer['response'])) {
-                    $version = $offer['version'];
-
-                    // Extract major.minor (e.g., "6.8" from "6.8.3")
-                    if (preg_match('/^(\d+\.\d+)/', $version, $matches)) {
-                        $minor_version = $matches[1];
-
-                        // Keep track of the highest version for each minor version
-                        if (!isset($versions_by_minor[$minor_version]) ||
-                            version_compare($version, $versions_by_minor[$minor_version], '>')) {
-                            $versions_by_minor[$minor_version] = $version;
-                        }
-                    }
+                if (isset($offer['version'])) {
+                    $all_versions[] = $offer['version'];
                 }
             }
 
-            // Sort by version descending and return top versions
-            if (!empty($versions_by_minor)) {
-                uasort($versions_by_minor, 'version_compare');
-                $versions = array_reverse($versions_by_minor);
-                return array_slice($versions, 0, 6); // Return latest 6 versions
+            // Sort all versions descending
+            if (!empty($all_versions)) {
+                usort($all_versions, 'version_compare');
+                $all_versions = array_reverse($all_versions);
+                // Return top 6 versions with complete patch numbers (filtering in JS may remove some)
+                return array_slice($all_versions, 0, 6);
             }
         }
     }
 
-    // Fallback: generate versions from latest if API fails
+    // Fallback: generate versions from latest if both methods fail
     $latest_version = clean_sweep_get_latest_wordpress_version();
     $versions = [$latest_version];
 

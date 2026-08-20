@@ -35,14 +35,21 @@ class CleanSweep_ProgressManager {
             return false;
         }
 
-        // Ensure required fields are present
+        $existing = $this->getCurrentProgress();
+        if (!is_array($existing)) {
+            $existing = [];
+        }
+        unset($existing['error'], $existing['error_data'], $existing['results'], $existing['summary']);
+
+        // Merge so omitted keys (current, total, plugin) survive later writes.
         $progressData = array_merge([
             'timestamp' => time(),
             'status' => 'processing',
             'progress' => 0,
             'message' => '',
             'details' => ''
-        ], $data);
+        ], $existing, $data);
+        $progressData['timestamp'] = time();
 
         // Sanitize data for JSON encoding
         $progressData = clean_sweep_sanitize_utf8_array($progressData);
@@ -75,9 +82,17 @@ class CleanSweep_ProgressManager {
      * @return bool Success status
      */
     public function sendCompletion($results) {
+        $existing = $this->getCurrentProgress();
+        $total = is_array($existing) ? (int) ($existing['total'] ?? 0) : 0;
+        $current = is_array($existing) ? (int) ($existing['current'] ?? $total) : $total;
+
         $completionData = [
             'status' => 'complete',
             'progress' => 100,
+            'phase' => 'complete',
+            'current' => $total > 0 ? $total : $current,
+            'total' => $total,
+            'plugin' => '',
             'message' => 'Operation completed successfully!',
             'results' => $results,
             'completed_at' => time()
@@ -171,7 +186,7 @@ class CleanSweep_ProgressManager {
             return null;
         }
 
-        $filePath = PROGRESS_DIR . $this->progressFile;
+        $filePath = CLEAN_SWEEP_PROGRESS_DIR . $this->progressFile;
 
         if (!file_exists($filePath)) {
             return null;
@@ -206,7 +221,7 @@ class CleanSweep_ProgressManager {
             return true;
         }
 
-        $filePath = PROGRESS_DIR . $this->progressFile;
+        $filePath = CLEAN_SWEEP_PROGRESS_DIR . $this->progressFile;
 
         if (file_exists($filePath)) {
             return unlink($filePath);
@@ -221,7 +236,7 @@ class CleanSweep_ProgressManager {
      * @return string Full path to progress file
      */
     public function getProgressFilePath() {
-        return PROGRESS_DIR . $this->progressFile;
+        return CLEAN_SWEEP_PROGRESS_DIR . $this->progressFile;
     }
 
     /**

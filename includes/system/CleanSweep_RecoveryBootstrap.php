@@ -70,6 +70,9 @@ class CleanSweep_RecoveryBootstrap {
             // FreshEnvironment already loaded WordPress and set up database connection
             global $clean_sweep_functions;
             if (!isset($clean_sweep_functions)) {
+                if (!class_exists('CleanSweep_Functions', false)) {
+                    require_once __DIR__ . '/CleanSweep_Functions.php';
+                }
                 // Create functions object - WordPress DB connection already available
                 $clean_sweep_functions = new CleanSweep_Functions(null);
             }
@@ -98,7 +101,8 @@ class CleanSweep_RecoveryBootstrap {
     }
 
     /**
-     * Show HTML setup interface
+     * Show HTML setup interface - Uses Svelte app with RecoveryMode component
+     * Integrates with the modern Svelte + Bits UI frontend
      */
     private function showHtmlSetupInterface() {
         // Double-check: if environment became valid while loading the page, redirect immediately
@@ -107,234 +111,56 @@ class CleanSweep_RecoveryBootstrap {
             echo '<script>window.location.href = window.location.pathname + "?recovery_token=" + Date.now();</script>';
             return;
         }
-
-        clean_sweep_output_html_header();
-
-        echo '<div style="max-width: 800px; margin: 50px auto; padding: 30px; background: #fff; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">';
-        echo '<h1 style="color: #d73a49; text-align: center; margin-bottom: 30px;">🛡️ Secure Recovery Environment Setup</h1>';
-
-        echo '<div style="background: #fff3cd; border: 1px solid #ffeaa7; padding: 20px; border-radius: 6px; margin-bottom: 30px;">';
-        echo '<h3 style="margin: 0 0 15px 0; color: #856404;">🔄 Setting up Secure Recovery Environment</h3>';
-        echo '<p style="margin: 0; color: #856404;">Clean Sweep runs in a protected recovery environment that safely isolates and removes malware.</p>';
-        echo '</div>';
-
-        echo '<div id="setup-progress" style="margin-bottom: 30px;">';
-        echo '<div style="background: #f8f9fa; border: 1px solid #dee2e6; padding: 20px; border-radius: 6px;">';
-        echo '<div style="display: flex; align-items: center; margin-bottom: 15px;">';
-        echo '<div id="progress-spinner" style="width: 20px; height: 20px; border: 2px solid #007cba; border-top: 2px solid transparent; border-radius: 50%; animation: spin 1s linear infinite; margin-right: 15px;"></div>';
-        echo '<h4 style="margin: 0; color: #007cba;">Setting up Recovery Environment...</h4>';
-        echo '</div>';
-        echo '<div style="background: #e9ecef; height: 8px; border-radius: 4px; overflow: hidden;">';
-        echo '<div id="progress-bar" style="width: 0%; height: 100%; background: #007cba; transition: width 0.3s ease;"></div>';
-        echo '</div>';
-        echo '<p id="progress-text" style="margin: 10px 0 0 0; color: #6c757d; font-size: 14px;">Initializing download...</p>';
-        echo '</div>';
-        echo '</div>';
-
-        echo '<div id="manual-upload" style="display: none;">';
-        echo '<div style="background: #f8d7da; border: 1px solid #f5c6cb; padding: 20px; border-radius: 6px;">';
-        echo '<h4 style="margin: 0 0 15px 0; color: #721c24;">⚠️ Auto-Setup Failed</h4>';
-        echo '<p style="margin: 0 0 15px 0; color: #721c24;">Unable to set up the recovery environment automatically. This can happen in restricted network environments.</p>';
-        echo '<p style="margin: 0 0 20px 0; color: #721c24;"><strong>Solution:</strong> Download the required files manually and upload the ZIP file.</p>';
-
-        echo '<div style="background: #fff; border: 1px solid #dee2e6; padding: 20px; border-radius: 6px; margin-bottom: 20px;">';
-        echo '<h5 style="margin: 0 0 10px 0;">📥 Manual Upload Steps:</h5>';
-        echo '<ol style="margin: 0; padding-left: 20px;">';
-        echo '<li>Download the latest WordPress ZIP from <a href="https://wordpress.org/download/" target="_blank" style="color: #007cba;">wordpress.org/download</a></li>';
-        echo '<li>Locate the wordpress-*.zip file on your computer</li>';
-        echo '<li>Upload the ZIP file below</li>';
-        echo '</ol>';
-        echo '</div>';
-
-        echo '<form id="upload-form" enctype="multipart/form-data" style="margin-bottom: 20px;">';
-        echo '<input type="file" name="recovery_zip" accept=".zip" required style="display: block; margin-bottom: 10px; padding: 8px; border: 1px solid #dee2e6; border-radius: 4px; width: 100%;">';
-        echo '<button type="submit" style="background: #007cba; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer;">📤 Upload & Install</button>';
-        echo '</form>';
-        echo '<div id="upload-progress" style="display: none;">Processing upload...</div>';
-        echo '</div>';
-        echo '</div>';
-
-        echo '<div style="text-align: center; color: #6c757d; font-size: 14px;">';
-        echo '<p>This setup runs only once. Future visits will be instant.</p>';
-        echo '</div>';
-
-        echo '</div>';
-
-        // JavaScript for setup process with enhanced cache-busting
-        echo '<script>
-        document.addEventListener("DOMContentLoaded", function() {
-            const progressBar = document.getElementById("progress-bar");
-            const progressText = document.getElementById("progress-text");
-            const setupProgress = document.getElementById("setup-progress");
-            const manualUpload = document.getElementById("manual-upload");
-
-            // Start auto-download
-            startAutoDownload();
-
-            function startAutoDownload() {
-                progressText.textContent = "Initializing secure environment...";
-
-                fetch("", {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/x-www-form-urlencoded",
-                        "Cache-Control": "no-cache, no-store",
-                        "Pragma": "no-cache"
-                    },
-                    body: "action=start_fresh_setup"
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        updateProgress(25, "Setting up recovery environment...");
-                        pollProgress();
-                    } else {
-                        showManualUpload(data.error || "Auto-setup failed");
-                    }
-                })
-                .catch(error => {
-                    showManualUpload("Connection error - manual setup required");
-                });
-            }
-
-            function pollProgress() {
-                fetch("", {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/x-www-form-urlencoded",
-                        "Cache-Control": "no-cache, no-store",
-                        "Pragma": "no-cache"
-                    },
-                    body: "action=get_setup_progress"
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.progress !== undefined) {
-                        updateProgress(data.progress, data.message || "Setting up...");
-                        if (data.progress < 100) {
-                            setTimeout(pollProgress, 1000);
-                        } else if (data.success) {
-                            updateProgress(100, "Environment configured! Starting Clean Sweep...");
-                            // PRE-RELOAD CACHE CLEAR + INCREASED DELAY
-                            setTimeout(() => completeSetup(), 1000);
-                        }
-                    }
-                })
-                .catch(error => {
-                    showManualUpload("Progress check failed");
-                });
-            }
-
-            function completeSetup() {
-                // Step 1: Clear server caches before reload
-                updateProgress(100, "Clearing server caches...");
-                fetch("", {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/x-www-form-urlencoded",
-                        "Cache-Control": "no-cache, no-store",
-                        "Pragma": "no-cache"
-                    },
-                    body: "action=clear_all_caches"
-                })
-                .then(() => {
-                    // Step 2: Verify canary file exists (proves setup completed)
-                    updateProgress(100, "Verifying environment setup completion...");
-                    pollCanary(0);
-                })
-                .catch(() => {
-                    // Fallback: still try to reload
-                    setTimeout(() => window.location.href = window.location.pathname + "?recovery_token=" + Date.now(), 2000);
-                });
-            }
-
-            function pollCanary(attempts) {
-                const maxAttempts = 10;  // Try for 5 seconds (500ms * 10)
-                
-                if (attempts >= maxAttempts) {
-                    // Canary check timed out, reload anyway (cache should have cleared)
-                    updateProgress(100, "Environment ready! Starting Clean Sweep...");
-                    setTimeout(() => window.location.href = window.location.pathname + "?recovery_token=" + Date.now(), 1000);
-                    return;
-                }
-
-                fetch("", {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/x-www-form-urlencoded",
-                        "Cache-Control": "no-cache, no-store",
-                        "Pragma": "no-cache"
-                    },
-                    body: "action=check_canary"
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        // Canary file found! Setup is definitely complete
-                        updateProgress(100, "✅ Setup verified! Starting Clean Sweep...");
-                        setTimeout(() => window.location.href = window.location.pathname + "?recovery_token=" + Date.now(), 1000);
-                    } else {
-                        // Canary not found yet, keep polling
-                        setTimeout(() => pollCanary(attempts + 1), 500);
-                    }
-                })
-                .catch(() => {
-                    // Network error, keep polling
-                    setTimeout(() => pollCanary(attempts + 1), 500);
-                });
-            }
-
-            function updateProgress(percent, message) {
-                progressBar.style.width = percent + "%";
-                progressText.textContent = message;
-            }
-
-            function showManualUpload(reason) {
-                setupProgress.style.display = "none";
-                manualUpload.style.display = "block";
-
-                // Handle manual upload
-                const uploadForm = document.getElementById("upload-form");
-                uploadForm.addEventListener("submit", function(e) {
-                    e.preventDefault();
-                    const formData = new FormData(uploadForm);
-                    formData.append("action", "upload_wordpress_zip");
-
-                    document.getElementById("upload-progress").style.display = "block";
-
-                    fetch("", {
-                        method: "POST",
-                        headers: {
-                            "Cache-Control": "no-cache, no-store",
-                            "Pragma": "no-cache"
-                        },
-                        body: formData
-                    })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.success) {
-                            updateProgress(100, "Environment configured! Starting Clean Sweep...");
-                            setTimeout(() => completeSetup(), 1000);
-                        } else {
-                            alert("Upload failed: " + (data.error || "Unknown error"));
-                        }
-                    })
-                    .catch(error => {
-                        alert("Upload error: " + error.message);
-                    });
-                });
-            }
-        });
-        </script>';
-
-        echo '<style>
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+        
+        // Detect recovery issues for Svelte app
+        $recovery_issues = array();
+        $fresh_dir = dirname(dirname(__DIR__)) . '/core/fresh';
+        
+        if (!is_dir($fresh_dir)) {
+            $recovery_issues[] = 'missing_fresh_directory';
         }
-        </style>';
-
-        clean_sweep_output_html_footer();
+        
+        $canary_path = $fresh_dir . '/.clean-sweep-canary.php';
+        if (!file_exists($canary_path)) {
+            $recovery_issues[] = 'missing_canary';
+        }
+        
+        $required_files = ['wp-load.php', 'wp-settings.php'];
+        foreach ($required_files as $file) {
+            if (!file_exists($fresh_dir . '/' . $file)) {
+                $recovery_issues[] = 'wp_settings_corrupt';
+                break;
+            }
+        }
+        
+        // Pass recovery data to Svelte app
+        $recovery_data = array(
+            'isRecoveryMode' => true,
+            'issues' => $recovery_issues
+        );
+        
+        // Output Svelte app shell - same as main app but with recovery mode
+        echo '<!DOCTYPE html><html lang="en"><head>';
+        echo '<meta charset="UTF-8">';
+        echo '<meta name="viewport" content="width=device-width, initial-scale=1.0">';
+        echo '<title>Clean Sweep - Recovery Mode</title>';
+        
+        // Svelte compiled app CSS
+        echo '<link rel="stylesheet" href="assets/dist/clean-sweep.css">';
+        
+        // Custom CSS (Slate theme)
+        echo '<link rel="stylesheet" href="assets/css/custom.css">';
+        
+        // Pass recovery data to Svelte app
+        echo '<script>window.cleanSweepRecovery = ' . json_encode($recovery_data) . ';</script>';
+        
+        // Svelte compiled app (from Vite build)
+        echo '<script type="module" src="assets/dist/clean-sweep.js"></script>';
+        
+        echo '</head>';
+        echo '<body class="bg-app text-ink antialiased min-h-screen transition-colors">';
+        echo '<div id="app"></div>';
+        echo '</body></html>';
     }
 
     /**
@@ -360,9 +186,10 @@ class CleanSweep_RecoveryBootstrap {
 
             case 'clear_all_caches':
                 $this->handleClearCaches();
+                break;
+
             case 'check_canary':
                 $this->handleCanaryCheck();
-                break;
                 break;
 
             default:
@@ -377,53 +204,33 @@ class CleanSweep_RecoveryBootstrap {
      */
     private function handleStartSetup() {
         $progress_file = isset($_POST['progress_file']) ? $_POST['progress_file'] : 'recovery_setup';
+        $this->fresh_env->setProgressFile($progress_file);
 
-        // Initialize progress file
-        $progress_data = [
-            'status' => 'downloading',
-            'progress' => 10,
-            'message' => 'Initializing recovery environment setup...',
-            'step' => 1,
-            'total_steps' => 3
-        ];
-        clean_sweep_write_progress_file($progress_file, $progress_data);
+        $plan = $this->fresh_env->resolveDownloadPlan();
+        clean_sweep_write_progress_file($progress_file, [
+            'status' => 'running',
+            'progress' => 8,
+            'message' => $plan['reason'] ?? 'Preparing recovery environment…',
+            'step' => 'resolve',
+            'wp_version' => $plan['version'] ?? '',
+            'plan_source' => $plan['source'] ?? '',
+        ]);
 
         // Reset execution time before long operation
         clean_sweep_reset_execution_time();
 
-        // Start setup process
+        // Start setup process (writes finer progress itself)
         if ($this->fresh_env->setup()) {
-            // SET SESSION FLAG WITH TIMESTAMP FOR FAST VALIDATION BYPASS
-            // This prevents FastCGI caching issues on subsequent page loads
-            // Sessions are in-process memory, not affected by filesystem caching
             $_SESSION['fresh_env_setup_complete'] = time();
-            clean_sweep_log_message("✅ Session flag set: fresh_env_setup_complete = " . $_SESSION['fresh_env_setup_complete'], 'info');
+            clean_sweep_log_message('Session flag set: fresh_env_setup_complete = ' . $_SESSION['fresh_env_setup_complete'], 'info');
 
-            // PHP will auto-save session data when request ends
-            // No need to manually call session_write_close()
-
-            // Update progress to complete
-            $progress_data = [
-                'status' => 'complete',
-                'progress' => 100,
-                'message' => 'Recovery environment setup complete!',
-                'step' => 3,
-                'total_steps' => 3
-            ];
-            clean_sweep_write_progress_file($progress_file, $progress_data);
-
-            $this->sendJsonResponse(true, 'Setup completed successfully');
+            $this->sendJsonResponse(true, 'Setup completed successfully', [
+                'wp_version' => $plan['version'] ?? '',
+                'plan_source' => $plan['source'] ?? '',
+            ]);
         } else {
-            // Update progress to error
-            $progress_data = [
-                'status' => 'error',
-                'progress' => 0,
-                'message' => 'Failed to setup recovery environment',
-                'details' => 'Could not download or configure WordPress files'
-            ];
-            clean_sweep_write_progress_file($progress_file, $progress_data);
-
-            $this->sendJsonResponse(false, 'Setup failed');
+            // setup() already reports error progress when possible
+            $this->sendJsonResponse(false, 'Setup failed. You can upload a recovery package instead.');
         }
     }
 
@@ -433,7 +240,7 @@ class CleanSweep_RecoveryBootstrap {
     private function handleGetProgress() {
         $progress_file = isset($_POST['progress_file']) ? $_POST['progress_file'] : 'recovery_setup';
 
-        $progress_path = PROGRESS_DIR . '/' . $progress_file . '.progress';
+        $progress_path = CLEAN_SWEEP_PROGRESS_DIR . '/' . $progress_file . '.progress';
 
         if (file_exists($progress_path)) {
             $progress_data = json_decode(file_get_contents($progress_path), true);
@@ -455,13 +262,38 @@ class CleanSweep_RecoveryBootstrap {
      * Handle ZIP upload
      */
     private function handleUploadZip() {
+        $progress_file = isset($_POST['progress_file']) ? $_POST['progress_file'] : 'recovery_setup';
+        $this->fresh_env->setProgressFile($progress_file);
+
         if (!isset($_FILES['recovery_zip']) || $_FILES['recovery_zip']['error'] !== UPLOAD_ERR_OK) {
+            clean_sweep_write_progress_file($progress_file, [
+                'status' => 'error',
+                'progress' => 0,
+                'message' => 'No recovery package uploaded (or upload error).',
+                'step' => 'upload',
+            ]);
             $this->sendJsonResponse(false, 'No file uploaded or upload error');
             return;
         }
 
+        $name = (string) ($_FILES['recovery_zip']['name'] ?? '');
+        if ($name !== '' && !preg_match('/\.zip$/i', $name)) {
+            $this->sendJsonResponse(false, 'Please upload a .zip recovery package.');
+            return;
+        }
+
+        clean_sweep_write_progress_file($progress_file, [
+            'status' => 'running',
+            'progress' => 15,
+            'message' => 'Uploading recovery package…',
+            'step' => 'upload',
+        ]);
+
+        clean_sweep_reset_execution_time();
+
         $temp_file = $_FILES['recovery_zip']['tmp_name'];
         if ($this->fresh_env->setup($temp_file)) {
+            $_SESSION['fresh_env_setup_complete'] = time();
             $this->sendJsonResponse(true, 'Upload and setup complete');
         } else {
             $this->sendJsonResponse(false, 'Upload processing failed');

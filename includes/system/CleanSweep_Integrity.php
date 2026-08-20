@@ -7,17 +7,14 @@
 // Core integrity baseline management functions
 if (!function_exists('clean_sweep_establish_core_baseline')) {
     function clean_sweep_establish_core_baseline($wp_version = null) {
-        // Check if comprehensive monitoring is enabled
-        if (session_status() === PHP_SESSION_NONE) {
-            session_start();
+        // Visit engine: core reinstall / explicit seal never hashes plugins.
+        $boot = dirname(__DIR__) . '/system/visit/bootstrap.php';
+        if (is_readable($boot)) {
+            require_once $boot;
+            $sealer = new CleanSweep_ScopeSealer();
+            return $sealer->seal_core($wp_version);
         }
-        $comprehensive_mode = isset($_SESSION['clean_sweep_comprehensive_baseline']) && $_SESSION['clean_sweep_comprehensive_baseline'];
-
-        if ($comprehensive_mode) {
-            return clean_sweep_establish_comprehensive_baseline($wp_version);
-        } else {
-            return clean_sweep_establish_core_only_baseline($wp_version);
-        }
+        return clean_sweep_establish_core_only_baseline($wp_version);
     }
 }
 
@@ -604,6 +601,20 @@ if (!function_exists('clean_sweep_clear_core_baseline')) {
 if (!function_exists('clean_sweep_check_for_reinfection')) {
     function clean_sweep_check_for_reinfection() {
         $violations = [];
+
+        $boot = dirname(__DIR__) . '/system/visit/bootstrap.php';
+        if (is_readable($boot)) {
+            require_once $boot;
+            $sealer = new CleanSweep_ScopeSealer();
+            $sealed = $sealer->compare_sealed();
+            if (!empty($sealed)) {
+                return $sealed;
+            }
+            $state = (new CleanSweep_VisitState())->load();
+            if (!empty($state['scopes']['core']['sealed'])) {
+                return [];
+            }
+        }
 
         // Get persistent baseline
         $baseline = clean_sweep_get_core_baseline();

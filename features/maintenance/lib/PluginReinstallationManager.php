@@ -48,7 +48,7 @@ class CleanSweep_PluginReinstallationManager {
         try {
             switch ($action) {
                 case 'analyze_plugins':
-                    return $this->handle_analyze_plugins($params);
+                    return $this->clean_sweep_handle_analyze_plugins($params);
 
                 case 'get_backup_choice':
                     return $this->handle_get_backup_choice($params);
@@ -78,7 +78,7 @@ class CleanSweep_PluginReinstallationManager {
      * @param array $params
      * @return array
      */
-    private function handle_analyze_plugins($params) {
+    private function clean_sweep_handle_analyze_plugins($params) {
         clean_sweep_log_message("PluginReinstallationManager: Starting plugin analysis", 'info');
 
         $progress_file = $params['progress_file'] ?? null;

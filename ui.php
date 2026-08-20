@@ -39,22 +39,54 @@ function clean_sweep_is_recovery_mode() {
 
 /**
  * Output HTML header for browser execution
+ * Updated with Svelte + Tailwind CSS for modern UI
  */
 function clean_sweep_output_html_header() {
     if (!defined('WP_CLI') || !WP_CLI) {
-        $recovery_mode = defined('CLEAN_SWEEP_RECOVERY_MODE') && CLEAN_SWEEP_RECOVERY_MODE;
-        $title_suffix = $recovery_mode ? ' - Recovery Mode' : '';
-        $badge_html = ''; // Remove recovery badge for cleaner UI
-
-        echo '<!DOCTYPE html><html><head><title>Clean Sweep - WordPress Malware Cleanup Toolkit' . $title_suffix . '</title>';
-        echo '<link rel="stylesheet" href="assets/css/style.css">';
-        echo '<script src="assets/script.js"></script>';
-        // Center title only when Recovery Mode is loaded (fresh environment not set up)
+        // Check if in recovery mode
         $recovery_mode = clean_sweep_is_recovery_mode();
-        $title_class = $recovery_mode ? 'centered-title' : '';
-        echo '</head><body><h1 class="' . $title_class . '">🧹 Clean Sweep v ' . CLEAN_SWEEP_VERSION . $badge_html . '</h1>';
-
-
+        $title_suffix = $recovery_mode ? ' - Recovery Mode' : '';
+        
+        // Get recovery detection data
+        $recovery_issues = array();
+        if ($recovery_mode) {
+            $fresh_env_path = __DIR__ . '/core/fresh';
+            if (!is_dir($fresh_env_path)) {
+                $recovery_issues[] = 'missing_fresh_directory';
+            }
+            if (!file_exists($fresh_env_path . '/.clean-sweep-canary.php')) {
+                $recovery_issues[] = 'missing_canary';
+            }
+            if (!file_exists($fresh_env_path . '/wp-load.php') || !file_exists($fresh_env_path . '/wp-settings.php')) {
+                $recovery_issues[] = 'wp_settings_corrupt';
+            }
+        }
+        
+        $recovery_data = array(
+            'isRecoveryMode' => $recovery_mode,
+            'issues' => $recovery_issues
+        );
+        
+        echo '<!DOCTYPE html><html lang="en"><head>';
+        echo '<meta charset="UTF-8">';
+        echo '<meta name="viewport" content="width=device-width, initial-scale=1.0">';
+        echo '<title>Clean Sweep - WordPress Malware Cleanup Toolkit' . $title_suffix . '</title>';
+        
+        // Svelte compiled app CSS
+        echo '<link rel="stylesheet" href="assets/dist/clean-sweep.css">';
+        
+        // Custom CSS (Slate theme)
+        echo '<link rel="stylesheet" href="assets/css/custom.css">';
+        
+        // Pass recovery data to Svelte app
+        echo '<script>window.cleanSweepRecovery = ' . json_encode($recovery_data) . ';</script>';
+        
+        // Svelte compiled app (from Vite build)
+        echo '<script type="module" src="assets/dist/clean-sweep.js"></script>';
+        
+        echo '</head>';
+        echo '<body class="bg-app text-ink antialiased min-h-screen transition-colors">';
+        echo '<div id="app"></div>';
     }
 }
 
@@ -194,23 +226,24 @@ function clean_sweep_display_recovery_setup_interface($recovery_detection) {
 
         function startRecoveryProgressPolling() {
             const pollInterval = setInterval(() => {
-                fetch("logs/recovery_setup.progress?t=" + Date.now())
+                // Use API endpoint instead of direct file access (avoids 404 firewall issues)
+                fetch("api/bootstrap.php?action=get_progress&progress_file=recovery_setup.progress")
                     .then(response => {
-                        if (response.status === 404) return null;
+                        if (response.status === 404 || response.status === 500) return null;
                         return response.json();
                     })
                     .then(data => {
-                        if (data) {
-                            updateRecoveryProgress(data);
+                        if (data && data.data) {
+                            updateRecoveryProgress(data.data);
 
-                            if (data.status === "complete") {
+                            if (data.data.status === "complete") {
                                 clearInterval(pollInterval);
                                 setTimeout(() => {
                                     window.location.reload();
                                 }, 1000);
-                            } else if (data.status === "error") {
+                            } else if (data.data.status === "error") {
                                 clearInterval(pollInterval);
-                                showRecoveryError("Setup failed: " + (data.details || "Unknown error"));
+                                showRecoveryError("Setup failed: " + (data.data.message || "Unknown error"));
                             }
                         }
                     })
@@ -267,9 +300,9 @@ function clean_sweep_output_html_footer() {
     if (!defined('WP_CLI') || !WP_CLI) {
         // Only show completion message if re-installation was actually performed
         if (isset($_POST['action']) && $_POST['action'] === 'reinstall_plugins') {
-            echo '<hr><p><strong>Process completed.</strong> Check the log file for details: <code>' . LOGS_DIR . LOG_FILE . '</code></p>';
-            echo '<p><strong>Backup location:</strong> <code>' . __DIR__ . '/' . BACKUP_DIR . '</code></p>';
-            echo '<p><em>Remember to re-activate your plugins through the WordPress admin panel.</em></p>';
+            echo '<hr><p><strong>Process completed.</strong> Check the log file for details: <code>' . CLEAN_SWEEP_LOGS_DIR . CLEAN_SWEEP_LOG_FILE . '</code></p>';
+            echo '<p><strong>Backup location:</strong> <code>' . __DIR__ . '/' . CLEAN_SWEEP_BACKUP_DIR . '</code></p>';
+            echo '<p><em>Plugins that were active stay active. Load the site and confirm everything still works.</em></p>';
         }
         echo '</body></html>';
     }

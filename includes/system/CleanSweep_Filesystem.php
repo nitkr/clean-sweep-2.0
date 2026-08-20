@@ -8,6 +8,8 @@
  * @author Nithin K R
  */
 
+if (!class_exists('CleanSweep_Filesystem', false)) {
+
 class CleanSweep_Filesystem {
 
     public $method = 'direct';
@@ -168,4 +170,6 @@ class CleanSweep_Filesystem {
 
         return @rmdir($dir_path);
     }
+}
+
 }

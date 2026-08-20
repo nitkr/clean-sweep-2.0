@@ -26,6 +26,14 @@ class CleanSweep_PluginAnalyzer {
             clean_sweep_log_message("Loaded WordPress plugin functions from fresh installation: $fresh_plugin_php", 'debug');
         }
 
+        $cs_file = dirname(__DIR__, 2) . '/security/scan/PackageChecksums.php';
+        if (!class_exists('CleanSweep_PackageChecksums', false) && is_readable($cs_file)) {
+            require_once $cs_file;
+        }
+        if (!class_exists('CleanSweep_PackageIdentity', false)) {
+            require_once __DIR__ . '/PackageIdentity.php';
+        }
+
         clean_sweep_log_message("=== WordPress Plugin Analysis Started ===");
         clean_sweep_log_message("Version: " . CLEAN_SWEEP_VERSION);
         clean_sweep_log_message("WordPress Version: " . get_bloginfo('version'));
@@ -33,8 +41,13 @@ class CleanSweep_PluginAnalyzer {
         clean_sweep_log_message("Progress file: " . ($progress_file ?: 'none'));
 
         try {
+            // Determine the correct plugins directory
+            // Use ORIGINAL_WP_PLUGIN_DIR if available (for recovery mode), otherwise use WP_PLUGIN_DIR
+            $target_plugins_dir = defined('ORIGINAL_WP_PLUGIN_DIR') ? ORIGINAL_WP_PLUGIN_DIR : WP_PLUGIN_DIR;
+            clean_sweep_log_message("Target plugins directory: " . $target_plugins_dir, 'debug');
+            
             // Check if we can write to plugins directory
-            if (!wp_is_writable(WP_PLUGIN_DIR)) {
+            if (!wp_is_writable($target_plugins_dir)) {
                 throw new Exception("Plugins directory is not writable. Please check file permissions.");
             }
 
@@ -42,6 +55,7 @@ class CleanSweep_PluginAnalyzer {
             $wp_org_plugins = [];
             $wpmu_dev_plugins = [];
             $non_repo_plugins = [];
+            $likely_fake_plugins = [];
             $skipped_plugins = [];
 
             // Check WPMU DEV availability and get cached projects for lookup
@@ -52,6 +66,7 @@ class CleanSweep_PluginAnalyzer {
                 $wpmudev_projects = WPMUDEV_Dashboard::$site->get_cached_projects();
             }
 
+            // Get all plugins
             $all_plugins = get_plugins();
             $total_plugins = count($all_plugins);
             clean_sweep_log_message("Found $total_plugins installed plugins");
@@ -69,6 +84,8 @@ class CleanSweep_PluginAnalyzer {
                     $wp_org_plugins[$plugin_file] = $result['data'];
                 } elseif ($result['type'] === 'skipped') {
                     $skipped_plugins[$plugin_file] = $result['data'];
+                } elseif ($result['type'] === 'likely_fake') {
+                    $likely_fake_plugins[$plugin_file] = $result['data'];
                 } else {
                     $non_repo_plugins[$plugin_file] = $result['data'];
                 }
@@ -89,29 +106,33 @@ class CleanSweep_PluginAnalyzer {
             }
 
             // Detect suspicious files/folders
-            $suspicious_files = $this->detect_suspicious_files($wp_org_plugins, $wpmu_dev_plugins, $non_repo_plugins, $skipped_plugins);
+            $suspicious_files = $this->detect_suspicious_files($wp_org_plugins, $wpmu_dev_plugins, $non_repo_plugins, $skipped_plugins, $likely_fake_plugins);
 
             // Generate copy lists for UI
-            $copy_lists = $this->generate_copy_lists($wp_org_plugins, $wpmu_dev_plugins, $non_repo_plugins, $suspicious_files);
+            $copy_lists = $this->generate_copy_lists($wp_org_plugins, $wpmu_dev_plugins, $non_repo_plugins, $suspicious_files, $likely_fake_plugins);
 
             $wp_org_count = count($wp_org_plugins);
             $wpmu_dev_count = count($wpmu_dev_plugins);
             $non_repo_count = count($non_repo_plugins);
             $skipped_count = count($skipped_plugins);
             $suspicious_count = count($suspicious_files);
+            $likely_fake_count = count($likely_fake_plugins);
 
             // Analysis data is now passed directly with each JavaScript batch request
             // Analysis data is now passed directly with each JavaScript batch request
             // No database storage needed with JavaScript-only batching
 
             clean_sweep_log_message("=== Advanced Plugin Analysis Completed ===");
-            clean_sweep_log_message("WordPress.org: {$wp_org_count}, WPMU DEV: {$wpmu_dev_count}, Non-repository: {$non_repo_count}, Suspicious files: {$suspicious_count}");
+            clean_sweep_log_message("WordPress.org: {$wp_org_count}, WPMU DEV: {$wpmu_dev_count}, Non-repository: {$non_repo_count}, Likely fake: {$likely_fake_count}, Suspicious files: {$suspicious_count}");
+
+            $this->persist_identity_hits($likely_fake_plugins);
 
             return [
                 'success' => true,
                 'wp_org_plugins' => $wp_org_plugins,
                 'wpmu_dev_plugins' => $wpmu_dev_plugins,
                 'non_repo_plugins' => $non_repo_plugins,
+                'likely_fake_plugins' => $likely_fake_plugins,
                 'skipped_plugins' => $skipped_plugins,
                 'suspicious_files' => $suspicious_files,
                 'copy_lists' => $copy_lists,
@@ -120,6 +141,7 @@ class CleanSweep_PluginAnalyzer {
                     'wordpress_org' => $wp_org_count,
                     'wpmu_dev' => $wpmu_dev_count,
                     'non_repository' => $non_repo_count,
+                    'likely_fake' => $likely_fake_count,
                     'skipped' => $skipped_count,
                     'suspicious' => $suspicious_count,
                     'total' => $total_plugins
@@ -144,7 +166,9 @@ class CleanSweep_PluginAnalyzer {
      * @return array
      */
     private function analyze_single_plugin($plugin_file, $plugin_data, $wpmudev_projects) {
-        $plugin_path = WP_PLUGIN_DIR . '/' . $plugin_file;
+        // Use ORIGINAL_WP_PLUGIN_DIR if available
+        $plugins_dir = defined('ORIGINAL_WP_PLUGIN_DIR') ? ORIGINAL_WP_PLUGIN_DIR : WP_PLUGIN_DIR;
+        $plugin_path = $plugins_dir . '/' . $plugin_file;
 
         // Special handling for Hello Dolly - remove it entirely
         $slug = $this->extract_plugin_slug($plugin_file);
@@ -170,6 +194,8 @@ class CleanSweep_PluginAnalyzer {
 
             $data = [
                 'wdp_id' => $wdp,
+                'slug' => $slug,
+                'plugin_file' => $plugin_file,
                 'name' => $project_info->name ?? $plugin_data['Name'] ?? $plugin_file,
                 'version' => $project_info->version_installed ?? $plugin_data['Version'] ?? 'Unknown',
                 'description' => $project_info->description ?? $plugin_data['Description'] ?? '',
@@ -180,20 +206,81 @@ class CleanSweep_PluginAnalyzer {
         }
 
         // Check if plugin appears in WPMU DEV cached projects
+        clean_sweep_log_message("DEBUG: Checking cached projects for plugin_file='$plugin_file', slug='$slug'", 'debug');
         foreach ((array) $wpmudev_projects as $pid => $project) {
-            if (isset($project['filename']) && $project['filename'] === $plugin_file) {
-                clean_sweep_log_message("Scheduled {$plugin_data['Name']} for WPMU DEV reinstallation (cached project)", 'info');
-                return ['type' => 'wpmu_dev', 'data' => ['wdp_id' => null]];
+            $cached_filename = $project['filename'] ?? 'NOT_SET';
+            
+            // Handle format mismatch: plugin_file might be 'ultimate-branding' but filename is 'ultimate-branding/ultimate-branding.php'
+            $plugin_dir = dirname($plugin_file);
+            $plugin_basename = pathinfo($plugin_file, PATHINFO_FILENAME);
+            $cached_dir = dirname($cached_filename);
+            $cached_basename = pathinfo($cached_filename, PATHINFO_FILENAME);
+            
+            // Check different matching strategies
+            $match = false;
+            if ($cached_filename === $plugin_file) {
+                // Exact match
+                $match = true;
+            } elseif ($plugin_dir !== '.' && $plugin_dir === $cached_dir) {
+                // Directory match: 'ultimate-branding' === 'ultimate-branding'
+                $match = true;
+            } elseif ($plugin_dir === '.' && $plugin_basename === $cached_dir) {
+                // plugin_file is just name like 'forminator-pro', compare basename with cached dirname
+                $match = true;
+            } elseif ($plugin_dir === '.' && $plugin_basename === $cached_basename) {
+                // Basename comparison as last resort
+                $match = true;
+            }
+            
+            clean_sweep_log_message("DEBUG: Comparing cached project pid=$pid, filename='$cached_filename' (dir: '$cached_dir', base: '$cached_basename') vs plugin_file='$plugin_file' (dir: '$plugin_dir', base: '$plugin_basename') " . ($match ? 'MATCH' : 'NO MATCH'), 'debug');
+            
+            if ($match) {
+                clean_sweep_log_message("Scheduled {$plugin_data['Name']} for WPMU DEV reinstallation (cached project PID: {$pid})", 'info');
+                return ['type' => 'wpmu_dev', 'data' => [
+                    'wdp_id' => $pid,
+                    'slug' => $slug,
+                    'plugin_file' => $plugin_file,
+                    'name' => $plugin_data['Name'] ?? $plugin_file,
+                    'version' => $plugin_data['Version'] ?? 'Unknown',
+                ]];
             }
         }
+
+        $plugin_dir = dirname($plugin_path);
+        $single = (dirname($plugin_file) === '.' || dirname($plugin_file) === '') ? basename($plugin_file) : null;
+        $checksum_row = null;
+        if (class_exists('CleanSweep_PackageChecksums', false)) {
+            $latest = CleanSweep_PackageChecksums::load_latest();
+            $checksum_row = $latest['plugin:' . $slug] ?? null;
+        }
+        $identity_ctx = [
+            'type' => 'plugin',
+            'slug' => $slug,
+            'name' => (string) ($plugin_data['Name'] ?? $slug),
+            'version' => (string) ($plugin_data['Version'] ?? ''),
+            'author' => (string) ($plugin_data['Author'] ?? ''),
+            'plugin_uri' => (string) ($plugin_data['PluginURI'] ?? ''),
+            'author_uri' => (string) ($plugin_data['AuthorURI'] ?? ''),
+            'dir' => $plugin_dir,
+            'single_file' => $single,
+            'plugin_file' => $plugin_file,
+            'checksum_status' => is_array($checksum_row) ? ($checksum_row['status'] ?? null) : null,
+            'checksum_outcome' => is_array($checksum_row) ? ($checksum_row['outcome'] ?? null) : null,
+        ];
 
         // Check if this is a WordPress.org plugin
         $wp_org_info = clean_sweep_fetch_plugin_info($slug);
         if (!empty($wp_org_info) && isset($wp_org_info['version'])) {
+            $identity_ctx['org_info'] = $wp_org_info;
+            $id = $this->identity_verdict($identity_ctx);
+            if ($id) {
+                return $id;
+            }
             $data = [
                 'name' => $plugin_data['Name'],
                 'version' => $plugin_data['Version'],
                 'slug' => $slug,
+                'plugin_file' => $plugin_file,
                 'last_updated' => $wp_org_info['last_updated'] ?? null,
                 'plugin_url' => $wp_org_info['homepage'] ?? "https://wordpress.org/plugins/{$slug}/",
             ];
@@ -202,8 +289,15 @@ class CleanSweep_PluginAnalyzer {
             return ['type' => 'wordpress_org', 'data' => $data];
         }
 
+        $identity_ctx['org_info'] = [];
+        $id = $this->identity_verdict($identity_ctx);
+        if ($id) {
+            return $id;
+        }
+
         // Non-repository plugin
         $data = [
+            'slug' => $slug,
             'name' => $plugin_data['Name'],
             'version' => $plugin_data['Version'],
             'reason' => 'Not found in WordPress.org repository'
@@ -211,6 +305,36 @@ class CleanSweep_PluginAnalyzer {
 
         clean_sweep_log_message("Skipping non-repository plugin: {$plugin_data['Name']}", 'warning');
         return ['type' => 'non_repository', 'data' => $data];
+    }
+
+    /**
+     * @param array $ctx
+     * @return array|null
+     */
+    private function identity_verdict(array $ctx) {
+        if (!class_exists('CleanSweep_PackageIdentity', false)) {
+            return null;
+        }
+        $verdict = CleanSweep_PackageIdentity::evaluate($ctx);
+        if (($verdict['kind'] ?? 'ok') === 'ok') {
+            return null;
+        }
+        $data = [
+            'slug' => $ctx['slug'],
+            'name' => $ctx['name'],
+            'version' => $ctx['version'],
+            'plugin_file' => $ctx['plugin_file'] ?? $ctx['slug'],
+            'identity_kind' => $verdict['kind'],
+            'reasons' => $verdict['reasons'],
+            'org_name' => $verdict['org_name'],
+            'org_version' => $verdict['org_version'],
+            'reason' => $verdict['reasons'][0] ?? 'Likely fake or impersonating package',
+        ];
+        clean_sweep_log_message(
+            "Likely fake plugin {$ctx['name']} ({$verdict['kind']}): " . implode('; ', $verdict['reasons']),
+            'warning'
+        );
+        return ['type' => 'likely_fake', 'data' => $data];
     }
 
     /**
@@ -235,7 +359,9 @@ class CleanSweep_PluginAnalyzer {
      * @param array $plugin_data
      */
     private function remove_hello_dolly($plugin_file, $plugin_data) {
-        $plugin_path = WP_PLUGIN_DIR . '/' . $plugin_file;
+        // Use ORIGINAL_WP_PLUGIN_DIR if available
+        $plugins_dir = defined('ORIGINAL_WP_PLUGIN_DIR') ? ORIGINAL_WP_PLUGIN_DIR : WP_PLUGIN_DIR;
+        $plugin_path = $plugins_dir . '/' . $plugin_file;
         if (file_exists($plugin_path)) {
             clean_sweep_log_message("Removing Hello Dolly plugin (demo plugin): {$plugin_data['Name']}", 'info');
 
@@ -254,143 +380,48 @@ class CleanSweep_PluginAnalyzer {
     }
 
     /**
-     * Detect suspicious files and folders in plugins directory
+     * Detect orphan files/folders in the plugins directory root.
+     *
+     * Orphans only: items that are not an exact match to a recognized WP.org,
+     * WPMU DEV, custom, or skipped plugin package. Does not scan inside those
+     * packages (reinstall + malware scan cover in-package issues). Does not
+     * list mu-plugins (avoid false positives on legitimate drop-ins).
      *
      * @param array $wp_org_plugins
      * @param array $wpmu_dev_plugins
      * @param array $non_repo_plugins
+     * @param array $skipped_plugins
+     * @param array $likely_fake_plugins
      * @return array
      */
-    private function detect_suspicious_files($wp_org_plugins, $wpmu_dev_plugins, $non_repo_plugins, $skipped_plugins = []) {
-        clean_sweep_log_message("Detecting suspicious files in plugins directory", 'info');
+    private function detect_suspicious_files($wp_org_plugins, $wpmu_dev_plugins, $non_repo_plugins, $skipped_plugins = [], $likely_fake_plugins = []) {
+        clean_sweep_log_message("Detecting orphan files in plugins directory", 'info');
 
-        // Get all recognized plugin directories/files (including skipped plugins like WPMU DEV Dashboard)
-        $recognized_plugins = array_merge(
-            array_keys($wp_org_plugins),
-            array_keys($wpmu_dev_plugins),
-            array_keys($non_repo_plugins),
-            array_keys($skipped_plugins)
-        );
+        $plugins_dir = defined('ORIGINAL_WP_PLUGIN_DIR') ? ORIGINAL_WP_PLUGIN_DIR : WP_PLUGIN_DIR;
+        clean_sweep_log_message("Scanning plugins directory: " . $plugins_dir, 'debug');
 
-        // Convert to directory names for comparison
-        $recognized_dirs = [];
-        foreach ($recognized_plugins as $plugin_file) {
+        $all_known = array_merge($wp_org_plugins, $wpmu_dev_plugins, $non_repo_plugins, $skipped_plugins, $likely_fake_plugins);
+
+        $recognized_exact = [];
+        foreach ($all_known as $plugin_file => $plugin_data) {
             $plugin_dir = dirname($plugin_file);
             if ($plugin_dir === '.' || $plugin_dir === '') {
-                // Single file plugin, get the filename without extension
-                $recognized_dirs[] = pathinfo($plugin_file, PATHINFO_FILENAME);
+                $recognized_exact[] = $plugin_file;
+                $recognized_exact[] = pathinfo($plugin_file, PATHINFO_FILENAME);
             } else {
-                $recognized_dirs[] = basename($plugin_dir);
+                $recognized_exact[] = basename($plugin_dir);
             }
         }
-        $recognized_dirs = array_unique($recognized_dirs);
+        $recognized_exact = array_values(array_unique($recognized_exact));
 
-        // Scan plugins directory for suspicious items
-        $suspicious_files = [];
-        $all_items = scandir(WP_PLUGIN_DIR);
+        $suspicious_files = CleanSweep_SuspiciousItemAnalyzer::scan_orphans(
+            $plugins_dir,
+            $recognized_exact,
+            'orphan'
+        );
 
-        foreach ($all_items as $item) {
-            if ($item === '.' || $item === '..') continue;
-            if ($item === 'index.php') continue; // Standard WordPress file
-
-            $full_path = WP_PLUGIN_DIR . '/' . $item;
-
-            // Check if this item belongs to a recognized plugin
-            $is_recognized = false;
-            foreach ($recognized_dirs as $recognized_dir) {
-                if (strpos($item, $recognized_dir) === 0) {
-                    $is_recognized = true;
-                    break;
-                }
-            }
-
-            if (!$is_recognized) {
-                $analysis = $this->analyze_suspicious_item($full_path, $item);
-                if ($analysis) {
-                    $suspicious_files[] = $analysis;
-                }
-            }
-        }
-
-        clean_sweep_log_message("Found " . count($suspicious_files) . " suspicious files/folders", 'info');
+        clean_sweep_log_message("Found " . count($suspicious_files) . " orphan files/folders in plugins root", 'info');
         return $suspicious_files;
-    }
-
-    /**
-     * Analyze a suspicious file or folder
-     *
-     * @param string $full_path
-     * @param string $item_name
-     * @return array|null
-     */
-    private function analyze_suspicious_item($full_path, $item_name) {
-        if (!file_exists($full_path)) {
-            return null;
-        }
-
-        $is_dir = is_dir($full_path);
-        $size_bytes = 0;
-        $file_count = 0;
-
-        if ($is_dir) {
-            $size_bytes = $this->get_directory_size($full_path);
-            $file_count = $this->count_files_in_directory($full_path);
-        } else {
-            $size_bytes = filesize($full_path);
-            $file_count = 1;
-        }
-
-        $size_mb = round($size_bytes / 1024 / 1024, 2);
-
-        return [
-            'name' => $item_name,
-            'path' => $full_path,
-            'is_directory' => $is_dir,
-            'size_bytes' => $size_bytes,
-            'size_mb' => $size_mb,
-            'file_count' => $file_count,
-            'last_modified' => filemtime($full_path),
-            'readable' => is_readable($full_path),
-            'writable' => is_writable($full_path)
-        ];
-    }
-
-    /**
-     * Get directory size recursively
-     *
-     * @param string $directory
-     * @return int
-     */
-    private function get_directory_size($directory) {
-        $size = 0;
-        $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($directory));
-
-        foreach ($files as $file) {
-            if ($file->isFile()) {
-                $size += $file->getSize();
-            }
-        }
-
-        return $size;
-    }
-
-    /**
-     * Count files in directory recursively
-     *
-     * @param string $directory
-     * @return int
-     */
-    private function count_files_in_directory($directory) {
-        $count = 0;
-        $files = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($directory));
-
-        foreach ($files as $file) {
-            if ($file->isFile()) {
-                $count++;
-            }
-        }
-
-        return $count;
     }
 
     /**
@@ -400,15 +431,37 @@ class CleanSweep_PluginAnalyzer {
      * @param array $wpmu_dev_plugins
      * @param array $non_repo_plugins
      * @param array $suspicious_files
+     * @param array $likely_fake_plugins
      * @return array
      */
-    private function generate_copy_lists($wp_org_plugins, $wpmu_dev_plugins, $non_repo_plugins, $suspicious_files) {
+    private function generate_copy_lists($wp_org_plugins, $wpmu_dev_plugins, $non_repo_plugins, $suspicious_files, $likely_fake_plugins = []) {
         return [
             'wordpress_org' => $this->format_plugin_list($wp_org_plugins),
             'wpmu_dev' => $this->format_plugin_list($wpmu_dev_plugins),
             'non_repository' => $this->format_plugin_list($non_repo_plugins),
+            'likely_fake' => $this->format_plugin_list($likely_fake_plugins),
             'suspicious' => $this->format_suspicious_list($suspicious_files)
         ];
+    }
+
+    /**
+     * @param array $likely_fake_plugins
+     */
+    private function persist_identity_hits(array $likely_fake_plugins): void {
+        if (!class_exists('CleanSweep_PackageIdentity', false)) {
+            return;
+        }
+        $items = [];
+        foreach ($likely_fake_plugins as $row) {
+            $items[] = [
+                'type' => 'plugin',
+                'slug' => $row['slug'] ?? '',
+                'name' => $row['name'] ?? '',
+                'kind' => $row['identity_kind'] ?? 'decoy',
+                'reasons' => $row['reasons'] ?? [],
+            ];
+        }
+        CleanSweep_PackageIdentity::replace_type('plugin', $items);
     }
 
     /**
@@ -445,10 +498,17 @@ class CleanSweep_PluginAnalyzer {
 
         $lines = [];
         foreach ($suspicious_files as $file) {
-            $type = $file['is_directory'] ? 'Directory' : 'File';
-            $size = $file['size_mb'] . ' MB';
-            $count = $file['is_directory'] ? " ({$file['file_count']} files)" : '';
-            $lines[] = "{$file['name']} - {$type} - {$size}{$count}";
+            $type = !empty($file['is_directory']) ? 'Directory' : 'File';
+            $severity = $file['severity'] ?? 'unknown';
+            $reason = '';
+            if (!empty($file['reasons']) && is_array($file['reasons'])) {
+                $reason = ': ' . $file['reasons'][0];
+            }
+            $size = isset($file['size_mb']) ? $file['size_mb'] . ' MB' : '';
+            $count = !empty($file['is_directory']) && isset($file['file_count'])
+                ? " ({$file['file_count']} files)"
+                : '';
+            $lines[] = "[{$severity}] {$file['name']} - {$type} - {$size}{$count}{$reason}";
         }
 
         return implode("\n", $lines);

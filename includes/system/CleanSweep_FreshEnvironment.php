@@ -15,12 +15,172 @@ class CleanSweep_FreshEnvironment {
     private $marker_file;
     private $htaccess_file;
     private $integrity_file;
+    /** @var string Progress basename under logs/ (no .progress suffix) */
+    private $progress_file = 'recovery_setup';
+    /** @var array{version?:string,url?:string,source?:string,reason?:string} */
+    private $download_plan = [];
 
     public function __construct() {
         $this->fresh_dir = dirname(dirname(__DIR__)) . '/core/fresh';
         $this->marker_file = $this->fresh_dir . '/.clean-sweep-setup';
         $this->htaccess_file = $this->fresh_dir . '/.htaccess';
         $this->integrity_file = $this->fresh_dir . '/.integrity-hash';
+    }
+
+    public function setProgressFile($name) {
+        $name = preg_replace('/[^a-zA-Z0-9_\-]/', '', (string) $name);
+        if ($name !== '') {
+            $this->progress_file = $name;
+        }
+    }
+
+    /**
+     * Hybrid plan: prefer site-matched WP when PHP allows it; else PHP matrix; one download.
+     *
+     * @return array{version:string,url:string,source:string,reason:string}
+     */
+    public function resolveDownloadPlan() {
+        $php = PHP_VERSION;
+        $site = $this->detectSiteWpVersion();
+
+        if ($site !== '' && version_compare($php, $this->phpRequiredForWp($site), '>=')) {
+            $plan = [
+                'version' => $site,
+                'url' => 'https://wordpress.org/wordpress-' . rawurlencode($site) . '.zip',
+                'source' => 'site_match',
+                'reason' => 'Matching this site (PHP ' . $php . ')',
+            ];
+            $this->download_plan = $plan;
+            return $plan;
+        }
+
+        foreach ($this->wpCompatibilityMatrix() as $row) {
+            if (version_compare($php, $row['min_php'], '>=')) {
+                $plan = [
+                    'version' => $row['version'],
+                    'url' => $row['url'],
+                    'source' => 'php_matrix',
+                    'reason' => 'Selecting a compatible recovery build for PHP ' . $php,
+                ];
+                $this->download_plan = $plan;
+                return $plan;
+            }
+        }
+
+        $plan = [
+            'version' => '6.3.5',
+            'url' => 'https://wordpress.org/wordpress-6.3.5.zip',
+            'source' => 'fallback_pin',
+            'reason' => 'Selecting a compatible recovery build for PHP ' . $php,
+        ];
+        $this->download_plan = $plan;
+        return $plan;
+    }
+
+    /**
+     * Newest-first pins. Local only — no wordpress.org API round-trip.
+     *
+     * @return array<int,array{min_php:string,version:string,url:string}>
+     */
+    private function wpCompatibilityMatrix() {
+        return [
+            [
+                'min_php' => '7.4.0',
+                'version' => 'latest',
+                'url' => 'https://wordpress.org/latest.zip',
+            ],
+            [
+                'min_php' => '7.2.24',
+                'version' => '6.8.3',
+                'url' => 'https://wordpress.org/wordpress-6.8.3.zip',
+            ],
+            [
+                'min_php' => '7.0.0',
+                'version' => '6.3.5',
+                'url' => 'https://wordpress.org/wordpress-6.3.5.zip',
+            ],
+        ];
+    }
+
+    /** Coarse PHP floor by WP line (avoids API). */
+    private function phpRequiredForWp($version) {
+        $version = (string) $version;
+        if ($version === 'latest' || version_compare($version, '7.0', '>=')) {
+            return '7.4.0';
+        }
+        if (version_compare($version, '6.6', '>=')) {
+            return '7.2.24';
+        }
+        if (version_compare($version, '6.3', '>=')) {
+            return '7.0.0';
+        }
+        return '7.0.0';
+    }
+
+    /**
+     * Read site wp-includes/version.php as text (never execute site PHP).
+     */
+    private function detectSiteWpVersion() {
+        $roots = [];
+        if (function_exists('clean_sweep_detect_site_root')) {
+            $detected = clean_sweep_detect_site_root();
+            if (is_string($detected) && $detected !== '') {
+                $roots[] = rtrim(str_replace('\\', '/', $detected), '/');
+            }
+        }
+
+        $toolkit = rtrim(str_replace('\\', '/', dirname(dirname(__DIR__))), '/');
+        $roots[] = dirname($toolkit);
+        $roots[] = dirname($toolkit, 2);
+
+        foreach (array_unique($roots) as $root) {
+            if ($root === '' || $root === '/' || $root === '.') {
+                continue;
+            }
+            $path = $root . '/wp-includes/version.php';
+            if (!is_readable($path)) {
+                continue;
+            }
+            $content = @file_get_contents($path);
+            if (!is_string($content) || $content === '') {
+                continue;
+            }
+            if (preg_match('/\$wp_version\s*=\s*[\'"]([0-9]+(?:\.[0-9]+){1,3})[\'"]/', $content, $m)) {
+                clean_sweep_log_message('Detected site WordPress version ' . $m[1] . ' from ' . $path, 'info');
+                return $m[1];
+            }
+        }
+        return '';
+    }
+
+    /**
+     * Read $wp_version from an already-extracted fresh tree.
+     */
+    private function readInstalledWpVersion() {
+        $path = $this->fresh_dir . '/wp-includes/version.php';
+        if (!is_readable($path)) {
+            return '';
+        }
+        $content = @file_get_contents($path);
+        if (!is_string($content)) {
+            return '';
+        }
+        if (preg_match('/\$wp_version\s*=\s*[\'"]([0-9]+(?:\.[0-9]+){1,3})[\'"]/', $content, $m)) {
+            return $m[1];
+        }
+        return '';
+    }
+
+    private function reportProgress($percent, $message, $status = 'running', $extra = []) {
+        if (!function_exists('clean_sweep_write_progress_file')) {
+            return;
+        }
+        $payload = array_merge([
+            'status' => $status,
+            'progress' => max(0, min(100, (int) $percent)),
+            'message' => (string) $message,
+        ], is_array($extra) ? $extra : []);
+        clean_sweep_write_progress_file($this->progress_file, $payload);
     }
 
     /**
@@ -121,22 +281,37 @@ class CleanSweep_FreshEnvironment {
     }
 
     /**
-     * Download latest WordPress from wordpress.org
+     * Download WordPress using the hybrid plan (one zip).
      *
      * @return bool True on success
      */
     public function download() {
-        clean_sweep_log_message("🔄 Downloading latest WordPress for fresh environment...", 'info');
+        $plan = $this->resolveDownloadPlan();
+        $label = $plan['version'] === 'latest' ? 'latest' : $plan['version'];
+        clean_sweep_log_message('Downloading WordPress ' . $label . ' (' . $plan['source'] . '): ' . $plan['reason'], 'info');
+        $this->reportProgress(12, 'Selecting a compatible recovery build…', 'running', [
+            'step' => 'resolve',
+            'wp_version' => $plan['version'],
+            'plan_source' => $plan['source'],
+        ]);
 
-        // Create fresh directory
-        if (!is_dir($this->fresh_dir) && !mkdir($this->fresh_dir, 0755, true)) {
-            clean_sweep_log_message("❌ Failed to create fresh directory: " . $this->fresh_dir, 'error');
+        if (!$this->prepareFreshDirectory()) {
             return false;
         }
 
-        // Download WordPress
-        $download_url = 'https://wordpress.org/latest.zip';
+        $download_url = $plan['url'];
         $temp_file = sys_get_temp_dir() . '/wordpress_fresh_' . time() . '.zip';
+
+        $this->reportProgress(20, 'Downloading recovery components…', 'running', [
+            'step' => 'download',
+            'wp_version' => $plan['version'],
+        ]);
+
+        if (!function_exists('curl_init')) {
+            clean_sweep_log_message('curl is not available; use WordPress ZIP upload', 'error');
+            $this->reportProgress(0, 'Automatic download is unavailable on this host. Upload a recovery package instead.', 'error');
+            return false;
+        }
 
         $ch = curl_init($download_url);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
@@ -144,46 +319,68 @@ class CleanSweep_FreshEnvironment {
         curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
         curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
         curl_setopt($ch, CURLOPT_TIMEOUT, 300);
+        if (defined('CURLOPT_PROGRESSFUNCTION')) {
+            $last_pct = -1;
+            curl_setopt($ch, CURLOPT_NOPROGRESS, false);
+            curl_setopt($ch, CURLOPT_PROGRESSFUNCTION, function ($resource, $download_size, $downloaded) use (&$last_pct) {
+                if ($download_size > 0) {
+                    $pct = 20 + (int) floor(($downloaded / $download_size) * 40);
+                    $pct = min(60, $pct);
+                    if ($pct !== $last_pct && ($pct - $last_pct) >= 2) {
+                        $last_pct = $pct;
+                        $this->reportProgress($pct, 'Downloading recovery components…', 'running', [
+                            'step' => 'download',
+                        ]);
+                    }
+                }
+                return 0;
+            });
+        }
 
         $data = curl_exec($ch);
         $error = curl_error($ch);
+        $http = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
-        if ($data === false) {
-            clean_sweep_log_message("❌ Failed to download WordPress: " . $error, 'error');
+        if ($data === false || $data === '' || ($http > 0 && $http >= 400)) {
+            clean_sweep_log_message('Failed to download WordPress: ' . ($error !== '' ? $error : ('HTTP ' . $http)), 'error');
+            $this->reportProgress(0, 'Automatic download failed. Upload a recovery package instead.', 'error', [
+                'step' => 'download',
+                'details' => $error !== '' ? $error : ('HTTP ' . $http),
+            ]);
             return false;
         }
 
         if (file_put_contents($temp_file, $data) === false) {
-            clean_sweep_log_message("❌ Failed to save WordPress download", 'error');
+            clean_sweep_log_message('Failed to save WordPress download', 'error');
+            $this->reportProgress(0, 'Could not save the downloaded recovery package.', 'error');
             return false;
         }
 
-        clean_sweep_log_message("📦 Downloaded WordPress successfully", 'info');
+        clean_sweep_log_message('Downloaded WordPress successfully', 'info');
+        $this->reportProgress(65, 'Extracting recovery components…', 'running', ['step' => 'extract']);
 
-        // Extract WordPress
         $zip = new ZipArchive();
         $result = $zip->open($temp_file);
         if ($result !== true) {
-            clean_sweep_log_message("❌ Failed to extract WordPress: " . $result, 'error');
-            unlink($temp_file);
+            clean_sweep_log_message('Failed to extract WordPress: ' . $result, 'error');
+            @unlink($temp_file);
+            $this->reportProgress(0, 'Could not open the recovery package.', 'error');
             return false;
         }
 
         $zip->extractTo($this->fresh_dir);
         $zip->close();
 
-        // Move contents from wordpress/ subdirectory to fresh/
         $wordpress_dir = $this->fresh_dir . '/wordpress';
         if (is_dir($wordpress_dir)) {
             $this->moveDirectoryContents($wordpress_dir, $this->fresh_dir);
-            rmdir($wordpress_dir);
         }
 
-        // Cleanup
-        unlink($temp_file);
+        @unlink($temp_file);
 
-        clean_sweep_log_message("📂 Extracted WordPress to fresh environment", 'info');
+        clean_sweep_log_message('Extracted WordPress to fresh environment', 'info');
+        $this->reportProgress(80, 'Configuring recovery environment…', 'running', ['step' => 'configure']);
         return true;
     }
 
@@ -194,38 +391,76 @@ class CleanSweep_FreshEnvironment {
      * @return bool True on success
      */
     public function manualUpload($uploaded_file) {
-        clean_sweep_log_message("📦 Processing manual WordPress upload...", 'info');
+        clean_sweep_log_message('Processing manual WordPress upload…', 'info');
+        $this->reportProgress(25, 'Reading uploaded recovery package…', 'running', ['step' => 'upload']);
 
         if (!file_exists($uploaded_file)) {
-            clean_sweep_log_message("❌ Uploaded file not found", 'error');
+            clean_sweep_log_message('Uploaded file not found', 'error');
+            $this->reportProgress(0, 'Uploaded package not found.', 'error');
             return false;
         }
 
-        // Create fresh directory
-        if (!is_dir($this->fresh_dir) && !mkdir($this->fresh_dir, 0755, true)) {
-            clean_sweep_log_message("❌ Failed to create fresh directory", 'error');
+        if (!$this->prepareFreshDirectory()) {
             return false;
         }
 
-        // Extract uploaded ZIP
+        $this->reportProgress(55, 'Extracting recovery package…', 'running', ['step' => 'extract']);
+
         $zip = new ZipArchive();
         $result = $zip->open($uploaded_file);
         if ($result !== true) {
-            clean_sweep_log_message("❌ Failed to open uploaded ZIP: " . $result, 'error');
+            clean_sweep_log_message('Failed to open uploaded ZIP: ' . $result, 'error');
+            $this->reportProgress(0, 'Could not open the uploaded package.', 'error');
             return false;
         }
 
         $zip->extractTo($this->fresh_dir);
         $zip->close();
 
-        // Move contents from wordpress/ subdirectory
         $wordpress_dir = $this->fresh_dir . '/wordpress';
         if (is_dir($wordpress_dir)) {
             $this->moveDirectoryContents($wordpress_dir, $this->fresh_dir);
-            rmdir($wordpress_dir);
         }
 
-        clean_sweep_log_message("📂 Extracted uploaded WordPress successfully", 'info');
+        $this->download_plan = [
+            'version' => 'upload',
+            'url' => '',
+            'source' => 'manual_upload',
+            'reason' => 'Operator-uploaded recovery package',
+        ];
+
+        clean_sweep_log_message('Extracted uploaded WordPress successfully', 'info');
+        $this->reportProgress(80, 'Configuring recovery environment…', 'running', ['step' => 'configure']);
+        return true;
+    }
+
+    /**
+     * Ensure fresh dir exists and is empty enough for a clean extract.
+     */
+    private function prepareFreshDirectory() {
+        if (is_dir($this->fresh_dir)) {
+            $entries = @scandir($this->fresh_dir);
+            if (is_array($entries)) {
+                foreach ($entries as $entry) {
+                    if ($entry === '.' || $entry === '..') {
+                        continue;
+                    }
+                    $path = $this->fresh_dir . '/' . $entry;
+                    if (is_dir($path)) {
+                        $this->recursiveDelete($path);
+                    } else {
+                        @unlink($path);
+                    }
+                }
+            }
+            return true;
+        }
+
+        if (!@mkdir($this->fresh_dir, 0755, true)) {
+            clean_sweep_log_message('Failed to create fresh directory: ' . $this->fresh_dir, 'error');
+            $this->reportProgress(0, 'Could not create the fresh environment folder.', 'error');
+            return false;
+        }
         return true;
     }
 
@@ -280,24 +515,35 @@ EOT;
             return false;
         }
 
+        $this->reportProgress(85, 'Writing recovery configuration…', 'running', ['step' => 'configure']);
+
         // Generate wp-config.php (Option B: defines ABSPATH and content paths)
         if (!$this->generateConfig()) {
+            $this->reportProgress(0, 'Could not write fresh wp-config.php.', 'error');
             return false;
         }
 
         // Option B: Use WordPress's NATIVE wp-settings.php (no custom replacement needed!)
         // WordPress will load all files automatically from ABSPATH (/core/fresh/)
-        clean_sweep_log_message("✅ Using WordPress native wp-settings.php (Option B architecture)", 'info');
+        clean_sweep_log_message('Using WordPress native wp-settings.php (Option B architecture)', 'info');
 
         // Protect environment
         $this->protect();
 
-        // Create marker file
+        $installed = $this->readInstalledWpVersion();
+        $planned = (string) ($this->download_plan['version'] ?? '');
+        $stored_version = $installed !== '' ? $installed : ($planned !== '' && $planned !== 'upload' ? $planned : 'unknown');
+
+        // Create marker file with the real installed version when possible
         $marker_data = [
             'created' => time(),
             'method' => $upload_file ? 'manual' : 'auto',
-            'wordpress_version' => 'latest',
-            'architecture' => 'option_b'
+            'wordpress_version' => $stored_version,
+            'plan_version' => $planned !== '' ? $planned : null,
+            'plan_source' => $this->download_plan['source'] ?? null,
+            'plan_reason' => $this->download_plan['reason'] ?? null,
+            'php_version' => PHP_VERSION,
+            'architecture' => 'option_b',
         ];
 
         file_put_contents($this->marker_file, json_encode($marker_data, JSON_PRETTY_PRINT));
@@ -307,15 +553,20 @@ EOT;
 
         // Write canary file to signal setup completion (inline to avoid class loading issues)
         $canary_path = $this->fresh_dir . '/.clean-sweep-canary.php';
-        $canary_data = '<?php // Canary file - setup complete at ' . time() . ' ?>';
+        $canary_data = '<?php // Canary file - setup complete at ' . time() . ' WP ' . $stored_version . ' ?>';
         $canary_written = @file_put_contents($canary_path, $canary_data);
         if ($canary_written !== false) {
-            clean_sweep_log_message("✅ Canary file written at: $canary_path", "info");
+            clean_sweep_log_message('Canary file written at: ' . $canary_path, 'info');
         } else {
-            clean_sweep_log_message("⚠️ Failed to write canary file at: $canary_path", "error");
+            clean_sweep_log_message('Failed to write canary file at: ' . $canary_path, 'error');
         }
 
-        clean_sweep_log_message("✅ Fresh environment setup complete with Option B architecture", 'info');
+        $this->reportProgress(100, 'Recovery environment ready.', 'complete', [
+            'step' => 'done',
+            'wp_version' => $stored_version,
+        ]);
+
+        clean_sweep_log_message('Fresh environment setup complete with Option B architecture (WP ' . $stored_version . ')', 'info');
         return true;
     }
 
@@ -548,9 +799,6 @@ EOT;
         clean_sweep_log_message("   → WordPress executes from: " . ABSPATH, 'info');
         clean_sweep_log_message("   → Operations target: " . WP_CONTENT_DIR, 'info');
         clean_sweep_log_message("🎉 Recovery mode ready!", 'info');
-
-        // Define site path constants for scanning operations (allows scanning specific files/folders)
-        $this->defineSitePaths();
 
         return true;
     }

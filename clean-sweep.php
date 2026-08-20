@@ -21,9 +21,10 @@
 // Core modular components
 require_once __DIR__ . '/config.php';        // Configuration constants
 require_once __DIR__ . '/utils.php';         // Utility functions
+require_once __DIR__ . '/includes/system/visit/bootstrap.php';
+$GLOBALS['clean_sweep_toolkit_integrity'] = clean_sweep_toolkit_integrity();
 require_once __DIR__ . '/wordpress-api.php'; // WordPress API wrappers
 require_once __DIR__ . '/ui.php';            // User interface components
-require_once __DIR__ . '/display.php';       // Display and rendering functions
 
 // Batch Processing System - Reusable long-running operation framework
 require_once __DIR__ . '/includes/system/batch-processing/CleanSweep_BatchProcessor.php';
@@ -44,8 +45,28 @@ require_once __DIR__ . '/includes/system/CleanSweep_Filesystem.php';
 require_once __DIR__ . '/features/maintenance/plugin-reinstall.php';  // Plugin reinstallation
 require_once __DIR__ . '/features/maintenance/core-reinstall.php';    // Core file reinstallation
 require_once __DIR__ . '/features/utilities/zip-extract.php';         // ZIP extraction
-require_once __DIR__ . '/features/security/database-scan.php';        // Database scanning
-require_once __DIR__ . '/features/security/malware-scan.php';         // Malware scanning
+
+// CleanSweep_Scanner v2 - the new unified orchestrator
+require_once __DIR__ . '/features/security/scan/Scanner.php';     // Malware scanning
+
+// WP-Cron kick hook for CleanSweep_Scanner v2 (must be registered on every bootstrap that
+// can receive cron). Mirrors registration in api/bootstrap.php.
+if (function_exists('add_action') && !has_action('clean_sweep_scan_kick')) {
+    add_action('clean_sweep_scan_kick', function ($scan_id) {
+        $scan_id = is_string($scan_id) ? $scan_id : '';
+        if ($scan_id === '') {
+            return;
+        }
+        try {
+            $scanner = CleanSweep_Scanner::create($scan_id);
+            $scanner->drain($scan_id);
+        } catch (Throwable $e) {
+            if (function_exists('clean_sweep_log_message')) {
+                clean_sweep_log_message('CleanSweep_Scanner WP-Cron kick failed: ' . $e->getMessage(), 'error');
+            }
+        }
+    }, 10, 1);
+}
 
 // Application classes
 require_once __DIR__ . '/includes/system/CleanSweep_Application.php';
@@ -101,16 +122,42 @@ if ($is_ajax_request) {
     ini_set('log_errors', 1);  // Log errors instead of displaying
 }
 
-// AUTO-ADD RECOVERY_TOKEN IF MISSING (Cache-busting enhancement)
-if (!isset($_GET['recovery_token']) && !$is_ajax_request && (!defined('WP_CLI') || !WP_CLI)) {
-    // Build redirect URL with recovery_token parameter
-    $current_uri = $_SERVER['REQUEST_URI'];
-    $separator = strpos($current_uri, '?') !== false ? '&' : '?';
-    $redirect_url = $current_uri . $separator . 'recovery_token=' . time();
+// Cache-busting recovery_token: issue on first visit, and again on every full
+// page refresh/reload. AJAX must not redirect.
+if (!$is_ajax_request && (!defined('WP_CLI') || !WP_CLI) && ($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'GET') {
+    $incoming_token = isset($_GET['recovery_token']) ? (string) $_GET['recovery_token'] : '';
+    $served_token = isset($_SESSION['clean_sweep_recovery_token_served']) ? (string) $_SESSION['clean_sweep_recovery_token_served'] : '';
 
-    // Perform redirect to add the cache-busting parameter
-    header('Location: ' . $redirect_url, true, 302);
-    exit;
+    // Missing token, or same token as last fully served page → treat as refresh.
+    $needs_new_token = ($incoming_token === '' || !preg_match('/^[0-9]{9,16}$/', $incoming_token) || $incoming_token === $served_token);
+
+    if ($needs_new_token) {
+        $new_token = (string) time();
+        // Avoid colliding with the just-served token within the same second.
+        if ($new_token === $served_token || $new_token === $incoming_token) {
+            $new_token .= (string) random_int(10, 99);
+        }
+
+        $parts = parse_url($_SERVER['REQUEST_URI'] ?? '/');
+        $path = isset($parts['path']) ? $parts['path'] : '/';
+        $query = [];
+        if (!empty($parts['query'])) {
+            parse_str($parts['query'], $query);
+        }
+        $query['recovery_token'] = $new_token;
+        // Do not mark served yet — that happens on the follow-up request below.
+        unset($_SESSION['clean_sweep_recovery_token_served']);
+
+        $redirect_url = $path . '?' . http_build_query($query);
+        header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+        header('Pragma: no-cache');
+        header('Location: ' . $redirect_url, true, 302);
+        exit;
+    }
+
+    // This request is the post-redirect load with a fresh token — remember it so
+    // the next browser refresh will rotate again.
+    $_SESSION['clean_sweep_recovery_token_served'] = $incoming_token;
 }
 
 // ============================================================================
@@ -144,10 +191,3 @@ try {
 }
 
 // ============================================================================
-// CLEANUP & FINALIZATION
-// ============================================================================
-
-// Output HTML footer for browser execution
-if (!$is_ajax_request && (!defined('WP_CLI') || !WP_CLI)) {
-    clean_sweep_output_html_footer();
-}

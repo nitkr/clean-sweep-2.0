@@ -5,6 +5,17 @@
  * Shared utility functions for plugin operations
  */
 
+if (!defined('ORIGINAL_WP_PLUGIN_DIR')) {
+    if (defined('ORIGINAL_WP_CONTENT_DIR') && is_dir(ORIGINAL_WP_CONTENT_DIR . '/plugins')) {
+        define('ORIGINAL_WP_PLUGIN_DIR', rtrim(str_replace('\\', '/', ORIGINAL_WP_CONTENT_DIR), '/') . '/plugins/');
+    } elseif (defined('WP_PLUGIN_DIR') && is_dir(WP_PLUGIN_DIR)
+        && strpos(str_replace('\\', '/', WP_PLUGIN_DIR), '/core/fresh/') === false) {
+        define('ORIGINAL_WP_PLUGIN_DIR', rtrim(str_replace('\\', '/', WP_PLUGIN_DIR), '/') . '/');
+    } elseif (defined('WP_CONTENT_DIR') && is_dir(WP_CONTENT_DIR . '/plugins')) {
+        define('ORIGINAL_WP_PLUGIN_DIR', rtrim(str_replace('\\', '/', WP_CONTENT_DIR), '/') . '/plugins/');
+    }
+}
+
 /**
  * Format timestamp as relative time (e.g., "2 days ago", "3 months ago")
  * Properly handles UTC timestamps from WordPress.org API
@@ -46,14 +57,36 @@ function clean_sweep_format_relative_time($timestamp) {
  * Fetch additional plugin information from WordPress.org API
  */
 function clean_sweep_fetch_plugin_info($slug) {
+    $slug = sanitize_key((string)$slug);
+    if ($slug === '') {
+        return [];
+    }
+
+    // Cache WordPress.org lookups — analyze_plugins used to hit the network
+    // once per plugin on every run (slow log: curl_exec in bootstrap → plugins).
+    $cache_key = 'cs_wporg_plugin_v2_' . $slug;
+    if (function_exists('get_transient')) {
+        $cached = get_transient($cache_key);
+        if (is_array($cached)) {
+            return $cached;
+        }
+    }
+
     // Suppress all errors and warnings during API call
     $error_reporting = error_reporting(0);
 
     try {
-        $api_url = "https://api.wordpress.org/plugins/info/1.0/$slug.json";
-        $response = @wp_remote_get($api_url, ['timeout' => 5]); // Reduced timeout
+        $api_url = "https://api.wordpress.org/plugins/info/1.0/{$slug}.json";
+        $response = @wp_remote_get($api_url, [
+            'timeout' => 3,
+            'redirection' => 2,
+        ]);
 
         if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 200) {
+            // Negative-cache brief miss so one slow plugin doesn't retry every request
+            if (function_exists('set_transient')) {
+                set_transient($cache_key, [], 15 * MINUTE_IN_SECONDS);
+            }
             return [];
         }
 
@@ -62,15 +95,24 @@ function clean_sweep_fetch_plugin_info($slug) {
             return [];
         }
 
-        return [
+        $out = [
             'last_updated' => $data['last_updated'] ?? null,
             'homepage' => $data['homepage'] ?? null,
             'version' => $data['version'] ?? null,
+            'name' => $data['name'] ?? null,
+            'author' => isset($data['author']) ? trim(strip_tags((string) $data['author'])) : null,
+            'slug' => $data['slug'] ?? $slug,
             'requires' => $data['requires'] ?? null,
             'tested' => $data['tested'] ?? null,
             'rating' => $data['rating'] ?? null,
             'num_ratings' => $data['num_ratings'] ?? null
         ];
+
+        if (function_exists('set_transient')) {
+            set_transient($cache_key, $out, 12 * HOUR_IN_SECONDS);
+        }
+
+        return $out;
     } catch (Exception $e) {
         return [];
     } finally {
@@ -80,8 +122,72 @@ function clean_sweep_fetch_plugin_info($slug) {
 }
 
 /**
- * Check if a plugin path corresponds to a WordPress.org repository plugin
+ * Fetch theme information from WordPress.org API (cached).
+ *
+ * @param string $slug
+ * @return array
  */
+function clean_sweep_fetch_theme_info($slug) {
+    $slug = sanitize_key((string) $slug);
+    if ($slug === '') {
+        return [];
+    }
+
+    $cache_key = 'cs_wporg_theme_v2_' . $slug;
+    if (function_exists('get_transient')) {
+        $cached = get_transient($cache_key);
+        if (is_array($cached)) {
+            return $cached;
+        }
+    }
+
+    $error_reporting = error_reporting(0);
+
+    try {
+        $api_url = 'https://api.wordpress.org/themes/info/1.1/?action=theme_information&request[slug]=' . rawurlencode($slug);
+        $response = @wp_remote_get($api_url, [
+            'timeout' => 3,
+            'redirection' => 2,
+        ]);
+
+        if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 200) {
+            if (function_exists('set_transient')) {
+                set_transient($cache_key, [], 15 * MINUTE_IN_SECONDS);
+            }
+            return [];
+        }
+
+        $data = @json_decode(wp_remote_retrieve_body($response), true);
+        if (!$data || !empty($data['error']) || empty($data['version'])) {
+            if (function_exists('set_transient')) {
+                set_transient($cache_key, [], 15 * MINUTE_IN_SECONDS);
+            }
+            return [];
+        }
+
+        $out = [
+            'last_updated' => $data['last_updated'] ?? null,
+            'homepage' => $data['homepage'] ?? null,
+            'version' => $data['version'] ?? null,
+            'requires' => $data['requires'] ?? null,
+            'screenshot_url' => $data['screenshot_url'] ?? null,
+            'name' => $data['name'] ?? null,
+            'author' => isset($data['author']) ? trim(strip_tags((string) $data['author'])) : null,
+            'slug' => $data['slug'] ?? $slug,
+        ];
+
+        if (function_exists('set_transient')) {
+            set_transient($cache_key, $out, 12 * HOUR_IN_SECONDS);
+        }
+
+        return $out;
+    } catch (Exception $e) {
+        return [];
+    } finally {
+        error_reporting($error_reporting);
+    }
+}
+
 /**
  * Check if a plugin is managed by WPMU DEV dashboard
  * Uses the same detection method as the Dashboard: checks for WDP ID header
