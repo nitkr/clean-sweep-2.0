@@ -32,10 +32,11 @@
   let destLabel = $derived(destination ? upload.destLabel(destination, customRel) : '');
   let destValid = $derived(upload.destIsValid($upload));
   let atRoot = $derived(upload.writesAtRoot($upload));
+  let extractMode = $derived(upload.isExtractMode($upload));
   let smartPackage = $derived(inspectOn && upload.isSmartPackageQueue(uploadQueue));
-  let mixedSmart = $derived(smartPackage && mixedBatch);
-  let isPackage = $derived(upload.isPackageDest(destination) || smartPackage);
-  let kindBanner = $derived(inspectOn ? upload.packageBanner(uploadQueue) : '');
+  let mixedSmart = $derived(smartPackage && mixedBatch && !extractMode);
+  let isPackage = $derived(upload.isPackageDest(destination) || (smartPackage && !extractMode));
+  let kindBanner = $derived(inspectOn ? upload.packageBanner(uploadQueue, extractMode) : '');
   let kindBannerBlocking = $derived(
     !!kindBanner && kindBanner.includes('separately from path extracts')
   );
@@ -48,10 +49,10 @@
   let backupEligible = $derived(backupOn && upload.backupEligibleBatch($upload));
   let backupBlocked = $derived(backupOn ? upload.backupBlockedReason($upload) : '');
   let canConfirm = $derived(
-    (smartPackage || destValid)
+    (isPackage || destValid)
       && !busy
       && !kindBannerBlocking
-      && (smartPackage || !atRoot || confirmRoot)
+      && (isPackage || !atRoot || confirmRoot)
   );
   let showSuccessActions = $derived(!!(uploadResult || batchResult));
   let reviewLabel = $derived(
@@ -359,7 +360,9 @@
                         <span class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-elevated text-muted">
                           {kindLabel(item.inspect?.kind)}
                         </span>
-                        {#if item.inspect?.kind === 'plugin'}
+                        {#if extractMode}
+                          <span class="text-[10px] text-faint">→ {destLabel}</span>
+                        {:else if item.inspect?.kind === 'plugin'}
                           <span class="text-[10px] text-faint">→ plugins/</span>
                         {:else if item.inspect?.kind === 'theme'}
                           <span class="text-[10px] text-faint">→ themes/</span>
@@ -608,7 +611,9 @@
           <div class="p-3 bg-app rounded-md border border-line text-sm">
             <div class="text-ink font-medium truncate">{itemName(item)}</div>
             <div class="text-xs text-muted mt-1">
-              {#if item.inspect?.kind === 'plugin'}
+              {#if extractMode}
+                → {destLabel}
+              {:else if item.inspect?.kind === 'plugin'}
                 → plugins/
               {:else if item.inspect?.kind === 'theme'}
                 → themes/

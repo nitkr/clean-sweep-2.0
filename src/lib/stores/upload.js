@@ -116,6 +116,11 @@ function writesAtRoot(state) {
   return state.destination === 'root' || (state.destination === 'custom' && isRootRel(state.customRel));
 }
 
+/** Operator chose Extract files to a path (not Reinstall as plugin/theme). */
+function isExtractMode(state) {
+  return !!(state && state.extractOpen && isExtractDest(state.destination));
+}
+
 /** @returns {{ plugin: number, theme: number, unknown: number, other: number }} */
 function queuePackageKinds(queue) {
   let plugin = 0;
@@ -160,7 +165,8 @@ function smartBatchSummary(queue) {
   return parts.join(', ');
 }
 
-function packageBanner(queue) {
+function packageBanner(queue, extractMode = false) {
+  if (extractMode) return '';
   if (!isMixedPackageQueue(queue)) return '';
   if (!isSmartPackageQueue(queue)) {
     return 'This batch mixes packages with other ZIPs. Upload plugins/themes separately from path extracts.';
@@ -168,16 +174,22 @@ function packageBanner(queue) {
   return `Mixed batch will auto-route: ${smartBatchSummary(queue)}.`;
 }
 
+function mixBlocksConfirm(state) {
+  if (isExtractMode(state)) return false;
+  const counts = queuePackageKinds(state.uploadQueue);
+  return (counts.plugin > 0 || counts.theme > 0) && (counts.unknown > 0 || counts.other > 0);
+}
+
 /**
- * Per-ZIP install target. Package kinds always route by inspect.kind;
- * everything else uses the operator-chosen destination.
+ * Per-ZIP install target. Reinstall cards route plugin/theme ZIPs by inspect.kind.
+ * Extract-to-path always uses the operator-chosen destination.
  */
 function resolveItemRoute(item, state) {
   const kind = item?.inspect?.kind;
-  if (kind === 'plugin') {
+  if (!isExtractMode(state) && kind === 'plugin') {
     return { destination: 'plugins', customRel: '', package: true, label: destLabelFor('plugins') };
   }
-  if (kind === 'theme') {
+  if (!isExtractMode(state) && kind === 'theme') {
     return { destination: 'themes', customRel: '', package: true, label: destLabelFor('themes') };
   }
   const dest = writesAtRoot(state) ? 'root' : state.destination;
@@ -192,6 +204,7 @@ function resolveItemRoute(item, state) {
 
 function backupEligibleBatch(state) {
   if (!isFeatureEnabled('uploadPackageBackup')) return false;
+  if (isExtractMode(state)) return false;
   const queue = state.uploadQueue || [];
   const smart = isSmartPackageQueue(queue);
   if (!smart && !isPackageDest(state.destination)) return false;
@@ -205,6 +218,7 @@ function backupEligibleBatch(state) {
 
 function backupBlockedReason(state) {
   if (!isFeatureEnabled('uploadPackageBackup')) return '';
+  if (isExtractMode(state)) return '';
   const queue = state.uploadQueue || [];
   const smart = isSmartPackageQueue(queue);
   if (!smart && !isPackageDest(state.destination)) return '';
@@ -247,6 +261,7 @@ function createUploadStore() {
     resolveItemRoute,
     destIsValid,
     isExtractDest,
+    isExtractMode,
     isPackageDest,
     writesAtRoot,
     isRootRel,
@@ -582,6 +597,7 @@ function createUploadStore() {
         }
 
         const after = readState();
+        const extractMode = isExtractMode(after);
         const smart = isSmartPackageQueue(after.uploadQueue);
         const mixed = isMixedPackageQueue(after.uploadQueue);
         const allPlugin = after.uploadQueue.length > 0
@@ -595,8 +611,11 @@ function createUploadStore() {
             uploadProgress: 90,
             mixedBatch: mixed,
           };
-          // Homogeneous packages still snap the destination card for clarity.
-          // Mixed smart batches keep the operator card; install routes per ZIP kind.
+          // Extract-to-path: keep the operator destination even for plugin/theme ZIPs.
+          if (isExtractMode(s)) {
+            return next;
+          }
+          // Reinstall cards: homogeneous packages snap dest; mixed smart batches route per ZIP.
           if (allPlugin) {
             return { ...next, destination: 'plugins', extractOpen: false };
           }
@@ -610,9 +629,11 @@ function createUploadStore() {
         });
         app.setProgress(
           90,
-          smart && mixed
-            ? `Inspected. Will auto-route: ${smartBatchSummary(after.uploadQueue)}.`
-            : 'Inspected. Confirm destination.',
+          extractMode
+            ? 'Inspected. Confirm extract path.'
+            : (smart && mixed
+              ? `Inspected. Will auto-route: ${smartBatchSummary(after.uploadQueue)}.`
+              : 'Inspected. Confirm destination.'),
           'running'
         );
         return true;
@@ -626,13 +647,11 @@ function createUploadStore() {
 
     openConfirm() {
       const state = readState();
+      const extractMode = isExtractMode(state);
       const smart = isSmartPackageQueue(state.uploadQueue);
-      const counts = queuePackageKinds(state.uploadQueue);
-      const hasPackage = counts.plugin > 0 || counts.theme > 0;
-      const hasNonPackage = counts.unknown > 0 || counts.other > 0;
 
-      // Packages + raw/unknown in one run cannot share one confirm path safely.
-      if (hasPackage && hasNonPackage) {
+      // Reinstall only: packages + raw/unknown cannot share one confirm path.
+      if (mixBlocksConfirm(state)) {
         errors.add({
           message: 'This batch mixes packages with other ZIPs. Upload plugins/themes separately from path extracts.',
           code: 'DEST_MISMATCH',
@@ -640,7 +659,7 @@ function createUploadStore() {
         return false;
       }
 
-      if (!smart && !destIsValid(state)) {
+      if ((extractMode || !smart) && !destIsValid(state)) {
         errors.add({ message: 'Choose where to extract the files', code: 'MISSING_DESTINATION' });
         return false;
       }
@@ -684,16 +703,18 @@ function createUploadStore() {
     },
 
     /**
-     * Confirm modal CTA — serial extract; package ZIPs route by inspect.kind.
+     * Confirm modal CTA — serial extract. Reinstall cards route by inspect.kind;
+     * extract-to-path uses the chosen destination for every ZIP.
      */
     async confirmAndInstall() {
       const state = readState();
+      const extractMode = isExtractMode(state);
       const smart = isSmartPackageQueue(state.uploadQueue);
-      if (!smart && !destIsValid(state)) {
+      if ((extractMode || !smart) && !destIsValid(state)) {
         errors.add({ message: 'Choose where to extract the files', code: 'MISSING_DESTINATION' });
         return;
       }
-      if (!smart && writesAtRoot(state) && !state.confirmRoot) {
+      if ((extractMode || !smart) && writesAtRoot(state) && !state.confirmRoot) {
         errors.add({
           message: 'Confirm that you understand this writes at the WordPress root',
           code: 'OVERWRITE_NOT_CONFIRMED',
@@ -701,10 +722,7 @@ function createUploadStore() {
         return;
       }
 
-      const counts = queuePackageKinds(state.uploadQueue);
-      const hasPackage = counts.plugin > 0 || counts.theme > 0;
-      const hasNonPackage = counts.unknown > 0 || counts.other > 0;
-      if (hasPackage && hasNonPackage) {
+      if (mixBlocksConfirm(state)) {
         errors.add({
           message: 'This batch mixes packages with other ZIPs. Upload plugins/themes separately from path extracts.',
           code: 'DEST_MISMATCH',
@@ -718,11 +736,13 @@ function createUploadStore() {
         fallbackDest === 'custom' ? String(state.customRel || '').trim() : ''
       );
       const mixed = isMixedPackageQueue(state.uploadQueue);
-      const startMsg = smart
-        ? (mixed
-            ? `Reinstalling mixed batch (${smartBatchSummary(state.uploadQueue)})…`
-            : `Reinstalling to ${fallbackLabel}…`)
-        : `Extracting to ${fallbackLabel}…`;
+      const startMsg = extractMode
+        ? `Extracting to ${fallbackLabel}…`
+        : (smart
+          ? (mixed
+              ? `Reinstalling mixed batch (${smartBatchSummary(state.uploadQueue)})…`
+              : `Reinstalling to ${fallbackLabel}…`)
+          : `Extracting to ${fallbackLabel}…`);
 
       update(s => ({
         ...s,
@@ -822,7 +842,7 @@ function createUploadStore() {
             || mode === 'plugin_upgrader'
             || mode === 'theme_upgrader';
         });
-        const destRel = mixed && smart
+        const destRel = !extractMode && mixed && smart
           ? smartBatchSummary(queue)
           : (ok[0]?.results?.destination_rel || fallbackLabel);
         const doneMsg = anyReinstalled
@@ -840,7 +860,7 @@ function createUploadStore() {
           installMessage: success ? doneMsg : (failed[0]?.error || 'Extract failed'),
           uploadResult: success
             ? {
-                destination: mixed && smart ? 'mixed' : (ok[0]?.destination || fallbackDest),
+                destination: !extractMode && mixed && smart ? 'mixed' : (ok[0]?.destination || fallbackDest),
                 destination_rel: destRel,
                 extracted: ok,
                 reinstalled: anyReinstalled,
