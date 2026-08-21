@@ -6,6 +6,34 @@
  */
 
 /**
+ * Check if a plugin is active by querying the database directly
+ * This avoids dependency on ABSPATH being defined
+ *
+ * @param string $plugin Plugin path (e.g., 'wpmudev-updates/update-notifications.php')
+ * @return bool True if plugin is active, false otherwise
+ */
+function clean_sweep_is_plugin_active($plugin) {
+    static $active_plugins_cache = null;
+    
+    if ($active_plugins_cache === null) {
+        global $wpdb;
+        $active_plugins_cache = [];
+        
+        if ($wpdb) {
+            $option_value = $wpdb->get_var("SELECT option_value FROM {$wpdb->options} WHERE option_name = 'active_plugins' LIMIT 1");
+            if ($option_value) {
+                $unserialized = maybe_unserialize($option_value);
+                if (is_array($unserialized)) {
+                    $active_plugins_cache = $unserialized;
+                }
+            }
+        }
+    }
+    
+    return in_array($plugin, $active_plugins_cache, true);
+}
+
+/**
  * Check if WPMU DEV Dashboard is available and authenticated
  *
  * @return bool True if WPMU DEV Dashboard is available and authenticated, false otherwise
@@ -73,8 +101,16 @@ function clean_sweep_is_wpmudev_available() {
     }
 
     // PHASE 4: Now load the WPMU DEV Dashboard plugin (API key constant is already set)
+    // First check if the plugin is actually activated in WordPress
+    $dashboard_plugin = 'wpmudev-updates/update-notifications.php';
+    $dashboard_path = WP_PLUGIN_DIR . '/' . $dashboard_plugin;
+    
+    if (!clean_sweep_is_plugin_active($dashboard_plugin)) {
+        clean_sweep_log_message("❌ WPMU DEV Dashboard plugin is not activated in WordPress", 'warning');
+        return false;
+    }
+    
     if (!class_exists('WPMUDEV_Dashboard')) {
-        $dashboard_path = WP_PLUGIN_DIR . '/wpmudev-updates/update-notifications.php';
         if (file_exists($dashboard_path)) {
             clean_sweep_log_message("🔄 Auto-loading WPMU DEV Dashboard plugin (with API key pre-defined)...", 'info');
             include_once $dashboard_path;

@@ -1,0 +1,360 @@
+/**
+ * Clean Sweep - Custom CSS (Slate Theme)
+ * 
+ * Minimal custom styles that complement Tailwind CSS.
+ * Uses the Slate color palette from the design spec.
+ * 
+ * Color Palette:
+ * - Background: #0f172a (deep slate)
+ * - Surface: #1e293b (cards/panels)
+ * - Text: #e2e8f0 (primary), #94a3b8 (secondary)
+ * - Accent: #06b6d4 / #22d3ee (cyan)
+ * - Danger: #ef4444 (red)
+ */
+
+/* ==========================================================================
+   Base Styles
+   ========================================================================== */
+
+/* Smooth scrolling */
+html {
+    scroll-behavior: smooth;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: #1e293b;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #334155;
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #475569;
+}
+
+/* Selection */
+::selection {
+    background: rgba(6, 182, 212, 0.3);
+    color: #f1f5f9;
+}
+
+/* Focus states */
+*:focus {
+    outline: none;
+}
+
+*:focus-visible {
+    outline: 2px solid #06b6d4;
+    outline-offset: 2px;
+}
+
+/* ==========================================================================
+   Alpine.js Hide Directive
+   ========================================================================== */
+
+[x-cloak] {
+    display: none !important;
+}
+
+/* ==========================================================================
+   Custom Form Elements
+   ========================================================================== */
+
+/* Radio buttons */
+input[type="radio"].accent-radio {
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border: 2px solid #475569;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background: transparent;
+}
+
+input[type="radio"].accent-radio:hover {
+    border-color: #06b6d4;
+}
+
+input[type="radio"].accent-radio:checked {
+    border-color: #06b6d4;
+    background: #06b6d4;
+    box-shadow: inset 0 0 0 3px #0f172a;
+}
+
+/* Checkboxes */
+input[type="checkbox"].accent-checkbox {
+    appearance: none;
+    width: 18px;
+    height: 18px;
+    border: 2px solid #475569;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    background: transparent;
+    position: relative;
+}
+
+input[type="checkbox"].accent-checkbox:hover {
+    border-color: #06b6d4;
+}
+
+input[type="checkbox"].accent-checkbox:checked {
+    background: #06b6d4;
+    border-color: #06b6d4;
+}
+
+input[type="checkbox"].accent-checkbox:checked::after {
+    content: '';
+    position: absolute;
+    left: 5px;
+    top: 2px;
+    width: 5px;
+    height: 9px;
+    border: solid #0f172a;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+
+/* Text inputs */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+textarea {
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+/* ==========================================================================
+   Progress Bar Styles
+   ========================================================================== */
+
+.progress-track {
+    background: #1e293b;
+    border-radius: 9999px;
+    overflow: hidden;
+}
+
+.progress-fill {
+    background: linear-gradient(90deg, #06b6d4, #22d3ee);
+    box-shadow: 0 0 10px rgba(34, 211, 238, 0.4);
+    transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ==========================================================================
+   Card Styles
+   ========================================================================== */
+
+.card-surface {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 0.75rem;
+    transition: border-color 0.2s, background-color 0.2s;
+}
+
+.card-surface:hover {
+    border-color: #475569;
+    background: #1e293b;
+}
+
+.card-hover:hover {
+    border-color: rgba(6, 182, 212, 0.5);
+}
+
+/* ==========================================================================
+   Button Styles
+   ========================================================================== */
+
+.btn-primary {
+    background: #06b6d4;
+    color: white;
+    font-weight: 500;
+    padding: 0.75rem 1.5rem;
+    border-radius: 0.5rem;
+    transition: all 0.2s;
+}
+
+.btn-primary:hover {
+    background: #0891b2;
+}
+
+.btn-primary:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-secondary {
+    background: transparent;
+    color: #94a3b8;
+    border: 1px solid #334155;
+    padding: 0.75rem 1.5rem;
+    border-radius: 0.5rem;
+    transition: all 0.2s;
+}
+
+.btn-secondary:hover {
+    color: #e2e8f0;
+    border-color: #475569;
+}
+
+/* ==========================================================================
+   Status Indicators
+   ========================================================================== */
+
+.status-success {
+    color: #22d3ee;
+}
+
+.status-warning {
+    color: #fbbf24;
+}
+
+.status-danger {
+    color: #ef4444;
+}
+
+.status-info {
+    color: #6366f1;
+}
+
+/* ==========================================================================
+   Animations
+   ========================================================================== */
+
+@keyframes pulse-soft {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.6;
+    }
+}
+
+.animate-pulse-soft {
+    animation: pulse-soft 2s ease-in-out infinite;
+}
+
+/* Spin animation for loading */
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.animate-spin {
+    animation: spin 1s linear infinite;
+}
+
+/* ==========================================================================
+   Utility Classes
+   ========================================================================== */
+
+/* Glow effects */
+.glow-cyan {
+    box-shadow: 0 0 20px rgba(34, 211, 238, 0.15);
+}
+
+.glow-red {
+    box-shadow: 0 0 20px rgba(239, 68, 68, 0.15);
+}
+
+/* Text utilities */
+.text-gradient {
+    background: linear-gradient(90deg, #06b6d4, #22d3ee);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+/* Grid pattern background */
+.grid-pattern {
+    background-image: 
+        linear-gradient(rgba(34, 211, 238, 0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(34, 211, 238, 0.02) 1px, transparent 1px);
+    background-size: 32px 32px;
+}
+
+/* Monospace text */
+.font-mono {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+/* ==========================================================================
+   Tab Navigation Overrides
+   ========================================================================== */
+
+.tab-button {
+    padding: 0.75rem 1.25rem;
+    font-weight: 500;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+}
+
+.tab-button:hover {
+    color: #e2e8f0;
+}
+
+.tab-button.active {
+    color: white;
+    border-bottom-color: #06b6d4;
+}
+
+/* ==========================================================================
+   Legacy Support (keep some old classes for compatibility)
+   ========================================================================== */
+
+.tab-container {
+    margin: 1.5rem 0;
+}
+
+.progress-container {
+    margin: 1.5rem 0;
+}
+
+.progress-bar {
+    background: #1e293b;
+    border-radius: 4px;
+    height: 20px;
+    overflow: hidden;
+}
+
+.progress-bar .progress-fill {
+    height: 100%;
+}
+
+.stats-box {
+    display: inline-block;
+    margin: 0.5rem;
+    padding: 1rem;
+    background: #1e293b;
+    border-radius: 0.5rem;
+    border: 1px solid #334155;
+    min-width: 100px;
+    text-align: center;
+}
+
+.stats-number {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: #06b6d4;
+}
+
+.stats-label {
+    font-size: 0.75rem;
+    color: #94a3b8;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* Spin animation for loading spinners */
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}

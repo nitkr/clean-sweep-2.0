@@ -1,249 +1,114 @@
-# Clean Sweep - WordPress Maintenance Toolkit
+# Clean Sweep
 
-A simple toolkit for basic WordPress cleanup and maintenance tasks. Provides malware scanning, plugin management, core file updates, and file operations for WordPress administrators.
+<p align="center">
+  Drop-in WordPress <strong>malware cleanup toolkit</strong>. Copy the folder onto an infected site, work from the browser, then delete it when the site is stable.
+</p>
 
-## Features
+<p align="center">
+  Version 2.0
+  ·
+  <a href="docs/README.md">Documentation</a>
+  ·
+  <a href="docs/start.md">Quick start</a>
+  ·
+  <a href="docs/guide.md">Guide</a>
+  ·
+  <a href="docs/troubleshooting.md">Troubleshooting</a>
+</p>
 
-### 🔍 Malware Scanning
-- Basic pattern-based malware detection
-- Database scanning for suspicious content
-- File scanning with common malware signatures
+<p align="center">
+  <img src="demo.png" alt="Clean Sweep dashboard — last results, suggested cleanup path, and tools" width="880">
+</p>
 
-### 📦 Plugin Management
-- Reinstall WordPress.org plugins with latest versions
-- Automatic backup before changes
-- Plugin verification after installation
+<p align="center"><sub>Dashboard after a visit: last results, suggested cleanup path, and Scanner / Security / Core / Extensions / Users / Cron in the sidebar.</sub></p>
 
-### 🔄 Core File Management
-- Download and replace WordPress core files
-- Preserve wp-config.php and wp-content directory
-- Backup existing core files before replacement
-
-### 📁 File Operations
-- Upload and extract ZIP files
-- Drag & drop interface
-- Extract to WordPress directories (plugins, themes, uploads, etc.)
-
-## ✨ Features
-
-- **Web Interface**: Browser-based tool with tabbed interface
-- **Progress Tracking**: Real-time updates during operations
-- **AJAX Support**: No page refreshes during long operations
-- **Batch Processing**: Handles large operations in manageable chunks
-- **Backup Creation**: Automatic backups before making changes
-- **Memory Efficient**: Optimized for shared hosting environments
-- **PHP 7.0+ Compatible**: Supports modern PHP versions
-
-## 🚀 Quick Start
-
-### Web Browser (Recommended)
-1. **Upload**: Copy the entire `clean-sweep/` folder to your WordPress root directory
-2. **Access**: Navigate to `http://yoursite.com/clean-sweep/clean-sweep.php`
-3. **Use**: Select the tool you need from the tabbed interface
-4. **Clean Up**: Use the cleanup tool to remove the toolkit when finished
-
-## 🛠️ Available Tools
-
-### 1. 🛡️ WordPress Core Re-installation
-- Downloads and installs clean WordPress core files
-- Preserves `wp-config.php` and `/wp-content` directory
-- Creates backup of existing core files
-- Real-time progress tracking with AJAX
-
-### 2. 📦 Plugin Management
-- **Analysis Phase**: Scans all plugins and identifies WordPress.org vs custom plugins
-- **Re-installation Phase**: Downloads latest versions from WordPress.org
-- **Automatic Backup**: Creates timestamped backups before changes
-- **Verification**: Confirms successful installation and accessibility
-
-### 3. 📁 File Upload & Extraction
-- Upload multiple ZIP files simultaneously
-- Extract to any WordPress directory (plugins, themes, uploads, etc.)
-- Drag & drop interface with progress tracking
-- Safety checks and file validation
-
-### 4. 🔍 Database Scanning
-- Scan database tables for suspicious content
-- Identify potential security issues
-- Generate reports for manual review
-
-### 5. � Malware Scanning
-- Pattern-based malware detection
-- File scanning with common signatures
-- Basic security analysis
-
-### 6. �🗑️ Cleanup Tool
-- Removes all Clean Sweep files and directories
-- Attempts to delete the main toolkit folder
-- Leaves no trace when finished
-
-## 📋 Requirements
-
-- **PHP**: 7.0 or higher (7.x and 8.x recommended)
-- **WordPress**: 6.0 or higher
-- **Permissions**: Write access to WordPress directories
-- **Internet**: Required for downloading WordPress core and plugins
-- **Web Server**: Apache/Nginx with PHP support
-
-## 🔒 Safety & Best Practices
-
-### Before Using:
-- ✅ **Complete backups**: Database, files, and offsite storage
-- ✅ **Test environment**: Use staging/dev environment first
-- ✅ **File permissions**: Ensure web server can write to target directories
-- ✅ **Monitor execution**: Watch progress and stop if issues arise
-
-### During Operations:
-- 📊 **Real-time monitoring**: AJAX progress updates show current status
-- 🛑 **Error handling**: Operations abort safely on critical errors
-- 📝 **Detailed logging**: All actions logged with timestamps (only during operations)
-
-### After Completion:
-- ✅ **Verify functionality**: Test your website thoroughly
-- ✅ **Re-activate plugins**: Use WordPress admin to enable plugins
-- ✅ **Security audit**: Change passwords, update components
-- ✅ **Clean up**: Use the cleanup tool to remove the toolkit
-
-## 📁 File Structure
-
-```
-clean-sweep/
-├── clean-sweep.php          # Main entry point
-├── config.php               # Configuration constants and security checks
-├── utils.php                # Utility functions and helpers
-├── wordpress-api.php        # WordPress API wrappers
-├── ui.php                   # User interface components
-├── display.php              # Display and rendering functions
-├── README.md                # This documentation
-├── LICENSE                  # GPL v2 license
-├── assets/
-│   ├── script.js            # Legacy JavaScript (compatibility)
-│   ├── css/
-│   │   └── style.css        # Interface styling
-│   └── js/
-│       ├── ajax.js          # AJAX functionality and timeout handling
-│       ├── core.js          # Core operations and file management
-│       ├── ui.js            # UI interactions and tabbed interface
-│       ├── upload.js        # File upload and extraction handling
-│       └── reinstall.js     # Plugin and core re-installation logic
-├── core/
-│   ├── clean-sweep-bootstrap.php
-│   ├── recovery/
-│   │   ├── recovery-wp-load.php
-│   │   ├── recovery-wp-config.php
-│   │   └── recovery-wp-settings.php
-│   ├── version.php
-│   ├── wp-config-sample.php
-│   ├── wp-load.php
-│   └── wp-settings.php
-├── features/
-│   ├── maintenance/
-│   │   ├── core-reinstall.php   # WordPress core file re-installation
-│   │   ├── plugin-backup.php    # Plugin backup utilities
-│   │   ├── plugin-reinstall.php # WordPress.org plugin management
-│   │   ├── plugin-utils.php     # Plugin utility functions
-│   │   ├── plugin-wordpress.php # WordPress plugin handling
-│   │   └── plugin-wpmudev.php   # WPMU DEV plugin management
-│   ├── security/
-│   │   ├── advanced-analysis.php # Advanced malware analysis
-│   │   ├── core-scanner.php     # Core file integrity scanning
-│   │   ├── database-scan.php    # Database malware detection
-│   │   ├── malware-scan.php     # File-based malware scanning
-│   │   ├── persistence.php      # Malware persistence detection
-│   │   └── signatures.php       # Malware signature database
-│   └── utilities/
-│       └── zip-extract.php      # ZIP file extraction utilities
-├── includes/
-│   └── display/
-│       ├── index.php         # Main display index
-│       ├── malware.php       # Malware scan display
-│       ├── plugins.php       # Plugin management display
-│       ├── ui.php            # UI component display
-│       └── utils.php         # Display utility functions
-├── backups/                 # Auto-generated backup directories
-└── logs/                    # Log files and progress tracking
-```
-
-## 📊 Output Files
-
-### Log Files
-- **Format**: `clean-sweep-log-YYYY-MM-DD-HH-II-SS.txt`
-- **Location**: `clean-sweep/logs/` directory
-- **Contents**: Detailed timestamped logs of all operations
-
-### Backup Directories
-- **Format**: `backups/wp-core-backup-YYYY-MM-DD-HH-II-SS/` (core files)
-- **Format**: `backups/plugins-backup-YYYY-MM-DD-HH-II-SS/` (plugins)
-- **Location**: `clean-sweep/backups/` directory
-- **Contents**: Complete backups before modifications
-
-### Progress Files
-- **Format**: `core_progress_*.progress`, `plugin_progress_*.progress`
-- **Location**: `clean-sweep/logs/` directory
-- **Purpose**: AJAX progress tracking (auto-cleaned)
-
-## 🛡️ Security Features
-
-- **Repository Validation**: Only processes files from trusted sources
-- **File Permission Checks**: Validates write access before operations
-- **AJAX Communication**: Secure client-server communication
-- **Input Sanitization**: All user inputs validated and sanitized
-- **Error Containment**: Operations fail safely without data loss
-- **Bootstrap Shield**: Multi-layer WordPress bootstrap protection with recovery modes
-- **Recovery Bootstrap**: Automatic fallback to clean WordPress environment for corrupted sites
-- **File Integrity Monitoring**: Hash-based detection of core file modifications
-
-## 🔧 Architecture
-
-Clean Sweep uses a modular architecture where each feature is handled by its own dedicated file. The main entry point (`clean-sweep.php`) coordinates all toolkit functions through a clean, organized codebase.
-
-## 📜 License
-
-This project is licensed under the **GNU General Public License Version 2** (GPL v2) - see the [LICENSE](LICENSE) file for details.
-
-## ⚠️ Important Notes
-
-- **Use at your own risk**: While designed for safety, always have backups
-- **Test first**: Use on development/staging environments when possible
-- **Monitor closely**: Watch progress and logs during execution
-- **Clean up**: Always use the cleanup tool to remove the toolkit when finished
-- **Structural integrity**: For sites with severely corrupted core files (missing wp-settings.php, broken wp-config.php), Clean Sweep may be unable to load. In such cases, manual WordPress repair or restoration from backup is recommended before using Clean Sweep.
-
-## 🐛 Troubleshooting
-
-### Common Issues:
-
-**"Could not find wp-load.php"**
-- Ensure Clean Sweep folder is in WordPress root directory
-- Check file permissions on WordPress core files
-
-**"Directory not writable"**
-- Fix permissions: `chmod 755 wp-content/`
-- Ensure web server user has write access
-
-**"Download failed"**
-- Check internet connection and firewall settings
-- Verify target repositories are accessible
-
-**Script timeouts**
-- Increase PHP `max_execution_time`
-- Use command line for large operations
-- Process in smaller batches
-
-### Recovery:
-- Restore from backup directories if needed
-- Check log files for detailed error information
-- Contact WordPress support for core issues
-
-## 📞 Support
-
-This toolkit is provided as-is for WordPress security assistance. For issues:
-
-1. Check the troubleshooting section above
-2. Review log files for error details
-3. Test on a development environment first
-4. Report issues with detailed information
+> Not a plugin you leave installed. Drop it next to `wp-config.php`, clean the site, then **Remove Clean Sweep**.
 
 ---
 
-**Clean Sweep** - Keeping WordPress installations secure and clean.
+## Quick start
+
+The GitHub zip is a run tree: `assets/dist/` is already built. You do not need `npm` on the site.
+
+1. Put the folder in the WordPress root, next to `wp-config.php` (name it `clean-sweep/` or keep the extracted name).
+2. Open `https://yoursite.com/clean-sweep/` — use **`index.php`**, not `index.html`.
+3. Start from the **dashboard**, or open Scanner / Users / Cron from the sidebar.
+4. Keep the **Scanner** tab open during long scans so auto-resume can continue.
+5. When finished, use **Remove Clean Sweep**.
+
+PHP 8.0+ · WordPress 6.0+ · write access to the install. Full list: [Quick start](docs/start.md).
+
+---
+
+## Documentation
+
+Click a page. Every docs page has the same top links so you can jump without coming back here.
+
+<table>
+  <tr>
+    <td width="50%" valign="top">
+      <h3><a href="docs/README.md">Docs home</a></h3>
+      <p>Index of the manual — run it, then change it.</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3><a href="docs/start.md">Quick start</a></h3>
+      <p>Install on a WordPress root, requirements, what empty dashboard cards mean.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3><a href="docs/guide.md">Using Clean Sweep</a></h3>
+      <p>Sidebar map, each tool, and the suggested cleanup path the dashboard follows.</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3><a href="docs/safety.md">Safety</a></h3>
+      <p>Backup first, how reinstalls behave, remove the toolkit when you are done.</p>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" valign="top">
+      <h3><a href="docs/troubleshooting.md">Troubleshooting</a></h3>
+      <p>WordPress not found, paused scans, reinstall failures, recovery mode, logs.</p>
+    </td>
+    <td width="50%" valign="top">
+      <h3><a href="docs/develop.md">Source &amp; UI build</a></h3>
+      <p>Tree layout, rebuild <code>assets/dist/</code>, <a href="features/security/signatures/README.md">signature packs</a>.</p>
+    </td>
+  </tr>
+</table>
+
+---
+
+## What it does
+
+| | Tool | |
+| --- | --- | --- |
+| Scan | **Scanner** | Files + database signatures, checksums. Quick / Standard / Deep. |
+| Scan | **Vulnerabilities** | Known CVEs — context for what to replace, not a malware verdict. |
+| Watch | **Security** | Live file watch, snapshots, integrity seal. |
+| Replace | **Core / Extensions / Upload** | Reinstall core, plugins, themes, or upload a clean ZIP. |
+| Audit | **Users / Cron** | Hidden admins, sessions, WP-Cron and Action Scheduler. |
+| Done | **Remove Clean Sweep** | Deletes the toolkit and leftover agents / visit data. |
+
+Extensions also flags likely fake / impersonating packages (stolen WordPress.org slug or decoy plugin).
+
+---
+
+## Suggested order
+
+Skip steps that do not apply. Same list as the dashboard **Suggested cleanup path**.
+
+1. Scan for malware (uploads and shells first; soft matches are often false positives).
+2. Turn on live file watch.
+3. Audit users, then cron.
+4. Check known vulnerabilities if you need CVE context.
+5. Replace compromised core / plugins / themes.
+6. Seal integrity, then **Remove Clean Sweep**.
+
+Details: [Using Clean Sweep](docs/guide.md).
+
+---
+
+## License
+
+GNU General Public License version 2. See [LICENSE](LICENSE).

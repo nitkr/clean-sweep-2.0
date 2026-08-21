@@ -1,0 +1,238 @@
+@import "tailwindcss";
+
+/* Class-based dark mode (matches theme.js toggling .dark on <html>) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ═══════════════════════════════════════════════════════════
+   Design tokens — light default, dark when .dark on html
+   Palette matches plans/prototype/index-layout-redesign.html
+   Text steps tuned for WCAG-friendly contrast on each surface
+   ═══════════════════════════════════════════════════════════ */
+
+:root {
+  /* Surfaces */
+  --cs-bg-app: #f4f4f5;
+  --cs-bg-panel: #ffffff;
+  --cs-bg-elevated: #fafafa;
+  --cs-bg-hover: #f0f0f2;
+  --cs-bg-input: #ffffff;
+
+  /* Borders */
+  --cs-border: #e4e4e7;
+  --cs-border-strong: #d4d4d8;
+
+  /* Text — readable on light surfaces */
+  --cs-text: #18181b;
+  --cs-text-muted: #3f3f46;   /* zinc-700 — secondary body */
+  --cs-text-faint: #71717a;   /* zinc-500 — captions / meta */
+
+  /* Accent */
+  --cs-accent: #4169e1;
+  --cs-accent-soft: rgba(65, 105, 225, 0.1);
+  --cs-accent-foreground: #ffffff;
+
+  /* Status */
+  --cs-success: #15803d;
+  --cs-success-soft: rgba(22, 163, 74, 0.12);
+  --cs-warning: #b45309;
+  --cs-warning-soft: rgba(217, 119, 6, 0.12);
+  --cs-danger: #b91c1c;
+  --cs-danger-soft: rgba(220, 38, 38, 0.1);
+
+  /* Scrollbar */
+  --cs-scrollbar: #d4d4d8;
+  --cs-scrollbar-track: #f4f4f5;
+
+  /* Shadow */
+  --cs-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+
+  /* Bits UI / shadcn-compatible HSL tokens (light) */
+  --background: 240 5% 96%;
+  --foreground: 240 6% 10%;
+  --card: 0 0% 100%;
+  --card-foreground: 240 6% 10%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 240 6% 10%;
+  --primary: 224 64% 57%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 240 5% 96%;
+  --secondary-foreground: 240 6% 10%;
+  --muted: 240 5% 96%;
+  --muted-foreground: 240 4% 30%;
+  --accent: 240 5% 96%;
+  --accent-foreground: 240 6% 10%;
+  --destructive: 0 72% 41%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 240 6% 90%;
+  --input: 240 6% 90%;
+  --ring: 224 64% 57%;
+  --radius: 0.5rem;
+  --chart-1: 224 64% 57%;
+  --chart-2: 160 84% 30%;
+  --chart-3: 30 80% 45%;
+  --chart-4: 280 66% 50%;
+  --chart-5: 0 72% 45%;
+}
+
+.dark {
+  --cs-bg-app: #0d0d0d;
+  --cs-bg-panel: #111113;
+  --cs-bg-elevated: #18181b;
+  --cs-bg-hover: rgba(30, 30, 30, 0.65);
+  --cs-bg-input: #0d0d0d;
+
+  --cs-border: rgba(39, 39, 42, 0.9);
+  --cs-border-strong: #3f3f46;
+
+  /* Text — readable on dark surfaces */
+  --cs-text: #e4e4e7;
+  --cs-text-muted: #a1a1aa;
+  --cs-text-faint: #71717a;
+
+  --cs-accent: #4169e1;
+  --cs-accent-soft: rgba(65, 105, 225, 0.14);
+  --cs-accent-foreground: #ffffff;
+
+  --cs-success: #22c55e;
+  --cs-success-soft: rgba(34, 197, 94, 0.12);
+  --cs-warning: #f59e0b;
+  --cs-warning-soft: rgba(245, 158, 11, 0.12);
+  --cs-danger: #ef4444;
+  --cs-danger-soft: rgba(239, 68, 68, 0.12);
+
+  --cs-scrollbar: #3f3f46;
+  --cs-scrollbar-track: #18181b;
+
+  --cs-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+
+  /* Bits UI dark */
+  --background: 240 10% 4%;
+  --foreground: 240 5% 96%;
+  --card: 240 10% 6%;
+  --card-foreground: 240 5% 96%;
+  --popover: 240 10% 6%;
+  --popover-foreground: 240 5% 96%;
+  --primary: 224 64% 57%;
+  --primary-foreground: 0 0% 100%;
+  --secondary: 240 4% 16%;
+  --secondary-foreground: 240 5% 96%;
+  --muted: 240 4% 16%;
+  --muted-foreground: 240 5% 64%;
+  --accent: 240 4% 16%;
+  --accent-foreground: 240 5% 96%;
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 240 4% 16%;
+  --input: 240 4% 16%;
+  --ring: 224 64% 57%;
+  --chart-1: 224 64% 57%;
+  --chart-2: 160 84% 39%;
+  --chart-3: 30 80% 55%;
+  --chart-4: 280 66% 60%;
+  --chart-5: 0 72% 55%;
+}
+
+/* Tailwind v4 theme — semantic utilities: bg-app, text-ink, border-line, … */
+@theme {
+  --color-slate-850: #151e2e;
+  --color-slate-950: #0a0f1a;
+  --color-accent-400: #22d3ee;
+  --color-accent-500: #06b6d4;
+  --color-accent-600: #0891b2;
+
+  --color-primary: var(--cs-accent);
+  --color-primary-foreground: var(--cs-accent-foreground);
+
+  --color-app: var(--cs-bg-app);
+  --color-panel: var(--cs-bg-panel);
+  --color-elevated: var(--cs-bg-elevated);
+  --color-hover: var(--cs-bg-hover);
+  --color-input-surface: var(--cs-bg-input);
+
+  --color-line: var(--cs-border);
+  --color-line-strong: var(--cs-border-strong);
+
+  --color-ink: var(--cs-text);
+  --color-muted: var(--cs-text-muted);
+  --color-faint: var(--cs-text-faint);
+
+  --color-success: var(--cs-success);
+  --color-warning: var(--cs-warning);
+  --color-danger: var(--cs-danger);
+}
+
+/* Base */
+html {
+  scroll-behavior: smooth;
+  color-scheme: light;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--cs-bg-app);
+  color: var(--cs-text);
+  @apply antialiased min-h-screen;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
+}
+
+/* Theme-aware transitions on shell surfaces */
+.theme-surface {
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease;
+}
+
+/* Scrollbars */
+.scroll-thin::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scroll-thin::-webkit-scrollbar-track {
+  background: var(--cs-scrollbar-track);
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: var(--cs-scrollbar);
+  border-radius: 4px;
+}
+
+/* Logo mark — same in both themes */
+.logo-grad {
+  background: linear-gradient(135deg, #4169e1 0%, #10b981 100%);
+  box-shadow: 0 4px 14px rgba(65, 105, 225, 0.25);
+}
+
+/* Soft card used on dashboards */
+.cs-card {
+  background: var(--cs-bg-panel);
+  border: 1px solid var(--cs-border);
+  border-radius: 0.75rem;
+  box-shadow: var(--cs-shadow);
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease;
+}
+
+/* Chip / meta pill */
+.cs-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 0.375rem;
+  border: 1px solid var(--cs-border);
+  background: var(--cs-bg-elevated);
+  font-size: 11px;
+  color: var(--cs-text-muted);
+}
+.cs-chip strong,
+.cs-chip .chip-value {
+  color: var(--cs-text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-weight: 500;
+}

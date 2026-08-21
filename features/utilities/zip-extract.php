@@ -1,614 +1,721 @@
 <?php
 /**
- * Handle WordPress plugin/theme installation using WordPress's built-in upgraders
- * Option B: WordPress is already loaded in recovery mode, just use it!
+ * JSON-safe plugin/theme install via WordPress upgraders.
+ * Do not extractTo() into plugins/ or themes/. Never activate.
  */
-function clean_sweep_wordpress_package_install($extract_path) {
-    clean_sweep_log_message("🎯 Using WordPress package installer (Option B architecture)", 'info');
-    clean_sweep_log_message("   → WordPress is already loaded from: " . (defined('ABSPATH') ? ABSPATH : 'N/A'), 'info');
-    clean_sweep_log_message("   → Extraction target: $extract_path", 'info');
 
-global $wp_filesystem;
-
-// Initialize WP_Filesystem (load required file if not already included)
-if (empty($wp_filesystem)) {
-    // Load file.php if not loaded
-    if (!function_exists('request_filesystem_credentials')) {
-        require_once ABSPATH . 'wp-admin/includes/file.php';
+function clean_sweep_install_log($message, $type = 'info') {
+    if (function_exists('clean_sweep_log_message')) {
+        clean_sweep_log_message($message, $type);
     }
-
-    WP_Filesystem();
-    clean_sweep_log_message("✅ WP_Filesystem initialized", 'info');
-}
-    // Verify upgrader classes are available (should be loaded from wp-settings.php in recovery mode)
-    if (!class_exists('Plugin_Upgrader')) {
-        clean_sweep_log_message("⚠️ Plugin_Upgrader not loaded, loading now...", 'warning');
-        require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
-        require_once ABSPATH . 'wp-admin/includes/class-plugin-upgrader.php';
-    }
-
-    if (!class_exists('Theme_Upgrader')) {
-        clean_sweep_log_message("⚠️ Theme_Upgrader not loaded, loading now...", 'warning');
-        require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php';
-        require_once ABSPATH . 'wp-admin/includes/class-theme-upgrader.php';
-    }
-
-    clean_sweep_log_message("✅ WordPress upgrader classes available", 'info');
-
-    // Check if WordPress classes are available for plugin/theme installation AFTER loading classes
-if (!class_exists('WP_Upgrader') || !class_exists('Plugin_Upgrader') || !class_exists('Theme_Upgrader')) {
-    clean_sweep_log_message("WordPress upgrader classes not available in recovery mode", 'warning');
-    return ['success' => false, 'message' => 'WordPress upgrader not available in recovery mode'];
 }
 
-    $file_count = count($_FILES['zip_files']['name']);
-    $results = [
-        'total_files' => $file_count,
-        'successful' => [],
-        'failed' => [],
-        'installer_type' => $extract_path === 'wp-content/plugins' ? 'Plugin' : 'Theme'
-    ];
-
-    clean_sweep_log_message("Using WordPress {$results['installer_type']} installer for $extract_path");
-
-    /**
-     * Custom upgrader skin to redirect WordPress installer messages to Clean Sweep logging
-     * Defined here after WordPress files are loaded to ensure WP_Upgrader_Skin is available
-     */
-    class CleanSweep_Upgrader_Skin extends WP_Upgrader_Skin {
-    private $filename;
-
-    public function __construct($filename = '') {
-        parent::__construct();
-        $this->filename = $filename;
+/**
+ * Recursive copy of one package directory. Refuses dest-escaping symlinks.
+ * Never call the whole-tree plugin backup helper — that snapshots every plugin.
+ *
+ * @return array{ok:bool,code?:string,message?:string,copied?:int,skipped?:int}
+ */
+function clean_sweep_copy_package_dir($src, $dest) {
+    $src = rtrim(str_replace('\\', '/', (string) $src), '/');
+    $dest = rtrim(str_replace('\\', '/', (string) $dest), '/');
+    if ($src === '' || $dest === '' || !is_dir($src)) {
+        return [
+            'ok' => false,
+            'code' => 'BACKUP_SLUG_UNKNOWN',
+            'message' => 'Package directory is not available',
+        ];
     }
 
-    public function feedback($string, ...$args) {
-        if (!empty($args)) {
-            $string = vsprintf($string, $args);
-        }
-
-        // Log WordPress installer progress messages
-        clean_sweep_log_message("WordPress installer: $string", 'info');
-
-        // Enhance message with filename context for clarity
-        $context_prefix = $this->filename ? '[' . htmlspecialchars($this->filename) . '] ' : '';
-        $enhanced_message = $context_prefix . $string;
-
-        // Display progress messages to user in real-time (like other Clean Sweep progress)
-        if (!defined('WP_CLI') || !WP_CLI) {
-            echo '<div style="background:#e7f3ff;border:1px solid #b8daff;padding:5px;border-radius:3px;margin:5px 0;color:#0066cc;">';
-            echo '<small>📦 ' . htmlspecialchars($enhanced_message) . '</small>';
-            echo '</div>';
-            ob_flush();
-            flush();
-        }
+    $src_real = realpath($src);
+    if ($src_real === false) {
+        return [
+            'ok' => false,
+            'code' => 'BACKUP_SLUG_UNKNOWN',
+            'message' => 'Package directory could not be resolved',
+        ];
     }
+    $src_real = rtrim(str_replace('\\', '/', $src_real), '/');
 
-    public function footer() {
-            // Suppress footer output for clean integration
-        }
+    if (!is_dir($dest) && !@mkdir($dest, 0755, true)) {
+        return [
+            'ok' => false,
+            'code' => 'EXTRACT_ERROR',
+            'message' => 'Could not create backup directory',
+        ];
     }
+    $dest_real = realpath($dest);
+    if ($dest_real === false) {
+        return [
+            'ok' => false,
+            'code' => 'EXTRACT_ERROR',
+            'message' => 'Backup directory could not be resolved',
+        ];
+    }
+    $dest_real = rtrim(str_replace('\\', '/', $dest_real), '/');
 
-    // Process each uploaded file
-    for ($i = 0; $i < $file_count; $i++) {
-        $file_name = $_FILES['zip_files']['name'][$i];
-        $file_tmp = $_FILES['zip_files']['tmp_name'][$i];
-        $file_error = $_FILES['zip_files']['error'][$i];
-
-        if (!defined('WP_CLI') || !WP_CLI) {
-            $progress = round(($i + 1) / $file_count * 100);
-            echo '<script>updateProgress(' . ($i + 1) . ', ' . $file_count . ', "Installing: ' . addslashes($file_name) . '");</script>';
-            ob_flush();
-            flush();
-        }
-
-        // Check for upload errors
-        if ($file_error !== UPLOAD_ERR_OK) {
-            $error_msg = "Upload error for $file_name: $file_error";
-            clean_sweep_log_message($error_msg, 'error');
-            $results['failed'][] = ['file' => $file_name, 'error' => $error_msg];
+    $copied = 0;
+    $skipped = 0;
+    $it = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($src_real, FilesystemIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::SELF_FIRST
+    );
+    foreach ($it as $item) {
+        $item_path = str_replace('\\', '/', $item->getPathname());
+        if ($item->isLink()) {
+            $link_real = realpath($item_path);
+            if ($link_real === false) {
+                $skipped++;
+                continue;
+            }
+            $link_n = rtrim(str_replace('\\', '/', $link_real), '/');
+            if ($link_n !== $src_real && strpos($link_n, $src_real . '/') !== 0) {
+                $skipped++;
+                continue;
+            }
+            $skipped++;
             continue;
         }
 
-        // Validate file type
-        if (!preg_match('/\.zip$/i', $file_name)) {
-            $error_msg = "Invalid file type: $file_name";
-            clean_sweep_log_message($error_msg, 'error');
-            $results['failed'][] = ['file' => $file_name, 'error' => $error_msg];
+        $rel = substr($item_path, strlen($src_real) + 1);
+        $target = $dest_real . '/' . $rel;
+
+        if ($item->isDir()) {
+            if (!is_dir($target) && !@mkdir($target, 0755, true)) {
+                return [
+                    'ok' => false,
+                    'code' => 'EXTRACT_ERROR',
+                    'message' => 'Could not copy package directory',
+                ];
+            }
             continue;
         }
 
-        // Use WordPress's install method with force clear option for malware removal
-        clean_sweep_log_message("Force installing $file_name using WordPress {$results['installer_type']} installer (malware removal mode)");
-
-        if ($extract_path === 'wp-content/plugins') {
-            // Hook to force clear destination (malware removal - ensure complete replacement)
-            add_filter('upgrader_package_options', function($options) {
-                $options['clear_destination'] = true;           // Delete existing directory contents
-                $options['abort_if_destination_exists'] = false; // Don't abort, just delete and replace
-                return $options;
-            });
-
-            // SIMPLE RETURN VALUE CHECKING - Using WordPress's direct API
-            $skin = new CleanSweep_Upgrader_Skin($file_name);
-            $upgrader = new Plugin_Upgrader($skin);
-            $result = $upgrader->install($file_tmp);
-
-            if (is_wp_error($result)) {
-                // WordPress clearly indicates FAILURE
-                $error_msg = $result->get_error_message();
-                clean_sweep_log_message("Plugin installation failed for $file_name: $error_msg", 'error');
-                $results['failed'][] = [
-                    'file' => $file_name,
-                    'error' => $error_msg,
-                    'action' => 'install'
-                ];
-            } elseif ($result === true) {
-                // WordPress clearly indicates SUCCESS - install() returns true
-                clean_sweep_log_message("Successfully force-installed plugin (complete replacement): $file_name");
-                $results['successful'][] = $file_name;
-            } else {
-                // Edge cases like null or other unexpected returns
-                clean_sweep_log_message("Plugin installation result unclear for $file_name", 'warning');
-                $results['failed'][] = [
-                    'file' => $file_name,
-                    'error' => 'Installation result unclear',
-                    'action' => 'install'
-                ];
-            }
-        } elseif ($extract_path === 'wp-content/themes') {
-            // Hook to force clear destination (malware removal - ensure complete replacement)
-            add_filter('upgrader_package_options', function($options) {
-                $options['clear_destination'] = true;           // Delete existing directory contents
-                $options['abort_if_destination_exists'] = false; // Don't abort, just delete and replace
-                return $options;
-            });
-
-            // SIMPLE RETURN VALUE CHECKING - Using WordPress's direct API
-            $skin = new CleanSweep_Upgrader_Skin($file_name);
-            $upgrader = new Theme_Upgrader($skin);
-            $result = $upgrader->install($file_tmp);
-
-            if (is_wp_error($result)) {
-                // WordPress clearly indicates FAILURE
-                $error_msg = $result->get_error_message();
-                clean_sweep_log_message("Theme installation failed for $file_name: $error_msg", 'error');
-                $results['failed'][] = [
-                    'file' => $file_name,
-                    'error' => $error_msg,
-                    'action' => 'install'
-                ];
-            } elseif ($result === true) {
-                // WordPress clearly indicates SUCCESS - install() returns true
-                clean_sweep_log_message("Successfully force-installed theme (complete replacement): $file_name");
-                $results['successful'][] = $file_name;
-            } else {
-                // Edge cases like null or other unexpected returns
-                clean_sweep_log_message("Theme installation result unclear for $file_name", 'warning');
-                $results['failed'][] = [
-                    'file' => $file_name,
-                    'error' => 'Installation result unclear',
-                    'action' => 'install'
-                ];
-            }
+        $parent = dirname($target);
+        if (!is_dir($parent) && !@mkdir($parent, 0755, true)) {
+            return [
+                'ok' => false,
+                'code' => 'EXTRACT_ERROR',
+                'message' => 'Could not copy package directory',
+            ];
+        }
+        $parent_real = realpath($parent);
+        if ($parent_real === false) {
+            return [
+                'ok' => false,
+                'code' => 'EXTRACT_ERROR',
+                'message' => 'Backup copy escaped the destination',
+            ];
+        }
+        $parent_n = rtrim(str_replace('\\', '/', $parent_real), '/');
+        if ($parent_n !== $dest_real && strpos($parent_n, $dest_real . '/') !== 0) {
+            return [
+                'ok' => false,
+                'code' => 'EXTRACT_ERROR',
+                'message' => 'Backup copy escaped the destination',
+            ];
         }
 
-        if (!defined('WP_CLI') || !WP_CLI) {
-            // Custom messages only for failures - WordPress handles success messages
-            if (!empty($results['failed']) && end($results['failed'])['file'] === $file_name) {
-                // This file failed - show error message from results
-                $failed_item = end($results['failed']);
-                $error_message = $failed_item['error'] ?? 'Installation failed';
-                echo '<div style="background:#f8d7da;border:1px solid #f5c6cb;padding:10px;border-radius:4px;margin:10px 0;color:#721c24;">';
-                echo '<strong>❌ Failed:</strong> ' . htmlspecialchars($file_name) . ' - ' . htmlspecialchars($error_message);
-                echo '</div>';
-            }
-            // Success messages are handled by WordPress's native feedback
+        $file_real = realpath($item_path);
+        if ($file_real === false) {
+            $skipped++;
+            continue;
         }
+        $file_n = str_replace('\\', '/', $file_real);
+        if ($file_n !== $src_real && strpos($file_n, $src_real . '/') !== 0) {
+            $skipped++;
+            continue;
+        }
+        if (!@copy($item_path, $target)) {
+            return [
+                'ok' => false,
+                'code' => 'EXTRACT_ERROR',
+                'message' => 'Could not copy package file',
+            ];
+        }
+        $copied++;
     }
 
-    $success_count = count($results['successful']);
-    $fail_count = count($results['failed']);
+    return ['ok' => true, 'copied' => $copied, 'skipped' => $skipped];
+}
 
-    // ============================================================================
-    // ESTABLISH INTEGRITY BASELINE FOR REINFECTION DETECTION (comprehensive mode only)
-    // ============================================================================
+/**
+ * Assert WP_PLUGIN_DIR / theme root matches the dest-resolver abs.
+ *
+ * @return array{ok:bool,abs?:string,resolved?:array,code?:string,message?:string}
+ */
+function clean_sweep_install_assert_package_root(string $kind): array {
+    $id = $kind === 'theme' ? 'themes' : 'plugins';
+    if (!function_exists('clean_sweep_resolve_upload_destination')) {
+        return [
+            'ok' => false,
+            'code' => 'INSTALLER_UNAVAILABLE',
+            'message' => 'Destination resolver is not available',
+        ];
+    }
+    $resolved = clean_sweep_resolve_upload_destination($id);
+    if (empty($resolved['ok'])) {
+        return [
+            'ok' => false,
+            'code' => $resolved['code'] ?? 'INSTALLER_UNAVAILABLE',
+            'message' => $resolved['message'] ?? 'Could not resolve package destination',
+        ];
+    }
 
-    if ($success_count > 0) {
-        // Check if comprehensive baseline mode is enabled
-        $comprehensive_mode = false;
-        if (session_status() === PHP_SESSION_NONE) {
-            session_start();
+    $dest_abs = rtrim(str_replace('\\', '/', (string) $resolved['abs']), '/');
+    $dest_real = is_dir($dest_abs) ? realpath($dest_abs) : false;
+    if ($dest_real === false) {
+        return [
+            'ok' => false,
+            'code' => 'INSTALLER_UNAVAILABLE',
+            'message' => 'Package destination does not exist',
+        ];
+    }
+    $dest_real = rtrim(str_replace('\\', '/', $dest_real), '/');
+
+    if ($kind === 'theme') {
+        if (function_exists('get_theme_root')) {
+            $wp_dir = (string) get_theme_root();
+        } elseif (defined('WP_CONTENT_DIR') && WP_CONTENT_DIR) {
+            $wp_dir = rtrim((string) WP_CONTENT_DIR, '/') . '/themes';
+        } else {
+            $wp_dir = '';
         }
-        $comprehensive_mode = isset($_SESSION['clean_sweep_comprehensive_baseline']) && $_SESSION['clean_sweep_comprehensive_baseline'];
+    } else {
+        $wp_dir = defined('WP_PLUGIN_DIR') ? (string) WP_PLUGIN_DIR : '';
+    }
 
-        if ($comprehensive_mode) {
-            clean_sweep_log_message("🔐 Updating comprehensive baseline after ZIP installation");
+    $wp_real = ($wp_dir !== '' && is_dir($wp_dir)) ? realpath($wp_dir) : false;
+    if ($wp_real === false) {
+        return [
+            'ok' => false,
+            'code' => 'INSTALLER_UNAVAILABLE',
+            'message' => 'WordPress package directory is not available',
+        ];
+    }
+    $wp_real = rtrim(str_replace('\\', '/', $wp_real), '/');
 
-            // Update baseline after successful plugin/theme installation (comprehensive mode only)
-            if (function_exists('clean_sweep_establish_core_baseline')) {
-                $baseline_result = clean_sweep_establish_core_baseline();
-                if ($baseline_result) {
-                    clean_sweep_log_message("✅ Comprehensive integrity baseline updated successfully after ZIP installation");
-                    clean_sweep_log_message("🛡️ Future malware scans will detect reinfection by comparing against this baseline");
-                } else {
-                    clean_sweep_log_message("⚠️ Failed to update comprehensive integrity baseline after ZIP installation", 'warning');
+    if ($wp_real !== $dest_real) {
+        return [
+            'ok' => false,
+            'code' => 'INSTALLER_UNAVAILABLE',
+            'message' => 'WordPress package directory does not match the destination',
+        ];
+    }
+
+    if (strpos($wp_real, '/core/fresh/') !== false || (bool) preg_match('#/core/fresh$#', $wp_real)) {
+        return [
+            'ok' => false,
+            'code' => 'INSTALLER_UNAVAILABLE',
+            'message' => 'Package destination is a fresh-core path',
+        ];
+    }
+
+    $tk = '';
+    if (defined('CLEAN_SWEEP_ROOT') && CLEAN_SWEEP_ROOT) {
+        $tk_real = realpath(CLEAN_SWEEP_ROOT);
+        $tk = $tk_real ? rtrim(str_replace('\\', '/', $tk_real), '/') : '';
+    }
+    if ($tk !== '' && ($wp_real === $tk || strpos($wp_real, $tk . '/') === 0)) {
+        return [
+            'ok' => false,
+            'code' => 'INSTALLER_UNAVAILABLE',
+            'message' => 'Package destination is inside the toolkit',
+        ];
+    }
+
+    return ['ok' => true, 'abs' => $dest_real, 'resolved' => $resolved];
+}
+
+/**
+ * WP_Filesystem() — direct method only. No FTP credential prompt.
+ *
+ * @return array{ok:bool,code?:string,message?:string}
+ */
+function clean_sweep_install_init_filesystem(): array {
+    if (!defined('ABSPATH') || ABSPATH === '') {
+        return [
+            'ok' => false,
+            'code' => 'FS_UNAVAILABLE',
+            'message' => 'WordPress is not loaded',
+        ];
+    }
+
+    $file_php = rtrim((string) ABSPATH, '/') . '/wp-admin/includes/file.php';
+    if (!function_exists('WP_Filesystem')) {
+        if (!is_readable($file_php)) {
+            return [
+                'ok' => false,
+                'code' => 'FS_UNAVAILABLE',
+                'message' => 'WordPress filesystem API is not available',
+            ];
+        }
+        require_once $file_php;
+    }
+    if (!function_exists('WP_Filesystem')) {
+        return [
+            'ok' => false,
+            'code' => 'FS_UNAVAILABLE',
+            'message' => 'WordPress filesystem API is not available',
+        ];
+    }
+
+    if (function_exists('get_filesystem_method') && get_filesystem_method() !== 'direct') {
+        return [
+            'ok' => false,
+            'code' => 'FS_UNAVAILABLE',
+            'message' => 'Direct filesystem access is required',
+        ];
+    }
+
+    $ok = WP_Filesystem();
+    global $wp_filesystem;
+    if (!$ok || !is_object($wp_filesystem)) {
+        return [
+            'ok' => false,
+            'code' => 'FS_UNAVAILABLE',
+            'message' => 'Could not initialize the WordPress filesystem',
+        ];
+    }
+    $method = isset($wp_filesystem->method) ? (string) $wp_filesystem->method : '';
+    if ($method !== 'direct') {
+        return [
+            'ok' => false,
+            'code' => 'FS_UNAVAILABLE',
+            'message' => 'Direct filesystem access is required',
+        ];
+    }
+
+    return ['ok' => true];
+}
+
+/**
+ * @return array{ok:bool,code?:string,message?:string}
+ */
+function clean_sweep_install_load_upgrader_classes(): array {
+    if (!defined('ABSPATH') || ABSPATH === '') {
+        return [
+            'ok' => false,
+            'code' => 'INSTALLER_UNAVAILABLE',
+            'message' => 'WordPress is not loaded',
+        ];
+    }
+    $admin = rtrim((string) ABSPATH, '/') . '/wp-admin/includes/';
+    foreach (['class-wp-upgrader.php', 'class-plugin-upgrader.php', 'class-theme-upgrader.php'] as $file) {
+        $path = $admin . $file;
+        if (is_readable($path)) {
+            require_once $path;
+        }
+    }
+    if (
+        !class_exists('WP_Upgrader')
+        || !class_exists('Plugin_Upgrader')
+        || !class_exists('Theme_Upgrader')
+        || !class_exists('WP_Upgrader_Skin')
+    ) {
+        return [
+            'ok' => false,
+            'code' => 'INSTALLER_UNAVAILABLE',
+            'message' => 'WordPress upgrader is not available',
+        ];
+    }
+    return ['ok' => true];
+}
+
+function clean_sweep_install_define_json_skin(): void {
+    if (class_exists('CleanSweep_Json_Upgrader_Skin', false)) {
+        return;
+    }
+    if (!class_exists('WP_Upgrader_Skin')) {
+        return;
+    }
+
+    class CleanSweep_Json_Upgrader_Skin extends WP_Upgrader_Skin {
+        private $filename;
+        private $on_feedback;
+
+        public function __construct($filename = '', $on_feedback = null) {
+            parent::__construct();
+            $this->filename = $filename;
+            $this->on_feedback = $on_feedback;
+        }
+
+        public function header() {
+        }
+
+        public function footer() {
+        }
+
+        public function before() {
+        }
+
+        public function after() {
+        }
+
+        public function error($errors) {
+            $msg = '';
+            if (is_string($errors)) {
+                $msg = $errors;
+            } elseif (is_object($errors) && method_exists($errors, 'get_error_message')) {
+                $msg = (string) $errors->get_error_message();
+            }
+            if ($msg !== '') {
+                clean_sweep_install_log('WordPress installer error: ' . $msg, 'error');
+                if (is_callable($this->on_feedback)) {
+                    call_user_func($this->on_feedback, $msg);
                 }
             }
-        } else {
-            clean_sweep_log_message("ℹ️ Skipping baseline update after ZIP installation (comprehensive mode disabled)");
+        }
+
+        public function feedback($string, ...$args) {
+            $string = (string) $string;
+            if (isset($this->upgrader->strings[$string])) {
+                $string = (string) $this->upgrader->strings[$string];
+            }
+            if ($string !== '' && strpos($string, '%') !== false && !empty($args)) {
+                $string = vsprintf($string, $args);
+            }
+            if ($string === '') {
+                return;
+            }
+            clean_sweep_install_log('WordPress installer: ' . $string, 'info');
+            if (is_callable($this->on_feedback)) {
+                call_user_func($this->on_feedback, $string);
+            }
+        }
+    }
+}
+
+/**
+ * Install one staged plugin/theme ZIP via Plugin_Upgrader / Theme_Upgrader.
+ * JSON-safe: no echo. Never activate_plugin / switch_theme. No raw unzip fallback.
+ *
+ * @param string $zip_path
+ * @param string $kind plugin|theme
+ * @param array  $opts filename, progress_cb, preview_slug
+ * @return array<string,mixed>
+ */
+function clean_sweep_install_uploaded_package($zip_path, $kind, $opts = []) {
+    $kind = $kind === 'theme' ? 'theme' : ($kind === 'plugin' ? 'plugin' : '');
+    if ($kind === '') {
+        return [
+            'success' => false,
+            'code' => 'NOT_A_PACKAGE',
+            'message' => 'Not a plugin or theme package',
+        ];
+    }
+    if ($zip_path === '' || !is_file($zip_path)) {
+        return [
+            'success' => false,
+            'code' => 'ZIP_NOT_FOUND',
+            'message' => 'ZIP file not found',
+        ];
+    }
+
+    $filename = isset($opts['filename']) ? (string) $opts['filename'] : basename((string) $zip_path);
+    $preview_slug = isset($opts['preview_slug']) ? (string) $opts['preview_slug'] : '';
+    $progress_cb = $opts['progress_cb'] ?? null;
+    $notify = function ($msg) use ($progress_cb) {
+        clean_sweep_install_log($msg);
+        if (is_callable($progress_cb)) {
+            call_user_func($progress_cb, $msg);
+        }
+    };
+
+    $root = clean_sweep_install_assert_package_root($kind);
+    if (empty($root['ok'])) {
+        return [
+            'success' => false,
+            'code' => $root['code'] ?? 'INSTALLER_UNAVAILABLE',
+            'message' => $root['message'] ?? 'Installer is not available',
+        ];
+    }
+
+    $fs = clean_sweep_install_init_filesystem();
+    if (empty($fs['ok'])) {
+        return [
+            'success' => false,
+            'code' => $fs['code'] ?? 'FS_UNAVAILABLE',
+            'message' => $fs['message'] ?? 'Direct filesystem access is required',
+        ];
+    }
+
+    $loaded = clean_sweep_install_load_upgrader_classes();
+    if (empty($loaded['ok'])) {
+        return [
+            'success' => false,
+            'code' => $loaded['code'] ?? 'INSTALLER_UNAVAILABLE',
+            'message' => $loaded['message'] ?? 'WordPress upgrader is not available',
+        ];
+    }
+
+    clean_sweep_install_define_json_skin();
+    if (!class_exists('CleanSweep_Json_Upgrader_Skin')) {
+        return [
+            'success' => false,
+            'code' => 'INSTALLER_UNAVAILABLE',
+            'message' => 'WordPress upgrader is not available',
+        ];
+    }
+
+    $filter = static function ($options) {
+        if (!is_array($options)) {
+            $options = [];
+        }
+        $options['clear_destination'] = true;
+        $options['abort_if_destination_exists'] = false;
+        return $options;
+    };
+    if (function_exists('add_filter')) {
+        add_filter('upgrader_package_options', $filter);
+    }
+
+    $notify('Installing ' . $filename . '…');
+    $skin = new CleanSweep_Json_Upgrader_Skin($filename, $progress_cb);
+    if ($kind === 'theme') {
+        $upgrader = new Theme_Upgrader($skin);
+    } else {
+        $upgrader = new Plugin_Upgrader($skin);
+    }
+
+    $result = $upgrader->install($zip_path);
+
+    if (function_exists('remove_filter')) {
+        remove_filter('upgrader_package_options', $filter);
+    }
+
+    if (is_object($result) && method_exists($result, 'get_error_message')) {
+        $error_msg = (string) $result->get_error_message();
+        clean_sweep_install_log('Package install failed for ' . $filename . ': ' . $error_msg, 'error');
+        return [
+            'success' => false,
+            'code' => 'INSTALL_ERROR',
+            'message' => $error_msg !== '' ? $error_msg : 'Installation failed',
+            'details' => [$error_msg],
+        ];
+    }
+    if ($result !== true) {
+        clean_sweep_install_log('Package install result unclear for ' . $filename, 'warning');
+        return [
+            'success' => false,
+            'code' => 'INSTALL_ERROR',
+            'message' => 'Installation result unclear',
+        ];
+    }
+
+    $up_result = is_array($upgrader->result) ? $upgrader->result : [];
+    $dest_name = isset($up_result['destination_name']) ? (string) $up_result['destination_name'] : '';
+    $dest_abs = isset($up_result['destination']) ? rtrim(str_replace('\\', '/', (string) $up_result['destination']), '/') : '';
+    $package_root = rtrim(str_replace('\\', '/', (string) $root['abs']), '/');
+    if ($dest_abs === '' && $dest_name !== '') {
+        $dest_abs = $package_root . '/' . $dest_name;
+    }
+
+    if ($dest_abs !== '' && function_exists('clean_sweep_upload_dest_toolkit_collision')) {
+        $hit = clean_sweep_upload_dest_toolkit_collision($dest_abs, '');
+        if (!empty($hit['hit'])) {
+            return [
+                'success' => false,
+                'code' => 'DEST_TOOLKIT',
+                'message' => $hit['message'] ?? 'Install landed inside the Clean Sweep toolkit',
+                'destination_name' => $dest_name,
+                'destination' => $dest_abs,
+            ];
+        }
+        $hit_name = clean_sweep_upload_dest_toolkit_collision($root['abs'], $dest_name);
+        if (!empty($hit_name['hit'])) {
+            return [
+                'success' => false,
+                'code' => 'DEST_TOOLKIT',
+                'message' => $hit_name['message'] ?? 'Install landed inside the Clean Sweep toolkit',
+                'destination_name' => $dest_name,
+                'destination' => $dest_abs,
+            ];
         }
     }
 
-    clean_sweep_log_message("WordPress installer batch completed. Success: $success_count, Failed: $fail_count");
-
-    // Display final results
-    if (!defined('WP_CLI') || !WP_CLI) {
-        echo '<h2>⚙️ WordPress ' . $results['installer_type'] . ' Installation Complete</h2>';
-        echo '<div style="background:#e7f3ff;border:1px solid #b8daff;padding:20px;border-radius:4px;margin:20px 0;">';
-        echo '<h3>📊 Installation Results Summary</h3>';
-        echo '<div style="display:flex;gap:20px;margin:15px 0;">';
-        echo '<div style="background:#d4edda;color:#155724;padding:10px;border-radius:4px;text-align:center;min-width:80px;">';
-        echo '<div style="font-size:24px;font-weight:bold;">' . $success_count . '</div>';
-        echo '<div style="font-size:12px;">Successful</div>';
-        echo '</div>';
-        echo '<div style="background:#f8d7da;color:#721c24;padding:10px;border-radius:4px;text-align:center;min-width:80px;">';
-        echo '<div style="font-size:24px;font-weight:bold;">' . $fail_count . '</div>';
-        echo '<div style="font-size:12px;">Failed</div>';
-        echo '</div>';
-        echo '<div style="background:#f8f9fa;color:#666;padding:10px;border-radius:4px;text-align:center;min-width:80px;">';
-        echo '<div style="font-size:24px;font-weight:bold;">' . $file_count . '</div>';
-        echo '<div style="font-size:12px;">Total</div>';
-        echo '</div>';
-        echo '</div>';
-
-        echo '<p><strong>Installation Method:</strong> WordPress ' . $results['installer_type'] . ' Upgrader (proper activation and management)</p>';
-        echo '<p><strong>Benefits:</strong> Automatic directory naming, dependency checking, and activation</p>';
-
-        echo '<button class="back-to-menu-btn visible" onclick="window.location.href = window.location.pathname">⬅️ Back to Main Menu</button>';
-
-        echo '</div>';
-    } else {
-        echo "\n⚙️ WORDPRESS " . strtoupper($results['installer_type']) . " INSTALLATION COMPLETE\n";
-        echo str_repeat("=", 50) . "\n";
-        echo "Total files: $file_count\n";
-        echo "Successful: $success_count\n";
-        echo "Failed: $fail_count\n";
-        echo str_repeat("=", 50) . "\n";
+    $plugin_file = null;
+    $name = '';
+    $version = '';
+    if ($kind === 'plugin' && method_exists($upgrader, 'plugin_info')) {
+        $info = $upgrader->plugin_info();
+        if (is_string($info) && $info !== '') {
+            $plugin_file = $info;
+        }
     }
+    if ($kind === 'theme' && method_exists($upgrader, 'theme_info')) {
+        $theme = $upgrader->theme_info();
+        if (is_object($theme) && method_exists($theme, 'get')) {
+            $name = (string) $theme->get('Name');
+            $version = (string) $theme->get('Version');
+        }
+    }
+
+    if ($dest_abs !== '' && is_dir($dest_abs)) {
+        $headers = clean_sweep_install_read_live_headers($dest_abs, $kind);
+        if ($name === '' && $headers['name'] !== '') {
+            $name = $headers['name'];
+        }
+        if ($version === '' && $headers['version'] !== '') {
+            $version = $headers['version'];
+        }
+    }
+
+    $sealed = false;
+    $seal_abs = '';
+    if ($dest_name !== '' && $dest_abs !== '' && is_dir($dest_abs)) {
+        $dest_n = rtrim(str_replace('\\', '/', $dest_abs), '/');
+        $dest_real = realpath($dest_abs);
+        if ($dest_real) {
+            $dest_n = rtrim(str_replace('\\', '/', $dest_real), '/');
+        }
+        $root_n = $package_root;
+        $root_real = is_dir($package_root) ? realpath($package_root) : false;
+        if ($root_real) {
+            $root_n = rtrim(str_replace('\\', '/', $root_real), '/');
+        }
+        if ($dest_n !== $root_n && strpos($dest_n, $root_n . '/') === 0) {
+            $seal_abs = $dest_n;
+        }
+    }
+    $visit_boot = dirname(__DIR__, 2) . '/includes/system/visit/bootstrap.php';
+    if (is_readable($visit_boot)) {
+        require_once $visit_boot;
+    }
+    if ($seal_abs !== '' && $dest_name !== '') {
+        if ($kind === 'plugin' && function_exists('clean_sweep_seal_plugin_dir')) {
+            clean_sweep_seal_plugin_dir($dest_name, $seal_abs);
+            $sealed = true;
+        } elseif ($kind === 'theme' && function_exists('clean_sweep_seal_theme_dir')) {
+            clean_sweep_seal_theme_dir($dest_name, $seal_abs);
+            $sealed = true;
+        }
+    }
+
+    // Phase 6: package verification baseline (scan integrity for Pro/non-.org).
+    // Created only after CS Upload/install success — not a claim of malware-free zip.
+    $verification_baseline = false;
+    $verification_baseline_files = 0;
+    if ($seal_abs !== '' && $dest_name !== '') {
+        $pvb = dirname(__DIR__, 2) . '/features/security/scan/PackageVerificationBaseline.php';
+        if (is_readable($pvb)) {
+            require_once $pvb;
+            if (class_exists('CleanSweep_PackageVerificationBaseline', false)) {
+                $created = CleanSweep_PackageVerificationBaseline::create_from_dir([
+                    'type' => $kind === 'theme' ? 'theme' : 'plugin',
+                    'slug' => $dest_name,
+                    'dir' => $seal_abs,
+                    'version' => $version,
+                    'name' => $name !== '' ? $name : $dest_name,
+                    'source' => 'upload',
+                ]);
+                if (!empty($created['success'])) {
+                    $verification_baseline = true;
+                    $verification_baseline_files = (int) ($created['file_count'] ?? 0);
+                }
+            }
+        }
+    }
+
+    $warnings = [];
+    if ($preview_slug !== '' && $dest_name !== '' && $dest_name !== $preview_slug) {
+        $warnings[] = 'DEST_NAME_MISMATCH';
+    }
+
+    $rel = '';
+    if ($dest_abs !== '' && function_exists('clean_sweep_upload_rel_under_site')) {
+        $rel = clean_sweep_upload_rel_under_site($dest_abs);
+    }
+
+    $label = $kind === 'theme' ? 'theme' : 'plugin';
+    $msg = 'Reinstalled ' . $label . ' ' . ($dest_name !== '' ? $dest_name : $filename);
+    if ($version !== '') {
+        $msg .= ' ' . $version;
+    }
+    $msg .= ' (stays active if it already was)';
+    if ($verification_baseline) {
+        $msg .= '; verification baseline saved (' . $verification_baseline_files . ' files)';
+    }
+
+    $notify($msg);
 
     return [
-        'success' => $fail_count === 0,
-        'total_files' => $file_count,
-        'successful' => $results['successful'],
-        'failed' => $results['failed'],
-        'extract_path' => $extract_path,
-        'installer_type' => $results['installer_type']
+        'success' => true,
+        'code' => '',
+        'message' => $msg,
+        'mode' => $kind === 'theme' ? 'theme_upgrader' : 'plugin_upgrader',
+        'destination_name' => $dest_name,
+        'destination' => $dest_abs,
+        'destination_rel' => $rel,
+        'slug' => $dest_name,
+        'plugin_file' => $plugin_file,
+        'name' => $name,
+        'version' => $version,
+        'sealed' => $sealed,
+        'verification_baseline' => $verification_baseline,
+        'verification_baseline_files' => $verification_baseline_files,
+        'warnings' => $warnings,
+        'files_extracted_count' => 0,
     ];
 }
 
 /**
- * Check if a directory path is safe to delete during ZIP extraction
- * Only allows deletion of WordPress-related directories to prevent accidents
+ * @return array{name:string,version:string}
  */
-function clean_sweep_is_safe_zip_replace_directory($extract_path, $target_dir) {
-    // Get relative path from WordPress root
-    $relative_path = str_replace(ABSPATH, '', $target_dir);
-
-    // Allow replacement of WordPress core directories
-    $safe_core_paths = [
-        'wordpress',
-        'wp-admin',
-        'wp-includes',
-        'wp-content/themes',
-        'wp-content/plugins'
-    ];
-
-    // Allow replacement of specific WordPress subdirectories
-    foreach ($safe_core_paths as $safe_path) {
-        if (strpos($relative_path, $safe_path) === 0 ||
-            $relative_path === $safe_path) {
-            return true;
+function clean_sweep_install_read_live_headers(string $dir, string $kind): array {
+    $name = '';
+    $version = '';
+    if (function_exists('clean_sweep_parse_headers') && function_exists('clean_sweep_upload_scan_installed_version')) {
+        $version = clean_sweep_upload_scan_installed_version($dir, $kind);
+    }
+    if (!function_exists('clean_sweep_parse_headers') || !is_dir($dir)) {
+        return ['name' => $name, 'version' => $version];
+    }
+    $items = @scandir($dir);
+    if (!is_array($items)) {
+        return ['name' => $name, 'version' => $version];
+    }
+    foreach ($items as $item) {
+        if ($item === '.' || $item === '..') {
+            continue;
+        }
+        $full = $dir . '/' . $item;
+        if (!is_file($full)) {
+            continue;
+        }
+        $base = strtolower($item);
+        $ext = strtolower(pathinfo($item, PATHINFO_EXTENSION));
+        $bytes = @file_get_contents($full);
+        if (!is_string($bytes)) {
+            continue;
+        }
+        if ($kind === 'theme' && $base === 'style.css') {
+            $h = clean_sweep_parse_headers($bytes, [
+                'Name' => 'Theme Name',
+                'Version' => 'Version',
+            ]);
+            if ($h['Name'] !== '') {
+                $name = $h['Name'];
+            }
+            if ($version === '' && $h['Version'] !== '') {
+                $version = $h['Version'];
+            }
+            break;
+        }
+        if ($kind !== 'theme' && $ext === 'php') {
+            $h = clean_sweep_parse_headers($bytes, [
+                'Name' => 'Plugin Name',
+                'Version' => 'Version',
+            ]);
+            if ($h['Name'] !== '') {
+                $name = $h['Name'];
+                if ($version === '' && $h['Version'] !== '') {
+                    $version = $h['Version'];
+                }
+                break;
+            }
         }
     }
-
-    // Allow replacement in wp-content subdirectories (themes, plugins, etc.)
-    if (strpos($relative_path, 'wp-content/') === 0) {
-        return true;
-    }
-
-    // Special case: complete WordPress installations
-    if (basename($target_dir) === 'wordpress' ||
-        strpos(basename($target_dir), 'wordpress') === 0) {
-        return true;
-    }
-
-    // Default: not safe to replace
-    return false;
+    return ['name' => $name, 'version' => $version];
 }
 
-/**
- * Detect the real WordPress site root directory for Option B architecture
- * Used when ABSPATH points to /core/fresh/ but operations need to target real site
- *
- * @return string Real WordPress site root path with trailing slash
- */
-function clean_sweep_detect_real_site_root() {
-    // Try to find wp-config.php by walking up from current directory
-    $current_dir = dirname(__DIR__); // utilities/ directory
-    $max_levels = 5;
-
-    for ($i = 0; $i < $max_levels; $i++) {
-        $config_path = $current_dir . '/wp-config.php';
-        if (file_exists($config_path)) {
-            return rtrim($current_dir, '/') . '/';
-        }
-        $current_dir = dirname($current_dir);
-    }
-
-    // Fallback: assume we're in wp-content/plugins/ structure
-    $current_dir = dirname(dirname(dirname(__DIR__))); // Go up 3 levels from utilities/
-    return rtrim($current_dir, '/') . '/';
-}
-
-/**
- * Execute ZIP file extraction for multiple files with clean replacement
- */
-function clean_sweep_execute_zip_extraction() {
-    // DEBUG: Check /core/fresh state before any processing
-    // Use absolute path from FRESH_DIR_ABSOLUTE constant (set before WordPress loads)
-    $fresh_dir_entry = defined('FRESH_DIR_ABSOLUTE') ? FRESH_DIR_ABSOLUTE : __DIR__ . '/../core/fresh';
-    $file_php_entry = $fresh_dir_entry . '/wp-admin/includes/file.php';
-    clean_sweep_log_message("DEBUG: At execute_zip_extraction start - /core/fresh exists: " . (is_dir($fresh_dir_entry) ? 'YES' : 'NO'), 'debug');
-    clean_sweep_log_message("DEBUG: At execute_zip_extraction start - file.php exists: " . (file_exists($file_php_entry) ? 'YES' : 'NO'), 'debug');
-    clean_sweep_log_message("DEBUG: Using FRESH_DIR_ABSOLUTE in execute_zip_extraction: " . (defined('FRESH_DIR_ABSOLUTE') ? 'YES' : 'NO'), 'debug');
-
-    clean_sweep_log_message("=== ZIP File Extraction Started ===");
-
-    // Check if files were uploaded
-    if (!isset($_FILES['zip_files']) || !is_array($_FILES['zip_files']['name'])) {
-        clean_sweep_log_message("No files uploaded or invalid upload format", 'error');
-
-        if (!defined('WP_CLI') || !WP_CLI) {
-            echo '<h2>📁 ZIP Extraction Failed</h2>';
-            echo '<div style="background:#f8d7da;border:1px solid #f5c6cb;padding:20px;border-radius:4px;margin:20px 0;color:#721c24;">';
-            echo '<h3>❌ Upload Error</h3>';
-            echo '<p>No ZIP files were uploaded. Please select files to extract.</p>';
-            echo '</div>';
-        }
-
-        return ['success' => false, 'message' => 'No files uploaded'];
-    }
-
-    $file_count = count($_FILES['zip_files']['name']);
-    clean_sweep_log_message("Processing $file_count ZIP file(s) for extraction");
-
-    // Get extraction path
-    $extract_path = isset($_POST['extract_path']) ? $_POST['extract_path'] : 'wp-content';
-    // Remove leading slash to ensure relative path from WordPress root
-    $extract_path = ltrim($extract_path, '/');
-    // Use real site root detection for Option B architecture compatibility
-    $base_path = clean_sweep_detect_real_site_root();
-    $full_extract_path = $base_path . $extract_path;
-
-    clean_sweep_log_message("Extracting files to: $full_extract_path");
-    clean_sweep_log_message("Extract path type: $extract_path");
-
-    // Route to appropriate installer based on destination
-    $use_wordpress_installer = ($extract_path === 'wp-content/plugins' || $extract_path === 'wp-content/themes');
-
-    if ($use_wordpress_installer) {
-        clean_sweep_log_message("Using WordPress installer for $extract_path");
-        return clean_sweep_wordpress_package_install($extract_path);
-    } else {
-        clean_sweep_log_message("Using standard ZIP extraction for $extract_path");
-
-        // Ensure extraction directory exists - use PHP mkdir as fallback
-        if (!is_dir($full_extract_path)) {
-            if (!mkdir($full_extract_path, 0755, true)) {
-                clean_sweep_log_message("Failed to create extraction directory: $full_extract_path", 'error');
-
-                if (!defined('WP_CLI') || !WP_CLI) {
-                    echo '<h2>📁 ZIP Extraction Failed</h2>';
-                    echo '<div style="background:#f8d7da;border:1px solid #f5c6cb;padding:20px;border-radius:4px;margin:20px 0;color:#721c24;">';
-                    echo '<h3>❌ Directory Error</h3>';
-                    echo '<p>Failed to create extraction directory.</p>';
-                    echo '</div>';
-                }
-
-                return ['success' => false, 'message' => 'Failed to create extraction directory'];
-            }
-        }
-
-        $results = [
-            'total_files' => $file_count,
-            'successful' => [],
-            'failed' => []
-        ];
-
-        // Handle pre-extraction malware removal if enabled
-        if (isset($_POST['enable_malware_removal']) && isset($_POST['delete_paths']) && !empty($_POST['delete_paths'])) {
-            $delete_paths = array_map('trim', explode("\n", $_POST['delete_paths']));
-
-            clean_sweep_log_message("=== PRE-EXTRACTION MALWARE REMOVAL STARTED ===");
-            clean_sweep_log_message("Processing " . count($delete_paths) . " paths for deletion");
-
-            $deleted_count = 0;
-            $skipped_count = 0;
-
-            foreach ($delete_paths as $path) {
-                if (empty($path)) continue; // Skip empty lines
-
-                $full_path = $full_extract_path . '/' . $path;
-
-                // SECURITY: Ensure path is within extraction directory to prevent directory traversal
-                $real_extract_path = realpath($full_extract_path);
-                $real_full_path = realpath($full_path);
-
-                if ($real_full_path === false) {
-                    // Path doesn't exist, try to check if it's within allowed directory
-                    $path_parts = explode('/', $path);
-                    $allowed_base = basename($full_extract_path);
-
-                    if (!empty($path_parts) && $path_parts[0] === $allowed_base) {
-                        // Convert to absolute path for checking
-                        $real_full_path = realpath($full_extract_path . '/' . implode('/', array_slice($path_parts, 1)));
-                    }
-                }
-
-                if ($real_full_path && strpos($real_full_path, $real_extract_path) === 0) {
-                    // Path is within extraction directory - safe to delete
-                    if (file_exists($full_path) || file_exists($real_full_path)) {
-                        $target_path = $real_full_path ?: $full_path;
-
-                        if (is_dir($target_path)) {
-                            // Delete directory recursively
-                            if (clean_sweep_recursive_delete($target_path)) {
-                                clean_sweep_log_message("Deleted directory: $path", 'info');
-                                $deleted_count++;
-                            } else {
-                                clean_sweep_log_message("Failed to delete directory: $path", 'error');
-                            }
-                        } else {
-                            // Delete file
-                            if (unlink($target_path)) {
-                                clean_sweep_log_message("Deleted file: $path", 'info');
-                                $deleted_count++;
-                            } else {
-                                clean_sweep_log_message("Failed to delete file: $path", 'error');
-                            }
-                        }
-                    } else {
-                        clean_sweep_log_message("Path does not exist: $path", 'warning');
-                    }
-                } else {
-                    // Path is outside extraction directory - skip for security
-                    clean_sweep_log_message("Skipped dangerous path (outside extraction directory): $path", 'warning');
-                    $skipped_count++;
-                }
-            }
-
-            clean_sweep_log_message("Pre-extraction malware removal completed. Deleted: $deleted_count, Skipped: $skipped_count");
-            clean_sweep_log_message("=== PRE-EXTRACTION MALWARE REMOVAL COMPLETED ===");
-        }
-
-        // Process each uploaded file with standard ZIP extraction
-        for ($i = 0; $i < $file_count; $i++) {
-            $file_name = $_FILES['zip_files']['name'][$i];
-            $file_tmp = $_FILES['zip_files']['tmp_name'][$i];
-            $file_error = $_FILES['zip_files']['error'][$i];
-
-            if (!defined('WP_CLI') || !WP_CLI) {
-                $progress = round(($i + 1) / $file_count * 100);
-                echo '<script>updateProgress(' . ($i + 1) . ', ' . $file_count . ', "Extracting: ' . addslashes($file_name) . '");</script>';
-                ob_flush();
-                flush();
-            }
-
-            // Check for upload errors
-            if ($file_error !== UPLOAD_ERR_OK) {
-                $error_msg = "Upload error for $file_name: $file_error";
-                clean_sweep_log_message($error_msg, 'error');
-                $results['failed'][] = ['file' => $file_name, 'error' => $error_msg];
-
-                if (!defined('WP_CLI') || !WP_CLI) {
-                    echo '<div style="background:#fff3cd;border:1px solid #ffeaa7;padding:10px;border-radius:4px;margin:10px 0;color:#856404;">';
-                    echo '<strong>⚠️ Skipped:</strong> ' . htmlspecialchars($file_name) . ' - Upload error';
-                    echo '</div>';
-                }
-                continue;
-            }
-
-            // Validate file type
-            if (!preg_match('/\.zip$/i', $file_name)) {
-                $error_msg = "Invalid file type: $file_name";
-                clean_sweep_log_message($error_msg, 'error');
-                $results['failed'][] = ['file' => $file_name, 'error' => $error_msg];
-
-                if (!defined('WP_CLI') || !WP_CLI) {
-                    echo '<div style="background:#fff3cd;border:1px solid #ffeaa7;padding:10px;border-radius:4px;margin:10px 0;color:#856404;">';
-                    echo '<strong>⚠️ Skipped:</strong> ' . htmlspecialchars($file_name) . ' - Invalid file type';
-                    echo '</div>';
-                }
-                continue;
-            }
-
-            // Extract the ZIP file
-            clean_sweep_log_message("Extracting ZIP file $file_name to $full_extract_path");
-            $result = clean_sweep_unzip_file($file_tmp, $full_extract_path);
-
-            if (is_wp_error($result)) {
-                $error_msg = "Failed to extract $file_name: " . $result->get_error_message();
-                clean_sweep_log_message($error_msg, 'error');
-                $results['failed'][] = ['file' => $file_name, 'error' => $result->get_error_message()];
-
-                if (!defined('WP_CLI') || !WP_CLI) {
-                    echo '<div style="background:#f8d7da;border:1px solid #f5c6cb;padding:10px;border-radius:4px;margin:10px 0;color:#721c24;">';
-                    echo '<strong>❌ Failed:</strong> ' . htmlspecialchars($file_name) . ' - ' . htmlspecialchars($result->get_error_message());
-                    echo '</div>';
-                }
-            } else {
-                clean_sweep_log_message("Successfully extracted: $file_name");
-                $results['successful'][] = $file_name;
-
-                if (!defined('WP_CLI') || !WP_CLI) {
-                    echo '<div style="background:#d4edda;border:1px solid #c3e6cb;padding:10px;border-radius:4px;margin:10px 0;color:#155724;">';
-                    echo '<strong>✅ Extracted:</strong> ' . htmlspecialchars($file_name);
-                    echo '</div>';
-                }
-            }
-        }
-
-        $success_count = count($results['successful']);
-        $fail_count = count($results['failed']);
-
-        clean_sweep_log_message("ZIP extraction batch completed. Success: $success_count, Failed: $fail_count");
-
-        // Display final results
-        if (!defined('WP_CLI') || !WP_CLI) {
-            echo '<h2>📁 ZIP Extraction Batch Complete</h2>';
-            echo '<div style="background:#e7f3ff;border:1px solid #b8daff;padding:20px;border-radius:4px;margin:20px 0;">';
-            echo '<h3>📊 Batch Results Summary</h3>';
-            echo '<div style="display:flex;gap:20px;margin:15px 0;">';
-            echo '<div style="background:#d4edda;color:#155724;padding:10px;border-radius:4px;text-align:center;min-width:80px;">';
-            echo '<div style="font-size:24px;font-weight:bold;">' . $success_count . '</div>';
-            echo '<div style="font-size:12px;">Successful</div>';
-            echo '</div>';
-            echo '<div style="background:#f8d7da;color:#721c24;padding:10px;border-radius:4px;text-align:center;min-width:80px;">';
-            echo '<div style="font-size:24px;font-weight:bold;">' . $fail_count . '</div>';
-            echo '<div style="font-size:12px;">Failed</div>';
-            echo '</div>';
-            echo '<div style="background:#f8f9fa;color:#666;padding:10px;border-radius:4px;text-align:center;min-width:80px;">';
-            echo '<div style="font-size:24px;font-weight:bold;">' . $file_count . '</div>';
-            echo '<div style="font-size:12px;">Total</div>';
-            echo '</div>';
-            echo '</div>';
-
-            if ($success_count > 0) {
-                echo '<p><strong>Extracted to:</strong> <code>' . htmlspecialchars($full_extract_path) . '</code></p>';
-                echo '<p><strong>Note:</strong> Standard ZIP extraction - existing files overwritten but external files preserved.</p>';
-            }
-
-            echo '<button class="back-to-menu-btn visible" onclick="window.location.reload()">⬅️ Back to Main Menu</button>';
-
-            echo '</div>';
-        } else {
-            echo "\n📁 ZIP EXTRACTION BATCH COMPLETE\n";
-            echo str_repeat("=", 50) . "\n";
-            echo "Total files: $file_count\n";
-            echo "Successful: $success_count\n";
-            echo "Failed: $fail_count\n";
-            echo "Extracted to: $full_extract_path\n";
-            echo str_repeat("=", 50) . "\n";
-        }
-
-        return [
-            'success' => $fail_count === 0,
-            'total_files' => $file_count,
-            'successful' => $results['successful'],
-            'failed' => $results['failed'],
-            'extract_path' => $full_extract_path
-        ];
-    }
-}

@@ -1,0 +1,567 @@
+<?php
+/**
+ * Chunked high-value sampling for the visit store.
+ */
+final class CleanSweep_Census {
+
+    private const PHP_EXTS = ['php', 'phtml', 'php3', 'php4', 'php5', 'php7', 'php8', 'phar'];
+
+    private const EXTRA_PHP_PER_TREE = 2500;
+    private const UPLOAD_PHP_CAP = 2000;
+    private const UPLOAD_IMAGE_CAP = 400;
+    private const UPLOAD_ALL_MEDIA_CAP = 800;
+    private const WP_CONTENT_OTHER_CAP = 2000;
+
+    private CleanSweep_VisitCapabilities $caps;
+    private CleanSweep_VisitStore $store;
+
+    public function __construct(?CleanSweep_VisitStore $store = null, ?CleanSweep_VisitCapabilities $caps = null) {
+        $this->store = $store ?: new CleanSweep_VisitStore();
+        $this->caps = $caps ?: CleanSweep_VisitCapabilities::instance();
+    }
+
+    public function store(): CleanSweep_VisitStore {
+        return $this->store;
+    }
+
+    public function sample_file(string $abs): array {
+        return [
+            'hash' => $this->caps->hash_path($abs),
+            'size' => $this->caps->size($abs),
+            'mtime' => $this->caps->mtime($abs),
+            'ctime' => $this->caps->ctime($abs),
+            'inode' => $this->inode($abs),
+        ];
+    }
+
+    public function run_phase(string $phase, int $offset = 0): array {
+        switch ($phase) {
+            case 'site_owned':
+                return $this->phase_site_owned();
+            case 'extra_php':
+                return $this->phase_extra_php($offset);
+            case 'wp_content':
+                return $this->phase_wp_content($offset);
+            case 'uploads':
+                return $this->phase_uploads($offset);
+            case 'options':
+                return $this->phase_options();
+            default:
+                return ['done' => true, 'next' => null, 'count' => 0];
+        }
+    }
+
+    private function phase_site_owned(): array {
+        $root = $this->site_root();
+        $names = [
+            'wp-config.php', '.htaccess', '.user.ini', 'php.ini', 'web.config',
+            'wp-content/db.php', 'wp-content/object-cache.php',
+            'wp-content/advanced-cache.php', 'wp-content/sunrise.php',
+        ];
+        $samples = [];
+        foreach ($names as $rel) {
+            $abs = $root . $rel;
+            if (is_file($abs) && is_readable($abs)) {
+                $samples[$rel] = $this->sample_file($abs);
+            }
+        }
+        $mu = $root . 'wp-content/mu-plugins';
+        if (is_dir($mu)) {
+            foreach ($this->list_php($mu, 80) as $abs) {
+                $rel = $this->rel($root, $abs);
+                $samples[$rel] = $this->sample_file($abs);
+            }
+        }
+        foreach ($this->list_root_extra_php($root) as $abs) {
+            $rel = $this->rel($root, $abs);
+            $samples[$rel] = $this->sample_file($abs);
+        }
+        $unexpected = $this->store->diff_bucket('site_owned', $samples);
+        $this->store->add_unexpected($unexpected);
+        $this->store->state()->event('census:site-owned', (string) count($samples));
+        return ['done' => true, 'next' => 'extra_php', 'count' => count($samples)];
+    }
+
+    /**
+     * Live path => {hash} for the portable snapshot (and import drift).
+     *
+     * @return array{site_owned:array<string,array>,extra_php:array<string,array>,uploads:array<string,array>}
+     */
+    public function collect_watch(bool $all_media = false): array {
+        $root = $this->site_root();
+        return [
+            'site_owned' => $this->hash_rels($this->list_site_owned_abs($root), $root),
+            'extra_php' => $this->hash_rels($this->list_plugin_theme_php($root, self::EXTRA_PHP_PER_TREE), $root),
+            'wp_content' => $this->hash_rels($this->list_wp_content_other($root, self::WP_CONTENT_OTHER_CAP), $root),
+            'uploads' => $this->hash_upload_watch($root, $all_media),
+        ];
+    }
+
+    private function phase_extra_php(int $offset): array {
+        $root = $this->site_root();
+        $dirs = [];
+        foreach (['wp-content/plugins', 'wp-content/themes'] as $d) {
+            if (is_dir($root . $d)) {
+                $dirs[] = $root . $d;
+            }
+        }
+        $all = [];
+        foreach ($dirs as $dir) {
+            $all = array_merge($all, $this->list_php($dir, self::EXTRA_PHP_PER_TREE));
+        }
+        $slice = array_slice($all, $offset, 80);
+        $samples = [];
+        foreach ($slice as $abs) {
+            $samples[$this->rel($root, $abs)] = $this->sample_file($abs);
+        }
+        $prev = $this->store->samples('extra_php');
+        $merged = $prev;
+        foreach ($samples as $k => $v) {
+            $merged[$k] = $v;
+        }
+        $next_off = $offset + count($slice);
+        $done = $next_off >= count($all);
+        if ($done) {
+            $unexpected = $this->store->diff_bucket('extra_php', $merged);
+            $this->store->add_unexpected($unexpected);
+            $this->store->state()->event('census:extra-php', (string) count($merged));
+        } else {
+            $this->store->put_samples('extra_php', $samples, false);
+        }
+        return [
+            'done' => $done,
+            'next' => $done ? 'wp_content' : 'extra_php',
+            'offset' => $done ? 0 : $next_off,
+            'count' => count($slice),
+        ];
+    }
+
+    private function phase_wp_content(int $offset): array {
+        $root = $this->site_root();
+        $all = $this->list_wp_content_other($root, self::WP_CONTENT_OTHER_CAP);
+        $slice = array_slice($all, $offset, 80);
+        $samples = [];
+        foreach ($slice as $abs) {
+            $samples[$this->rel($root, $abs)] = $this->sample_file($abs);
+        }
+        $prev = $this->store->samples('wp_content');
+        $merged = $prev;
+        foreach ($samples as $k => $v) {
+            $merged[$k] = $v;
+        }
+        $next_off = $offset + count($slice);
+        $done = $next_off >= count($all);
+        if ($done) {
+            $unexpected = $this->store->diff_bucket('wp_content', $merged);
+            $this->store->add_unexpected($unexpected);
+            $this->store->state()->event('census:wp-content', (string) count($merged));
+        } else {
+            $this->store->put_samples('wp_content', $samples, false);
+        }
+        return [
+            'done' => $done,
+            'next' => $done ? 'uploads' : 'wp_content',
+            'offset' => $done ? 0 : $next_off,
+            'count' => count($slice),
+        ];
+    }
+
+    private function phase_uploads(int $offset): array {
+        $root = $this->site_root();
+        $dir = $root . 'wp-content/uploads';
+        if (!is_dir($dir)) {
+            $this->store->state()->event('census:uploads', '0');
+            return ['done' => true, 'next' => 'options', 'count' => 0];
+        }
+        $state = $this->store->state()->load();
+        $all_media = !empty($state['include_all_media']);
+        $all = $this->list_upload_watch_abs($dir, $all_media);
+        $slice = array_slice($all, $offset, 40);
+        $samples = [];
+        foreach ($slice as $abs) {
+            $samples[$this->rel($root, $abs)] = $this->sample_file($abs) + [
+                'php_in_image' => $this->php_in_image($abs),
+            ];
+        }
+        $prev = $this->store->samples('uploads');
+        $merged = $prev + $samples;
+        $next_off = $offset + count($slice);
+        $done = $next_off >= count($all);
+        if ($done) {
+            $unexpected = $this->store->diff_bucket('uploads', $merged);
+            $this->store->add_unexpected($unexpected);
+            $this->store->state()->event('census:uploads', (string) count($merged));
+        } else {
+            $this->store->put_samples('uploads', $samples, false);
+        }
+        return [
+            'done' => $done,
+            'next' => $done ? 'options' : 'uploads',
+            'offset' => $done ? 0 : $next_off,
+            'count' => count($slice),
+        ];
+    }
+
+    private function phase_options(): array {
+        $keys = ['siteurl', 'home', 'default_role', 'users_can_register', 'active_plugins', 'template', 'stylesheet'];
+        $opts = [];
+        foreach ($keys as $key) {
+            if (function_exists('get_option')) {
+                $val = get_option($key);
+                $opts[$key] = is_scalar($val) ? (string) $val : md5(serialize($val));
+            }
+        }
+        $this->store->put_options($opts);
+        $this->store->state()->event('census:options', (string) count($opts));
+        return ['done' => true, 'next' => null, 'count' => count($opts)];
+    }
+
+    /**
+     * Find copies of a basename and/or hash under the site (not CS internals noise).
+     *
+     * @return array<int,array{path:string,hash:?string}>
+     */
+    public function find_elsewhere(string $basename, ?string $hash = null, int $limit = 40): array {
+        $root = $this->site_root();
+        $hits = [];
+        $skip = [
+            '/node_modules/',
+            '/.git/',
+            '/cache/',
+            '/clean-sweep/logs/',
+            '/clean-sweep/backups/',
+            '/clean-sweep/core/fresh/',
+            '/core/fresh/',
+        ];
+        if (!is_dir($root)) {
+            return $hits;
+        }
+        $iter = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS)
+        );
+        $base_l = strtolower($basename);
+        foreach ($iter as $file) {
+            if (!$file->isFile()) {
+                continue;
+            }
+            $abs = str_replace('\\', '/', $file->getPathname());
+            $ok = false;
+            foreach ($skip as $s) {
+                if (strpos($abs, $s) !== false) {
+                    $ok = true;
+                    break;
+                }
+            }
+            if ($ok) {
+                continue;
+            }
+            $name = strtolower($file->getFilename());
+            $h = null;
+            $name_match = ($name === $base_l);
+            if (!$name_match && $hash === null) {
+                continue;
+            }
+            if ($hash !== null) {
+                $h = $this->caps->hash_path($abs);
+                if (!$name_match && $h !== $hash) {
+                    continue;
+                }
+            }
+            if ($name_match || ($hash !== null && $h === $hash)) {
+                $hits[] = [
+                    'path' => $this->rel($root, $abs),
+                    'hash' => $h ?? $this->caps->hash_path($abs),
+                ];
+            }
+            if (count($hits) >= $limit) {
+                break;
+            }
+        }
+        return $hits;
+    }
+
+    /** Official packaged root PHP — not "random" extras. */
+    private function official_root_php(): array {
+        return [
+            'index.php', 'wp-activate.php', 'wp-blog-header.php', 'wp-comments-post.php',
+            'wp-config.php', 'wp-config-sample.php', 'wp-cron.php', 'wp-links-opml.php',
+            'wp-load.php', 'wp-login.php', 'wp-mail.php', 'wp-settings.php',
+            'wp-signup.php', 'wp-trackback.php', 'xmlrpc.php',
+        ];
+    }
+
+    /** @return string[] absolute paths */
+    private function list_site_owned_abs(string $root): array {
+        $out = [];
+        $names = [
+            'wp-config.php', '.htaccess', '.user.ini', 'php.ini', 'web.config',
+            'wp-content/db.php', 'wp-content/object-cache.php',
+            'wp-content/advanced-cache.php', 'wp-content/sunrise.php',
+        ];
+        foreach ($names as $rel) {
+            $abs = $root . $rel;
+            if (is_file($abs) && is_readable($abs)) {
+                $out[] = $abs;
+            }
+        }
+        $mu = $root . 'wp-content/mu-plugins';
+        if (is_dir($mu)) {
+            $out = array_merge($out, $this->list_php($mu, 80));
+        }
+        return array_merge($out, $this->list_root_extra_php($root));
+    }
+
+    /** @return string[] */
+    private function list_plugin_theme_php(string $root, int $per_tree): array {
+        $out = [];
+        foreach (['wp-content/plugins', 'wp-content/themes'] as $d) {
+            if (is_dir($root . $d)) {
+                $out = array_merge($out, $this->list_php($root . $d, $per_tree));
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * @param string[] $abs_list
+     * @return array<string,array{hash:?string}>
+     */
+    private function hash_rels(array $abs_list, string $root): array {
+        $out = [];
+        foreach ($abs_list as $abs) {
+            $rel = $this->rel($root, $abs);
+            if ($rel === '') {
+                continue;
+            }
+            $out[$rel] = ['hash' => $this->caps->hash_path($abs)];
+        }
+        return $out;
+    }
+
+    /**
+     * PHP / configs first so images cannot crowd them out of the cap.
+     *
+     * @return array<string,array{hash:?string,php_in_image?:bool}>
+     */
+    private function hash_upload_watch(string $root, bool $all_media): array {
+        $dir = $root . 'wp-content/uploads';
+        $out = [];
+        foreach ($this->list_upload_watch_abs($dir, $all_media) as $abs) {
+            $rel = $this->rel($root, $abs);
+            if ($rel === '') {
+                continue;
+            }
+            $row = ['hash' => $this->caps->hash_path($abs)];
+            if ($this->php_in_image($abs)) {
+                $row['php_in_image'] = true;
+            }
+            $out[$rel] = $row;
+        }
+        return $out;
+    }
+
+    /**
+     * Executables under wp-content that are not plugins/themes/uploads/mu-plugins.
+     * Catches wp-content/evil.php, cache/, upgrade/, and other dropper dirs.
+     *
+     * @return string[]
+     */
+    private function list_wp_content_other(string $root, int $max): array {
+        $dir = $root . 'wp-content';
+        if (!is_dir($dir)) {
+            return [];
+        }
+        $skip_dirs = [
+            'plugins' => true,
+            'themes' => true,
+            'uploads' => true,
+            'mu-plugins' => true,
+            'node_modules' => true,
+            '.git' => true,
+            'clean-sweep' => true,
+        ];
+        $skip_files = [
+            'db.php' => true,
+            'object-cache.php' => true,
+            'advanced-cache.php' => true,
+            'sunrise.php' => true,
+        ];
+        $out = [];
+        try {
+            $inner = new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS);
+            $filtered = new RecursiveCallbackFilterIterator($inner, static function ($current) use ($skip_dirs) {
+                if ($current->isDir()) {
+                    return !isset($skip_dirs[strtolower($current->getFilename())]);
+                }
+                return true;
+            });
+            $iter = new RecursiveIteratorIterator($filtered);
+        } catch (Throwable $e) {
+            return [];
+        }
+        foreach ($iter as $file) {
+            if (!$file->isFile()) {
+                continue;
+            }
+            $base = $file->getFilename();
+            if (isset($skip_files[strtolower($base)])) {
+                continue;
+            }
+            $ext = strtolower($file->getExtension());
+            $watch = in_array($ext, self::PHP_EXTS, true)
+                || $base === '.htaccess'
+                || $base === '.user.ini'
+                || (bool) preg_match('/\.(?:php\d*|phtml|phar)(?:\.|$)/i', $base);
+            if (!$watch) {
+                continue;
+            }
+            $out[] = $file->getPathname();
+            if (count($out) >= $max) {
+                break;
+            }
+        }
+        return $out;
+    }
+
+    /** Extra PHP sitting in the WordPress root (common dropper target). */
+    private function list_root_extra_php(string $root): array {
+        $out = [];
+        $official = array_flip($this->official_root_php());
+        foreach (['php', 'phtml', 'phar'] as $ext) {
+            foreach (glob($root . '*.' . $ext) ?: [] as $abs) {
+                $base = basename($abs);
+                if (isset($official[$base])) {
+                    continue;
+                }
+                $out[] = $abs;
+            }
+        }
+        return $out;
+    }
+
+    /** @return string[] */
+    private function list_php(string $dir, int $max): array {
+        $out = [];
+        $iter = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS)
+        );
+        foreach ($iter as $file) {
+            if (!$file->isFile()) {
+                continue;
+            }
+            $ext = strtolower($file->getExtension());
+            if (!in_array($ext, self::PHP_EXTS, true)) {
+                continue;
+            }
+            $out[] = $file->getPathname();
+            if (count($out) >= $max) {
+                break;
+            }
+        }
+        return $out;
+    }
+
+    /** @return string[] PHP/configs first, then a capped set of images. */
+    private function list_upload_watch_abs(string $dir, bool $all_media): array {
+        if (!is_dir($dir)) {
+            return [];
+        }
+        $php = [];
+        $media = [];
+        $iter = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS)
+        );
+        foreach ($iter as $file) {
+            if (!$file->isFile()) {
+                continue;
+            }
+            $base = $file->getFilename();
+            $ext = strtolower($file->getExtension());
+            $is_php = in_array($ext, self::PHP_EXTS, true)
+                || in_array($base, ['.htaccess', '.user.ini'], true)
+                || (bool) preg_match('/\.(?:php\d*|phtml|phar)(?:\.|$)/i', $base);
+            if ($is_php) {
+                $php[] = $file->getPathname();
+                if (count($php) >= self::UPLOAD_PHP_CAP) {
+                    break;
+                }
+                continue;
+            }
+            $is_image = in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'], true);
+            if ($all_media || $is_image) {
+                $media[] = $file->getPathname();
+            }
+        }
+        $media_cap = $all_media ? self::UPLOAD_ALL_MEDIA_CAP : self::UPLOAD_IMAGE_CAP;
+        if (!$all_media) {
+            $kept = [];
+            foreach (array_slice($media, 0, $media_cap) as $abs) {
+                if ($this->php_in_image($abs)) {
+                    $kept[] = $abs;
+                }
+            }
+            $media = $kept;
+        } else {
+            $media = array_slice($media, 0, $media_cap);
+        }
+        return array_merge($php, $media);
+    }
+
+    private function php_in_image(string $abs): bool {
+        if (!$this->caps->fopen || !is_readable($abs)) {
+            return false;
+        }
+        $ext = strtolower(pathinfo($abs, PATHINFO_EXTENSION));
+        if (!in_array($ext, ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'], true)) {
+            return false;
+        }
+        $fh = @fopen($abs, 'rb');
+        if (!$fh) {
+            return false;
+        }
+        $head = (string) fread($fh, 4096);
+        $tail = '';
+        $size = $this->caps->size($abs);
+        if ($size !== null && $size > 8192) {
+            fseek($fh, -4096, SEEK_END);
+            $tail = (string) fread($fh, 4096);
+        }
+        fclose($fh);
+        $blob = $head . $tail;
+        if (stripos($blob, '<?php') !== false || stripos($blob, '<?=') !== false) {
+            return true;
+        }
+        return false;
+    }
+
+    private function inode(string $abs): ?int {
+        $st = @stat($abs);
+        if (!is_array($st) || !isset($st['ino'])) {
+            return null;
+        }
+        return (int) $st['ino'];
+    }
+
+    private function site_root(): string {
+        if (!function_exists('clean_sweep_detect_site_root')) {
+            $f = (defined('CLEAN_SWEEP_ROOT') ? CLEAN_SWEEP_ROOT : dirname(__DIR__, 2) . '/')
+                . 'features/maintenance/core-reinstall.php';
+            if (is_readable($f)) {
+                require_once $f;
+            }
+        }
+        if (function_exists('clean_sweep_detect_site_root')) {
+            return clean_sweep_detect_site_root();
+        }
+        return defined('ABSPATH') ? rtrim(str_replace('\\', '/', ABSPATH), '/') . '/' : '/';
+    }
+
+    private function rel(string $root, string $abs): string {
+        $root = rtrim(str_replace('\\', '/', $root), '/') . '/';
+        $abs = str_replace('\\', '/', $abs);
+        if (strpos($abs, $root) === 0) {
+            return substr($abs, strlen($root));
+        }
+        return ltrim($abs, '/');
+    }
+}

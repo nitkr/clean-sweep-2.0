@@ -40,15 +40,15 @@ class CleanSweep_Application {
 
         switch ($action) {
             case 'analyze_plugins':
-                $this->handle_analyze_plugins();
+                $this->clean_sweep_handle_analyze_plugins();
                 break;
 
             case 'reinstall_plugins':
-                $this->handle_reinstall_plugins();
+                $this->clean_sweep_handle_reinstall_plugins();
                 break;
 
             case 'reinstall_core':
-                $this->handle_reinstall_core();
+                $this->clean_sweep_handle_reinstall_core();
                 break;
 
             case 'establish_core_baseline':
@@ -56,11 +56,11 @@ class CleanSweep_Application {
                 break;
 
             case 'export_baseline':
-                $this->handle_export_baseline();
+                $this->clean_sweep_handle_export_baseline();
                 break;
 
             case 'import_baseline':
-                $this->handle_import_baseline();
+                $this->clean_sweep_handle_import_baseline();
                 break;
 
             case 'compare_baselines':
@@ -72,7 +72,7 @@ class CleanSweep_Application {
                 break;
 
             case 'extract_zip':
-                $this->handle_extract_zip();
+                $this->clean_sweep_handle_extract_zip();
                 break;
 
             case 'scan_malware':
@@ -99,7 +99,7 @@ class CleanSweep_Application {
         }
     }
 
-    private function handle_analyze_plugins() {
+    private function clean_sweep_handle_analyze_plugins() {
         $progress_file = isset($_POST['progress_file']) ? $_POST['progress_file'] : null;
 
         if ($progress_file) {
@@ -118,10 +118,10 @@ class CleanSweep_Application {
             ];
             clean_sweep_write_progress_file($progress_file, $completion_data);
 
-            // 2. Now capture ONLY the clean HTML
-            ob_start();
-            clean_sweep_display_plugins_tab_content($analysis_results);
-            $html_content = ob_get_clean();
+            // 2. Now capture ONLY the clean HTML - skip plugin content generation
+            // Alpine.js will handle displaying results via the API
+            $html_content = '';
+            // Results will be loaded via AJAX calls to the API endpoints
 
             // 3. Clean all output buffers to ensure nothing else is sent
             while (ob_get_level() > 0) {
@@ -148,11 +148,12 @@ class CleanSweep_Application {
             }
 
             $analysis_results = clean_sweep_analyze_plugins();
-            clean_sweep_display_toolkit_interface($analysis_results);
+            // For regular requests, just show the Alpine.js UI - results will be loaded via AJAX
+            // The UI will handle displaying results through the API endpoints
         }
     }
 
-    private function handle_reinstall_plugins() {
+    private function clean_sweep_handle_reinstall_plugins() {
         $progress_file = isset($_POST['progress_file']) ? $_POST['progress_file'] : null;
         $batch_start = isset($_POST['batch_start']) ? intval($_POST['batch_start']) : 0;
         $batch_size = isset($_POST['batch_size']) ? intval($_POST['batch_size']) : 5;
@@ -312,9 +313,9 @@ class CleanSweep_Application {
                     clean_sweep_write_progress_file($progress_file, $completion_data);
 
                     // Generate HTML for final batch using real verification results
-                    ob_start();
-                    clean_sweep_display_final_results($reinstall_results, $verification_results);
-                    $html_content = ob_get_clean();
+                    // Skip HTML content generation - Alpine.js will handle displaying results via API
+                    $html_content = '';
+                    // Results will be loaded via AJAX calls to the API endpoints
                 } else {
                     // More batches to process - return batch info
                     $html_content = '';
@@ -363,7 +364,7 @@ class CleanSweep_Application {
         }
     }
 
-    private function handle_reinstall_core() {
+    private function clean_sweep_handle_reinstall_core() {
         $wp_version = isset($_POST['wp_version']) ? $_POST['wp_version'] : 'latest';
         clean_sweep_execute_core_reinstallation($wp_version);
     }
@@ -398,7 +399,7 @@ class CleanSweep_Application {
         }
     }
 
-    private function handle_export_baseline() {
+    private function clean_sweep_handle_export_baseline() {
         try {
             // Clean output buffers
             while (ob_get_level() > 0) {
@@ -438,7 +439,7 @@ class CleanSweep_Application {
         }
     }
 
-    private function handle_import_baseline() {
+    private function clean_sweep_handle_import_baseline() {
         try {
             // Clean output buffers
             while (ob_get_level() > 0) {
@@ -567,30 +568,21 @@ class CleanSweep_Application {
         }
     }
 
-    private function handle_extract_zip() {
-        // DEBUG: Check /core/fresh state before processing
-        // CleanSweep_Application.php is in /includes/system/, so go up 2 levels to project root, then down to /core/fresh
-        $fresh_dir_before = __DIR__ . '/../../core/fresh';
-        $file_php_before = $fresh_dir_before . '/wp-admin/includes/file.php';
-        clean_sweep_log_message("DEBUG: At handle_extract_zip start - /core/fresh exists: " . (is_dir($fresh_dir_before) ? 'YES' : 'NO'), 'debug');
-        clean_sweep_log_message("DEBUG: At handle_extract_zip start - file.php exists: " . (file_exists($file_php_before) ? 'YES' : 'NO'), 'debug');
-
-        // Output HTML header for proper page structure
-        clean_sweep_output_html_header();
-
-        if (!defined('WP_CLI') || !WP_CLI) {
-            echo '<h2>📁 ZIP Extraction Started</h2>';
-            echo '<div style="background:#e7f3ff;border:1px solid #b8daff;padding:20px;border-radius:4px;margin:20px 0;">';
-            echo '<p><strong>Process initiated successfully!</strong> Extracting uploaded ZIP file...</p>';
-            echo '</div>';
-            ob_flush();
-            flush();
+    private function clean_sweep_handle_extract_zip() {
+        if (function_exists('clean_sweep_log_message')) {
+            clean_sweep_log_message('HTML extract_zip is gone; use the JSON upload API', 'info');
         }
-
-        clean_sweep_execute_zip_extraction();
-
-        // Output HTML footer for complete page structure
-        clean_sweep_output_html_footer();
+        if (!headers_sent()) {
+            http_response_code(410);
+            header('Content-Type: application/json; charset=utf-8');
+        }
+        echo json_encode([
+            'success' => false,
+            'error' => 'HTML ZIP extract is no longer available. Use the JSON upload API.',
+            'code' => 'GONE',
+            'timestamp' => time(),
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        exit;
     }
 
     private function handle_scan_malware() {
@@ -599,7 +591,10 @@ class CleanSweep_Application {
         if ($progress_file) {
             $this->handle_scan_malware_ajax($progress_file);
         } else {
-            // Regular request - show progress and results
+            // Regular request: kick off a background scan and let the UI
+            // poll for status. We do NOT run the scan synchronously
+            // anymore (that was the root cause of "scan doesn't finish" -
+            // a single-request drain would hit the host's max_execution_time).
             if (!defined('WP_CLI') || !WP_CLI) {
                 echo '<h2>🔍 Malware Scan Started</h2>';
                 echo '<div style="background:#e7f3ff;border:1px solid #b8daff;padding:20px;border-radius:4px;margin:20px 0;">';
@@ -609,13 +604,15 @@ class CleanSweep_Application {
                 flush();
             }
 
-            $scan_results = clean_sweep_execute_malware_scan();
-            clean_sweep_display_toolkit_interface(null, $scan_results);
+            $profile_id = $_POST['profile_id'] ?? 'standard';
+            $scan_id = $this->start_background_scan($profile_id);
+            echo '<p>Scan ID: <code>' . htmlspecialchars($scan_id) . '</code></p>';
         }
     }
 
     private function handle_scan_malware_ajax($progress_file) {
-        // AJAX request - return JSON response
+        // AJAX request: start a background scan via CleanSweep_Scanner, write the
+        // progress file cache, return JSON with the scan_id.
         register_shutdown_function(function() {
             $error = error_get_last();
             if ($error && in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR])) {
@@ -628,97 +625,64 @@ class CleanSweep_Application {
         });
 
         try {
-            while (ob_get_level() > 0) {
-                ob_end_clean();
-            }
-
+            while (ob_get_level() > 0) ob_end_clean();
             ob_start();
-            $analysis_results = clean_sweep_execute_malware_scan();
+
+            $profile_id = $_POST['profile_id'] ?? 'standard';
+            // Match api/malware.php: Svelte JSON-stringifies custom_config into FormData.
+            require_once CLEAN_SWEEP_ROOT . 'features/security/scan/Scanner.php';
+            $raw_cfg = $_POST['custom_config'] ?? null;
+            if (is_array($raw_cfg)) {
+                $custom_config = $raw_cfg;
+            } elseif (is_string($raw_cfg) && $raw_cfg !== '') {
+                $decoded = json_decode(stripslashes($raw_cfg), true);
+                if (!is_array($decoded)) {
+                    throw new CleanSweep_ScanConfigException(
+                        'custom_config must be a valid JSON object',
+                        'INVALID_CUSTOM_CONFIG'
+                    );
+                }
+                $custom_config = $decoded;
+            } else {
+                $custom_config = [];
+            }
+            $custom_config = CleanSweep_Scanner::normalizeCustomConfigScalars($custom_config);
+            $scan_id = $this->start_background_scan($profile_id, $custom_config);
+
+            // Write the initial progress file so the UI can begin polling
+            // status immediately without waiting for a tick.
+            @clean_sweep_write_progress_file($progress_file, [
+                'status' => 'acknowledged',
+                'scan_id' => $scan_id,
+                'profile_id' => $profile_id,
+                'progress' => 0,
+                'message' => 'Scan acknowledged, starting...',
+                'timestamp' => time(),
+            ]);
             ob_end_clean();
-
-            if (!is_array($analysis_results)) {
-                throw new Exception("Scan function returned invalid response type: " . gettype($analysis_results));
-            }
-
-            while (ob_get_level() > 0) {
-                ob_end_clean();
-            }
-
-            $total_threats = isset($analysis_results['summary']['total_threats']) ? $analysis_results['summary']['total_threats'] : 0;
-
-            if ($total_threats > 50) {
-                $request_id = 'scan_' . time() . '_' . mt_rand(1000, 9999);
-                $cache_file = PROGRESS_DIR . '/' . 'threat_cache_' . $request_id . '.json';
-
-                if (!is_dir(TEMP_DIR)) {
-                    mkdir(TEMP_DIR, 0755, true);
-                    clean_sweep_log_message("Created temp directory: " . TEMP_DIR, 'info');
-                }
-
-                $full_results_for_cache = clean_sweep_sanitize_utf8_array($analysis_results);
-                file_put_contents($cache_file, json_encode($full_results_for_cache, JSON_UNESCAPED_UNICODE), LOCK_EX);
-                if (file_exists($cache_file)) {
-                    chmod($cache_file, 0644);
-                    clean_sweep_log_message("Cached {$total_threats} threat results to: {$cache_file}", 'info');
-                }
-
-                $analysis_results['truncated'] = true;
-                $analysis_results['request_id'] = $request_id;
-                $analysis_results['full_count'] = $total_threats;
-                $analysis_results['log_file_reference'] = LOGS_DIR . LOG_FILE;
-                $analysis_results['truncation_message'] = "Results truncated for browser performance. Found {$total_threats} total threats. Use the buttons below to load additional results.";
-
-                foreach (['database', 'files'] as $section) {
-                    if (isset($analysis_results[$section]) && is_array($analysis_results[$section])) {
-                        foreach ($analysis_results[$section] as $key => &$value) {
-                            if (is_array($value) && count($value) > 10) {
-                                $value = array_slice($value, 0, 10, true);
-                            }
-                        }
-                    }
-                }
-            }
-
-            ob_start();
-            clean_sweep_display_malware_scan_results($analysis_results);
-            $html_content = ob_get_clean();
-
-            ob_start();
-            $completion_data = [
-                'status' => 'complete',
-                'progress' => 100,
-                'message' => $analysis_results['truncation_message'] ?? 'Malware scan completed successfully!',
-                'results' => $analysis_results
-            ];
-            clean_sweep_write_progress_file($progress_file, $completion_data);
-            ob_end_clean();
-
-            while (ob_get_level() > 0) {
-                ob_end_clean();
-            }
-
-            header('Content-Type: application/json; charset=utf-8', true);
-            $safe_analysis_results = clean_sweep_sanitize_utf8_array($analysis_results);
-            $json_response = json_encode([
-                'success' => true,
-                'results' => $safe_analysis_results,
-                'html' => $html_content
-            ], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
-
-            if (json_last_error() !== JSON_ERROR_NONE) {
-                throw new Exception('JSON encoding failed: ' . json_last_error_msg());
-            }
 
             if (!headers_sent()) {
-                echo $json_response;
-            } else {
-                throw new Exception('Headers already sent - cannot send JSON');
+                header('Content-Type: application/json; charset=utf-8', true);
+                echo json_encode([
+                    'success' => true,
+                    'scan_id' => $scan_id,
+                    'status' => 'acknowledged',
+                    'progress_file' => $progress_file,
+                ], JSON_UNESCAPED_UNICODE);
+            }
+        } catch (CleanSweep_ScanConfigException $e) {
+            while (ob_get_level() > 0) ob_end_clean();
+            if (!headers_sent()) {
+                header('Content-Type: application/json; charset=utf-8', true);
+                http_response_code(400);
+                echo json_encode([
+                    'success' => false,
+                    'error' => $e->getMessage(),
+                    'code' => $e->errorCode,
+                ], JSON_UNESCAPED_UNICODE);
             }
         } catch (Exception $e) {
-            while (ob_get_level() > 0) {
-                ob_end_clean();
-            }
-
+            while (ob_get_level() > 0) ob_end_clean();
             if (!headers_sent()) {
                 header('Content-Type: application/json; charset=utf-8', true);
                 echo json_encode(['success' => false, 'error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
@@ -727,36 +691,66 @@ class CleanSweep_Application {
         exit;
     }
 
-    private function handle_run_integrity_check_async() {
-        // AJAX request - run integrity check asynchronously after malware scan completion
-        try {
-            while (ob_get_level() > 0) {
-                ob_end_clean();
+    /**
+     * Start a scan via the CleanSweep_Scanner and return the scan_id.
+     * Tries to fire-and-forget via fastcgi_finish_request() so the
+     * caller doesn't have to wait for the drain loop.
+     */
+    private function start_background_scan(string $profile_id, array $custom_config = []): string {
+        require_once CLEAN_SWEEP_ROOT . 'features/security/scan/Scanner.php';
+        // create('') then start() allocates the real scan_id — do not invent one here
+        // or the client would poll a different id than the checkpoint/queue.
+        $scanner = CleanSweep_Scanner::create('', $profile_id);
+        $handle = $scanner->start($profile_id, $custom_config);
+        $scan_id = $handle['scan_id'];
+
+        // Always schedule drain after the HTTP response is sent. On FPM,
+        // finish the request first; elsewhere shutdown still runs drain.
+        register_shutdown_function(function () use ($scanner, $scan_id) {
+            if (function_exists('fastcgi_finish_request')) {
+                while (ob_get_level() > 0) {
+                    @ob_end_clean();
+                }
+                @fastcgi_finish_request();
             }
+            $scanner->drain($scan_id);
+        });
 
-            // Run integrity check (may take time with large baselines)
+        return $scan_id;
+    }
+
+    private function handle_run_integrity_check_async() {
+        try {
+            while (ob_get_level() > 0) ob_end_clean();
+
             clean_sweep_log_message("🔍 Running asynchronous integrity check after malware scan", 'info');
-            $integrity_violations = clean_sweep_check_for_reinfection();
 
-            // Return JSON response with integrity violations
+            // Reuse the same function the CleanSweep_IntegrityWorker uses, so the
+            // two paths never diverge. We don't run a full scan here -
+            // the worker for this single integrity check is independent
+            // of the CleanSweep_Scanner's drain loop.
+            if (!function_exists('clean_sweep_check_for_reinfection')) {
+                throw new RuntimeException('Integrity function not available');
+            }
+            $violations = clean_sweep_check_for_reinfection();
+            $count = is_array($violations) ? count($violations) : 0;
+
             header('Content-Type: application/json; charset=utf-8', true);
             echo json_encode([
                 'success' => true,
-                'violations' => $integrity_violations,
-                'total_violations' => count($integrity_violations),
-                'message' => count($integrity_violations) > 0 ?
-                    "Found " . count($integrity_violations) . " integrity violations" :
-                    "No integrity violations detected"
+                'violations' => $violations,
+                'total_violations' => $count,
+                'message' => $count > 0
+                    ? "Found $count integrity violations"
+                    : "No integrity violations detected",
             ], JSON_UNESCAPED_UNICODE);
             exit;
         } catch (Exception $e) {
-            while (ob_get_level() > 0) {
-                ob_end_clean();
+            while (ob_get_level() > 0) ob_end_clean();
+            if (!headers_sent()) {
+                header('Content-Type: application/json; charset=utf-8', true);
+                echo json_encode(['success' => false, 'error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
             }
-
-            // Return error response
-            header('Content-Type: application/json; charset=utf-8', true);
-            echo json_encode(['success' => false, 'error' => $e->getMessage()], JSON_UNESCAPED_UNICODE);
             exit;
         }
     }
@@ -767,122 +761,42 @@ class CleanSweep_Application {
             exit;
         }
 
-        $request_id = isset($_POST['request_id']) ? $_POST['request_id'] : '';
-        $page = isset($_POST['page']) ? intval($_POST['page']) : 1;
-        $per_page = isset($_POST['per_page']) ? intval($_POST['per_page']) : 20;
+        $scan_id = isset($_POST['scan_id']) ? $_POST['scan_id'] : '';
+        $page = isset($_POST['page']) ? max(1, intval($_POST['page'])) : 1;
+        $per_page = isset($_POST['per_page']) ? max(1, min(500, intval($_POST['per_page']))) : 20;
 
-        clean_sweep_log_message("Load more threats request: request_id=$request_id, page=$page, per_page=$per_page", 'info');
-
-        if (empty($request_id) || !preg_match('/^scan_\d+_\d+$/', $request_id)) {
-            clean_sweep_log_message("ERROR: Invalid request_id format: $request_id", 'error');
-            echo json_encode(['success' => false, 'error' => 'Invalid request ID format']);
+        if (empty($scan_id) || !preg_match('/^bg_\d+_[a-f0-9]+$/', $scan_id)) {
+            echo json_encode(['success' => false, 'error' => 'Invalid scan_id']);
             exit;
         }
 
-        $temp_file = PROGRESS_DIR . '/' . 'threat_cache_' . $request_id . '.json';
+        // Read directly from the CleanSweep_ThreatStore (JSONL). No temp cache file.
+        require_once CLEAN_SWEEP_ROOT . 'features/security/scan/ThreatStore.php';
+        $store = new CleanSweep_ThreatStore($scan_id);
 
-        if (!file_exists($temp_file)) {
-            echo json_encode(['success' => false, 'error' => 'Results expired or not found']);
-            exit;
-        }
-
-        $full_results = json_decode(file_get_contents($temp_file), true);
-
-        if (!$full_results) {
-            echo json_encode(['success' => false, 'error' => 'Invalid cached results']);
-            exit;
-        }
-
-        clean_sweep_log_message("Cache loaded successfully. Database keys: " . implode(', ', array_keys($full_results['database'] ?? [])), 'info');
-        clean_sweep_log_message("Cache structure - Files keys: " . implode(', ', array_keys($full_results['files'] ?? [])), 'info');
-        clean_sweep_log_message("Cache summary - Total threats: " . ($full_results['summary']['total_threats'] ?? 0), 'info');
-
-        $all_threats = [];
-
-        $database_section = $full_results['database'] ?? [];
-        if (is_array($database_section)) {
-            foreach ($database_section as $key => $value) {
-                if (is_array($value) && !empty($value) && isset($value[0]['pattern'])) {
-                    foreach ($value as $threat) {
-                        if (is_array($threat)) {
-                            $threat['_table'] = $key;
-                            $threat['_section'] = 'database';
-                            $all_threats[] = $threat;
-                        }
-                    }
-                }
+        $offset = ($page - 1) * $per_page;
+        $paginated = [];
+        $idx = 0;
+        $total = 0;
+        $store->stream(function ($threat) use (&$paginated, &$idx, &$total, $offset, $per_page) {
+            if ($idx >= $offset && count($paginated) < $per_page) {
+                $paginated[] = $threat;
             }
-        }
-
-        $files_section = $full_results['files'] ?? [];
-        if (is_array($files_section)) {
-            foreach ($files_section as $key => $value) {
-                if (is_array($value) && !empty($value) && isset($value[0]['pattern'])) {
-                    foreach ($value as $threat) {
-                        if (is_array($threat)) {
-                            $threat['_file_category'] = $key;
-                            $threat['_section'] = 'files';
-                            $all_threats[] = $threat;
-                        }
-                    }
-                }
-            }
-        }
-
-        clean_sweep_log_message("Total flattened threats: " . count($all_threats), 'info');
-
-        $total_threats = count($all_threats);
-        $start = ($page - 1) * $per_page;
-        $paginated_threats = array_slice($all_threats, $start, $per_page);
-        $has_more = ($start + $per_page) < $total_threats;
-
-        ob_start();
-        foreach ($paginated_threats as $threat) {
-            $section = $threat['_section'];
-            unset($threat['_section'], $threat['_table'], $threat['_file_category']);
-
-            if ($section === 'database') {
-                echo '<li style="background:#f8f9fa;padding:10px;border-radius:4px;margin:10px 0;border:1px solid #dee2e6;">';
-                $table = $threat['_table'] ?? 'unknown';
-                echo '<div style="background:#007bff;color:white;padding:3px 8px;border-radius:3px;display:inline-block;font-size:11px;font-weight:bold;margin-bottom:5px;">📊 Database Threat</div><br>';
-                echo '<strong>Pattern:</strong> <code style="font-size:11px;">' . htmlspecialchars($threat['pattern'] ?? '') . '</code><br>';
-                echo '<strong>Match:</strong> <em style="font-size:12px;">' . htmlspecialchars($threat['match'] ?? '') . '</em><br>';
-
-                if (isset($threat['option_name'])) {
-                    echo '<strong>Option Name:</strong> <code>' . htmlspecialchars($threat['option_name']) . '</code><br>';
-                }
-                if (isset($threat['post_id'])) {
-                    echo '<strong>Post ID:</strong> ' . $threat['post_id'] . ' (<a href="post.php?post=' . $threat['post_id'] . '&action=edit" style="color:#007bff;text-decoration:none;font-size:11px;">Edit Post →</a>)<br>';
-                }
-                if (isset($threat['meta_key'])) {
-                    echo '<strong>Meta Key:</strong> <code>' . htmlspecialchars($threat['meta_key']) . '</code><br>';
-                }
-                if (isset($threat['comment_id'])) {
-                    echo '<strong>Comment ID:</strong> ' . $threat['comment_id'] . '<br>';
-                }
-                if (isset($threat['user_id'])) {
-                    echo '<strong>User ID:</strong> ' . $threat['user_id'] . '<br>';
-                }
-                echo '</li>';
-            } elseif ($section === 'files') {
-                echo '<li style="border:1px solid #f8d7da;padding:10px;border-radius:4px;margin:10px 0;background:#f8d7da;">';
-                echo '<strong>File:</strong> ' . htmlspecialchars($threat['file'] ?? '') . '<br>';
-                echo '<strong>Pattern:</strong> <code>' . htmlspecialchars($threat['pattern'] ?? '') . '</code><br>';
-                echo '<strong>Line ' . ($threat['line_number'] ?? '?') . ':</strong> <em>' . htmlspecialchars($threat['match'] ?? '') . '</em>';
-                echo '</li>';
-            }
-        }
-        $html = ob_get_clean();
+            $idx++;
+            $total++;
+        });
+        $has_more = ($offset + count($paginated)) < $total;
 
         header('Content-Type: application/json; charset=utf-8', true);
         echo json_encode([
             'success' => true,
-            'html' => $html,
+            'scan_id' => $scan_id,
+            'threats' => $paginated,
             'page' => $page,
-            'loaded_count' => count($paginated_threats),
+            'loaded_count' => count($paginated),
             'has_more' => $has_more,
-            'total_loaded' => min($start + $per_page, $total_threats),
-            'total_available' => $total_threats
+            'total_loaded' => min($offset + count($paginated), $total),
+            'total_available' => $total,
         ], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT);
         exit;
     }
@@ -904,8 +818,8 @@ class CleanSweep_Application {
     }
 
     private function handle_default() {
+        // Show the Alpine.js UI - all functionality is handled via AJAX calls to API endpoints
         clean_sweep_output_html_header();
-        clean_sweep_display_toolkit_interface();
         clean_sweep_output_html_footer();
     }
 }

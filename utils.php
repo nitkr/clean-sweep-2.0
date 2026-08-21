@@ -9,19 +9,44 @@
  */
 
 /**
+ * Whether a log level should be written.
+ * Default minimum is "info" so hot-path debug calls skip formatting I/O.
+ * Override with CLEAN_SWEEP_LOG_LEVEL (debug|info|warning|error).
+ */
+function clean_sweep_log_enabled($type = 'info') {
+    static $min_rank = null;
+    static $ranks = [
+        'debug' => 0,
+        'info' => 1,
+        'warning' => 2,
+        'error' => 3,
+    ];
+    if ($min_rank === null) {
+        $min = defined('CLEAN_SWEEP_LOG_LEVEL') ? (string) CLEAN_SWEEP_LOG_LEVEL : 'info';
+        $min_rank = $ranks[strtolower($min)] ?? 1;
+    }
+    $type_rank = $ranks[strtolower((string) $type)] ?? 1;
+    return $type_rank >= $min_rank;
+}
+
+/**
  * Logging function
  */
 function clean_sweep_log_message($message, $type = 'info') {
+    if (!clean_sweep_log_enabled($type)) {
+        return;
+    }
+
     $timestamp = date('Y-m-d H:i:s');
     $log_entry = "[$timestamp] [$type] $message\n";
 
     // Ensure logs directory exists
-    if (!is_dir(LOGS_DIR)) {
-        mkdir(LOGS_DIR, 0755, true);
+    if (!is_dir(CLEAN_SWEEP_LOGS_DIR)) {
+        mkdir(CLEAN_SWEEP_LOGS_DIR, 0755, true);
     }
 
     // Write to log file
-    file_put_contents(LOGS_DIR . LOG_FILE, $log_entry, FILE_APPEND);
+    file_put_contents(CLEAN_SWEEP_LOGS_DIR . CLEAN_SWEEP_LOG_FILE, $log_entry, FILE_APPEND);
 
     // Output to screen/console (only for CLI, hide from browser since we have separate log file)
     if (defined('WP_CLI') && WP_CLI) {
@@ -151,10 +176,7 @@ function clean_sweep_recursive_delete($dir) {
 function clean_sweep_is_wordpress_org_plugin($plugin_file) {
     $plugin_data = get_plugin_data($plugin_file);
 
-    // Check if Plugin URI contains wordpress.org
-    if (isset($plugin_data['PluginURI']) && strpos($plugin_data['PluginURI'], 'wordpress.org') !== false) {
-        return true;
-    }
+    // Do not trust Plugin URI — malware spoofs wordpress.org / developer.wordpress.org.
 
     // Check if plugin slug can be derived and exists in WP.org API
     $slug = basename(dirname($plugin_file));
@@ -184,15 +206,15 @@ function clean_sweep_get_active_plugins_list() {
  * Keeps files in logs directory for web-accessibility throughout entire operation
  */
 function clean_sweep_write_progress_file($progress_file, $data) {
-    if (!$progress_file) return;
+    if (!$progress_file) return false;
 
     // Add .progress extension if not already present
     if (substr($progress_file, -9) !== '.progress') {
         $progress_file .= '.progress';
     }
 
-    // Store in PROGRESS_DIR (logs/ directory) for web access during operations
-    $file_path = PROGRESS_DIR . $progress_file;
+    // Store in CLEAN_SWEEP_PROGRESS_DIR (logs/ directory) for web access during operations
+    $file_path = CLEAN_SWEEP_PROGRESS_DIR . $progress_file;
 
     $json_data = json_encode($data, JSON_PRETTY_PRINT);
 
@@ -202,7 +224,8 @@ function clean_sweep_write_progress_file($progress_file, $data) {
         mkdir($dir, 0755, true);
     }
 
-    @file_put_contents($file_path, $json_data);
+    $result = @file_put_contents($file_path, $json_data);
+    return $result !== false;
 }
 
 /**
@@ -211,11 +234,11 @@ function clean_sweep_write_progress_file($progress_file, $data) {
  */
 function clean_sweep_reset_execution_time() {
     // Only reset if we're still within the shared hosting limit
-    if (HOSTING_SHARED_LIMITS) {
+    if (CLEAN_SWEEP_HOSTING_SHARED_LIMITS) {
         $current_execution_time = ini_get('max_execution_time');
         // Reset execution time if we have more than 5 seconds left
-        if ($current_execution_time && $current_execution_time <= MAX_EXECUTION_TIME) {
-            set_time_limit(MAX_EXECUTION_TIME);
+        if ($current_execution_time && $current_execution_time <= CLEAN_SWEEP_MAX_EXECUTION_TIME) {
+            set_time_limit(CLEAN_SWEEP_MAX_EXECUTION_TIME);
         }
     } else {
         // For dedicated servers, be more aggressive with time limits
@@ -281,8 +304,8 @@ function clean_sweep_memory_cleanup() {
 function clean_sweep_progress_heartbeat($progress_file, $data, &$last_heartbeat) {
     $current_time = time();
 
-    // Only send heartbeat every PROGRESS_HEARTBEAT_INTERVAL seconds
-    if (($current_time - $last_heartbeat) >= PROGRESS_HEARTBEAT_INTERVAL) {
+    // Only send heartbeat every CLEAN_SWEEP_PROGRESS_HEARTBEAT_INTERVAL seconds
+    if (($current_time - $last_heartbeat) >= CLEAN_SWEEP_PROGRESS_HEARTBEAT_INTERVAL) {
         clean_sweep_write_progress_file($progress_file, $data);
         $last_heartbeat = $current_time;
 
@@ -303,12 +326,12 @@ function clean_sweep_progress_heartbeat($progress_file, $data, &$last_heartbeat)
  */
 function clean_sweep_download_url($url, $timeout = 300) {
     // Ensure temp directory exists
-    if (!is_dir(TEMP_DIR)) {
-        mkdir(TEMP_DIR, 0755, true);
+    if (!is_dir(CLEAN_SWEEP_TEMP_DIR)) {
+        mkdir(CLEAN_SWEEP_TEMP_DIR, 0755, true);
     }
 
     // Create temporary file
-    $temp_file = tempnam(TEMP_DIR, 'clean_sweep_download_');
+    $temp_file = tempnam(CLEAN_SWEEP_TEMP_DIR, 'clean_sweep_download_');
 
     // Initialize cURL
     $ch = curl_init($url);
@@ -358,11 +381,12 @@ function clean_sweep_download_url($url, $timeout = 300) {
  * Clean Sweep - Secure Unzip Function
  * Standalone implementation using ZipArchive that doesn't depend on WordPress admin code
  *
- * @param string $zip_file Path to ZIP file
- * @param string $destination Destination directory
+ * @param string      $zip_file     Path to ZIP file
+ * @param string      $destination  Destination directory
+ * @param string|null $tk           Toolkit abs for DEST_TOOLKIT (defaults to CLEAN_SWEEP_ROOT)
  * @return bool|WP_Error True on success or WP_Error on failure
  */
-function clean_sweep_unzip_file($zip_file, $destination) {
+function clean_sweep_unzip_file($zip_file, $destination, $tk = null) {
     // Validate inputs
     if (!file_exists($zip_file)) {
         return new WP_Error('file_not_found', 'ZIP file does not exist: ' . $zip_file);
@@ -382,35 +406,29 @@ function clean_sweep_unzip_file($zip_file, $destination) {
         return new WP_Error('dir_not_writable', 'Destination directory is not writable: ' . $destination);
     }
 
-    // Open ZIP file
-    $zip = new ZipArchive();
-    $result = $zip->open($zip_file);
-
-    if ($result !== true) {
-        $error_messages = [
-            ZipArchive::ER_EXISTS => 'File already exists',
-            ZipArchive::ER_INCONS => 'ZIP archive inconsistent',
-            ZipArchive::ER_INVAL => 'Invalid argument',
-            ZipArchive::ER_MEMORY => 'Memory allocation failure',
-            ZipArchive::ER_NOENT => 'No such file',
-            ZipArchive::ER_NOZIP => 'Not a ZIP archive',
-            ZipArchive::ER_OPEN => 'Cannot open file',
-            ZipArchive::ER_READ => 'Read error',
-            ZipArchive::ER_SEEK => 'Seek error'
-        ];
-
-        $error_msg = isset($error_messages[$result]) ? $error_messages[$result] : 'Unknown ZIP error: ' . $result;
-        return new WP_Error('zip_open_failed', 'Failed to open ZIP file: ' . $error_msg);
+    if (!function_exists('clean_sweep_safe_unzip')) {
+        $zip_safe = __DIR__ . '/features/utilities/zip-safe.php';
+        if (is_readable($zip_safe)) {
+            require_once $zip_safe;
+        }
+    }
+    if (!function_exists('clean_sweep_safe_unzip')) {
+        return new WP_Error('extract_failed', 'Safe unzip is not available');
     }
 
-    // Extract files
-    if (!$zip->extractTo($destination)) {
-        $zip->close();
-        return new WP_Error('extract_failed', 'Failed to extract ZIP file to: ' . $destination);
+    if ($tk === null && defined('CLEAN_SWEEP_ROOT')) {
+        $tk = CLEAN_SWEEP_ROOT;
+    }
+    $result = clean_sweep_safe_unzip($zip_file, $destination, $tk);
+    if (!empty($result['success'])) {
+        clean_sweep_log_message("Successfully extracted ZIP file to: $destination", 'info');
+        return true;
     }
 
-    $zip->close();
-
-    clean_sweep_log_message("Successfully extracted ZIP file to: $destination", 'info');
-    return true;
+    $code = (string) ($result['code'] ?? 'extract_failed');
+    if ($code === '') {
+        $code = 'extract_failed';
+    }
+    $message = (string) ($result['message'] ?? ('Failed to extract ZIP file to: ' . $destination));
+    return new WP_Error($code, $message);
 }

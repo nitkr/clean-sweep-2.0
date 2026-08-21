@@ -29,8 +29,6 @@ class CleanSweep_Functions {
 
     private $db;
 
-    private $integrity_manager = null;
-
     public function __construct($db = null) {
         $this->db = $db;
         $this->init_functions();
@@ -211,7 +209,7 @@ class CleanSweep_Functions {
                 }
                 // If still not set, use our fallback
                 if (!isset($wp_filesystem)) {
-                    $wp_filesystem = new Clean_Sweep_Filesystem();
+                    $wp_filesystem = new CleanSweep_Filesystem();
                 }
             }
         }

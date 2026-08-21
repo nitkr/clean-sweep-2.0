@@ -5,6 +5,8 @@
  * Functions for handling WordPress.org repository plugins
  */
 
+require_once __DIR__ . '/plugin-utils.php';
+
 /**
  * Download and install plugin from WordPress.org
  */
@@ -101,6 +103,35 @@ function clean_sweep_reinstall_plugin($plugin_slug) {
     // Clean up temp file
     unlink($temp_file);
 
+    // Ensure the plugins directory index.php exists (security file)
+    clean_sweep_ensure_plugins_index();
+
     clean_sweep_log_message("Successfully re-installed plugin: $plugin_slug", 'success');
+    return true;
+}
+
+/**
+ * Ensure the plugins directory index.php exists
+ * This is a standard WordPress security file that prevents directory browsing
+ * It is ALWAYS reinstalled during plugin reinstallation to ensure a clean copy
+ */
+function clean_sweep_ensure_plugins_index() {
+    $plugins_dir = defined('ORIGINAL_WP_PLUGIN_DIR') ? ORIGINAL_WP_PLUGIN_DIR : WP_PLUGIN_DIR;
+    $index_file = $plugins_dir . '/index.php';
+
+    // Standard WordPress plugins/index.php content (silence is golden)
+    $standard_content = "<?php
+// Silence is golden." . "\n";
+
+    // Always reinstall the index.php to ensure we have a clean copy
+    // This ensures any modified or potentially infected files are replaced
+    clean_sweep_log_message("Reinstalling plugins/index.php to ensure clean copy", 'info');
+    
+    if (file_put_contents($index_file, $standard_content) === false) {
+        clean_sweep_log_message("Failed to reinstall plugins/index.php", 'error');
+        return false;
+    }
+    
+    clean_sweep_log_message("Successfully reinstalled plugins/index.php", 'success');
     return true;
 }

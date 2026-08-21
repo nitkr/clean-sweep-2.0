@@ -72,6 +72,7 @@ if (!defined('CLEAN_SWEEP_ROOT')) {
 // Load Clean Sweep classes
 require_once CLEAN_SWEEP_ROOT . 'includes/system/CleanSweep_DB.php';
 require_once CLEAN_SWEEP_ROOT . 'includes/system/CleanSweep_Functions.php';
+require_once CLEAN_SWEEP_ROOT . 'includes/system/CleanSweep_Filesystem.php';
 
 // Initialize database connection and functions
 global $clean_sweep_db, $clean_sweep_functions;
@@ -169,72 +170,6 @@ if (!function_exists('unzip_file')) {
     }
 }
 
-// ============================================================================
-// FILESYSTEM COMPATIBILITY
-// ============================================================================
-
-/**
- * Minimal filesystem class for Clean Sweep compatibility
- */
-if (!class_exists('Clean_Sweep_Filesystem')) {
-    class Clean_Sweep_Filesystem {
-        public $method = 'direct';
-
-        public function rmdir($path, $recursive = false) {
-            if ($recursive) {
-                // Implement recursive delete directly
-                return $this->recursive_delete($path);
-            } else {
-                return @rmdir($path);
-            }
-        }
-
-        public function mkdir($path, $chmod = false) {
-            return @mkdir($path, 0755, true);
-        }
-
-        public function delete($path, $recursive = false) {
-            if (is_dir($path)) {
-                return $recursive ? $this->recursive_delete($path) : @rmdir($path);
-            } else {
-                return @unlink($path);
-            }
-        }
-
-        public function exists($path) {
-            return file_exists($path);
-        }
-
-        public function is_dir($path) {
-            return is_dir($path);
-        }
-
-        /**
-         * Recursive directory deletion
-         */
-        private function recursive_delete($dir_path) {
-            if (!is_dir($dir_path)) {
-                return true;
-            }
-
-            $iterator = new RecursiveIteratorIterator(
-                new RecursiveDirectoryIterator($dir_path, RecursiveDirectoryIterator::SKIP_DOTS),
-                RecursiveIteratorIterator::CHILD_FIRST
-            );
-
-            foreach ($iterator as $item) {
-                if ($item->isDir()) {
-                    @rmdir($item->getRealPath());
-                } else {
-                    @unlink($item->getRealPath());
-                }
-            }
-
-            return @rmdir($dir_path);
-        }
-    }
-}
-
 /**
  * Initialize filesystem access
  */
@@ -243,9 +178,8 @@ function clean_sweep_init_filesystem() {
 
     // Initialize WordPress filesystem if possible
     if (!function_exists('WP_Filesystem')) {
-        // Minimal filesystem compatibility
         if (!isset($wp_filesystem)) {
-            $wp_filesystem = new Clean_Sweep_Filesystem();
+            $wp_filesystem = new CleanSweep_Filesystem();
         }
     } else {
         WP_Filesystem();

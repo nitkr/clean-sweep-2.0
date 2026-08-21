@@ -220,14 +220,49 @@ function clean_sweep_create_core_backup_zip($site_root, $progress_file = null) {
  * Execute WordPress core file re-installation
  */
 function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
+    // Never copy these paths from the official zip onto the live site.
+    $preserve_files = [
+        'wp-config.php',
+        'wp-content',
+        '.htaccess',
+        'robots.txt',
+    ];
+
     // Get progress file parameter for AJAX progress tracking
     $progress_file = isset($_POST['progress_file']) ? $_POST['progress_file'] : null;
+
+    // Detect if this is an AJAX request - skip inline script output for JSON API responses
+    $is_ajax_request = !empty($progress_file) || 
+        (isset($_POST['action']) && strpos($_POST['action'], 'core') !== false) ||
+        (defined('DOING_AJAX') && DOING_AJAX);
 
     // Check if user has made a backup choice
     $create_backup = isset($_POST['create_backup']) && $_POST['create_backup'] === '1';
     $proceed_without_backup = isset($_POST['proceed_without_backup']) && $_POST['proceed_without_backup'] === '1';
 
     clean_sweep_log_message("=== WordPress Core Re-installation Started ===");
+    if (function_exists('clean_sweep_watch_note_operation')) {
+        clean_sweep_watch_note_operation('core_reinstall', [
+            'wp-admin/',
+            'wp-includes/',
+            'index.php',
+            'wp-load.php',
+            'wp-settings.php',
+            'wp-blog-header.php',
+            'wp-cron.php',
+            'wp-login.php',
+            'xmlrpc.php',
+            'wp-activate.php',
+            'wp-comments-post.php',
+            'wp-links-opml.php',
+            'wp-mail.php',
+            'wp-signup.php',
+            'wp-trackback.php',
+            'wp-config-sample.php',
+        ], 1800, [
+            'detail' => 'WordPress ' . $wp_version,
+        ]);
+    }
     clean_sweep_log_message("Target Version: $wp_version");
     clean_sweep_log_message("Progress file: " . ($progress_file ?: 'none'));
     clean_sweep_log_message("Create backup: " . ($create_backup ? 'YES' : 'NO'));
@@ -555,7 +590,8 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
         unlink($temp_file);
     }
 
-    if (!defined('WP_CLI') || !WP_CLI) {
+    // Skip inline script for AJAX requests to avoid corrupting JSON response
+    if (!$is_ajax_request && (!defined('WP_CLI') || !WP_CLI)) {
         echo '<script>updateProgress(4, 4, "Core Re-installation Complete");</script>';
         ob_flush();
         flush();
@@ -571,8 +607,8 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
     if (function_exists('clean_sweep_establish_core_baseline')) {
         $baseline_result = clean_sweep_establish_core_baseline($wp_version);
         if ($baseline_result) {
-            clean_sweep_log_message("✅ Core integrity baseline established successfully");
-            clean_sweep_log_message("🛡️ Future malware scans will detect reinfection by comparing against this baseline");
+            clean_sweep_log_message("✅ Core scope sealed (packaged core files only; plugins/themes not sealed)");
+            clean_sweep_log_message("🛡️ Leftover malware in plugins/mu-plugins can still rewrite core — watch this visit");
         } else {
             clean_sweep_log_message("⚠️ Failed to establish core integrity baseline", 'warning');
         }
@@ -642,13 +678,13 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
         echo "✅ Success!\n";
         echo "Version: $wp_version\n";
         echo "Files copied: $files_copied\n";
-        if ($core_backup_dir) {
-            echo "Backup location: " . __DIR__ . '/' . $core_backup_dir . "\n";
+        if ($core_backup_zip) {
+            echo "Backup location: " . $core_backup_zip . "\n";
         } else {
             echo "Backup: Skipped as requested\n";
         }
         echo str_repeat("=", 50) . "\n";
     }
 
-    return ['success' => true, 'files_copied' => $files_copied, 'backup_dir' => $core_backup_dir];
+    return ['success' => true, 'files_copied' => $files_copied, 'backup_dir' => $core_backup_zip];
 }

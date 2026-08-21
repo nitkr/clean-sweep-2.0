@@ -5,13 +5,15 @@
  * Backup and restore functionality for plugin operations
  */
 
+require_once __DIR__ . '/plugin-utils.php';
+
 /**
  * Create backup of current plugins as ZIP file with progress updates
  */
 function clean_sweep_create_backup($progress_file = null) {
     // Get Clean Sweep root directory (2 levels up from features/maintenance/)
     $clean_sweep_root = dirname(__DIR__, 2);
-    $backup_dir = $clean_sweep_root . DIRECTORY_SEPARATOR . BACKUP_DIR;
+    $backup_dir = $clean_sweep_root . DIRECTORY_SEPARATOR . CLEAN_SWEEP_BACKUP_DIR;
 
     // Create unique ZIP filename with timestamp
     $timestamp = date('Y-m-d_H-i-s');
@@ -106,8 +108,9 @@ function clean_sweep_create_backup($progress_file = null) {
                     'status' => 'backing_up',
                     'progress' => $progress_percentage,
                     'message' => "Creating ZIP backup... ($processed_count/$file_count files)",
-                    'current' => $processed_count,
-                    'total' => $file_count,
+                    'files_current' => $processed_count,
+                    'files_total' => $file_count,
+                    'plugin' => '',
                     'phase' => 'backup'
                 ];
                 @clean_sweep_write_progress_file($progress_file, $progress_data);
@@ -133,8 +136,9 @@ function clean_sweep_create_backup($progress_file = null) {
             'status' => 'backup_complete',
             'progress' => 100,
             'message' => "ZIP backup completed successfully ($file_count files, $zip_size MB)",
-            'current' => $file_count,
-            'total' => $file_count,
+            'files_current' => $file_count,
+            'files_total' => $file_count,
+            'plugin' => '',
             'phase' => 'backup'
         ];
         @clean_sweep_write_progress_file($progress_file, $progress_data);
@@ -149,7 +153,7 @@ function clean_sweep_create_backup($progress_file = null) {
 function clean_sweep_create_directory_backup($progress_file = null) {
     // Get Clean Sweep root directory (2 levels up from features/maintenance/)
     $clean_sweep_root = dirname(__DIR__, 2);
-    $backup_path = $clean_sweep_root . DIRECTORY_SEPARATOR . BACKUP_DIR;
+    $backup_path = $clean_sweep_root . DIRECTORY_SEPARATOR . CLEAN_SWEEP_BACKUP_DIR;
     clean_sweep_log_message("Creating directory backup of current plugins to: " . $backup_path);
 
     // Check if backup directory already exists
@@ -240,8 +244,9 @@ function clean_sweep_create_directory_backup($progress_file = null) {
                     'status' => 'backing_up',
                     'progress' => $progress_percentage,
                     'message' => "Backing up plugins... ($processed_count/$file_count files)",
-                    'current' => $processed_count,
-                    'total' => $file_count,
+                    'files_current' => $processed_count,
+                    'files_total' => $file_count,
+                    'plugin' => '',
                     'phase' => 'backup'
                 ];
                 @clean_sweep_write_progress_file($progress_file, $progress_data);
@@ -255,8 +260,9 @@ function clean_sweep_create_directory_backup($progress_file = null) {
             'status' => 'backup_complete',
             'progress' => 100,
             'message' => "Directory backup completed successfully ($file_count files backed up)",
-            'current' => $file_count,
-            'total' => $file_count,
+            'files_current' => $file_count,
+            'files_total' => $file_count,
+            'plugin' => '',
             'phase' => 'backup'
         ];
         @clean_sweep_write_progress_file($progress_file, $progress_data);
@@ -264,4 +270,116 @@ function clean_sweep_create_directory_backup($progress_file = null) {
 
     clean_sweep_log_message("Directory backup completed successfully - $file_count files backed up", 'success');
     return true;
+}
+
+/**
+ * Create backup of current themes as ZIP file
+ * 
+ * @return string|false ZIP file path on success, false on failure
+ */
+function clean_sweep_create_theme_backup() {
+    // Get Clean Sweep root directory
+    $clean_sweep_root = dirname(__DIR__, 2);
+    $backup_dir = $clean_sweep_root . DIRECTORY_SEPARATOR . 'backups';
+    
+    // Create unique ZIP filename with timestamp
+    $timestamp = date('Y-m-d_H-i-s');
+    $zip_filename = 'theme-backup_' . $timestamp . '.zip';
+    $zip_path = $backup_dir . DIRECTORY_SEPARATOR . $zip_filename;
+    
+    clean_sweep_log_message("Creating ZIP backup of themes to: " . $zip_path);
+    
+    // Ensure backup directory exists
+    if (!file_exists($backup_dir)) {
+        if (!wp_mkdir_p($backup_dir)) {
+            if (!mkdir($backup_dir, 0755, true)) {
+                clean_sweep_log_message("Failed to create backup directory: $backup_dir (permissions or path issue)", 'error');
+                return false;
+            }
+        }
+        clean_sweep_log_message("Created backup directory: $backup_dir");
+    }
+    
+    // Get the WordPress themes directory
+    $themes_dir = get_theme_root();
+    
+    if (!is_dir($themes_dir)) {
+        clean_sweep_log_message("Themes directory not found: $themes_dir", 'error');
+        return false;
+    }
+    
+    clean_sweep_log_message("Backing up themes from: $themes_dir");
+    
+    // Check if ZipArchive is available
+    if (!class_exists('ZipArchive')) {
+        clean_sweep_log_message("ZipArchive class not available, cannot create ZIP backup", 'error');
+        return false;
+    }
+    
+    $zip = new ZipArchive();
+    
+    if ($zip->open($zip_path, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== TRUE) {
+        clean_sweep_log_message("Failed to create ZIP file: $zip_path", 'error');
+        return false;
+    }
+    
+    clean_sweep_log_message("Created ZIP file successfully: $zip_filename");
+    
+    // Count total files for progress tracking
+    $file_count = 0;
+    $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($themes_dir));
+    foreach ($iterator as $file) {
+        if ($file->isFile()) {
+            $file_count++;
+        }
+    }
+    
+    clean_sweep_log_message("Found $file_count theme files to backup");
+    
+    // Reset iterator for actual backup
+    $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($themes_dir));
+    $themes_dir_length = strlen($themes_dir);
+    
+    // Ensure themes directory ends with slash
+    if (substr($themes_dir, -1) !== '/') {
+        $themes_dir .= '/';
+        $themes_dir_length = strlen($themes_dir);
+    }
+    
+    $processed_count = 0;
+    
+    foreach ($iterator as $file) {
+        if ($file->isFile()) {
+            $full_path = $file->getPathname();
+            
+            // Calculate relative path from themes directory
+            if (strpos($full_path, $themes_dir) === 0) {
+                $relative_path = substr($full_path, $themes_dir_length);
+            } else {
+                continue;
+            }
+            
+            // Skip if relative path is empty
+            if (empty($relative_path)) {
+                continue;
+            }
+            
+            if (!$zip->addFile($full_path, $relative_path)) {
+                clean_sweep_log_message("Failed to add file to ZIP: $relative_path", 'warning');
+                continue;
+            }
+            
+            $processed_count++;
+            
+            // Log progress every 50 files
+            if ($processed_count % 50 === 0) {
+                clean_sweep_log_message("Backup progress: $processed_count / $file_count files");
+            }
+        }
+    }
+    
+    $zip->close();
+    
+    clean_sweep_log_message("Theme backup completed successfully - $processed_count files backed up to $zip_filename", 'success');
+    return $zip_path;
 }
