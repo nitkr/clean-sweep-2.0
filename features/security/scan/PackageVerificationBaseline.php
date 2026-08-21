@@ -517,9 +517,20 @@ final class CleanSweep_PackageVerificationBaseline {
         $slug = (string) ($pkg['slug'] ?? '');
         $type = (string) ($pkg['type'] ?? 'plugin');
         $label = $type . ' ' . $slug;
-        $file = rtrim($dir_n, '/') . '/';
+        $main = rtrim($dir_n, '/') . '/';
+        $file = $main;
         if (!empty($pkg['single_file'])) {
-            $file = $file . $pkg['single_file'];
+            $file = $main . $pkg['single_file'];
+        } elseif ($type === 'theme') {
+            $guess = $main . 'style.css';
+            if (is_file($guess)) {
+                $file = $guess;
+            }
+        } elseif ($type === 'plugin' && $slug !== '') {
+            $guess = $main . $slug . '.php';
+            if (is_file($guess)) {
+                $file = $guess;
+            }
         }
         if (!class_exists('CleanSweep_SitePaths', false)) {
             require_once __DIR__ . '/SitePaths.php';

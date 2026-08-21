@@ -205,10 +205,37 @@ export function threatToSiteRelativePath(threat) {
   for (const candidate of ordered) {
     const rel = toSiteRelativePath(candidate);
     if (!rel) continue;
-    if (isUsableSiteRelativePath(rel)) return rel;
+    if (isUsableSiteRelativePath(rel)) return packageDirToEditorFile(rel);
     if (!fallback) fallback = rel;
   }
-  return fallback;
+  return packageDirToEditorFile(fallback);
+}
+
+/**
+ * Package-level findings often store the plugin/theme folder, not a file.
+ * The editor and files API only load files — map those folders to the
+ * same entry files package_finding uses (style.css / {slug}.php).
+ *
+ * @param {string} rel
+ * @returns {string}
+ */
+export function packageDirToEditorFile(rel) {
+  if (!rel) return '';
+  const p = String(rel).replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!p) return '';
+  const segs = p.split('/').filter(Boolean);
+  const base = segs[segs.length - 1] || '';
+  if (!base) return p;
+  if (base.startsWith('.') || /\.[A-Za-z0-9]+$/.test(base)) {
+    return p;
+  }
+  if (segs.length === 3 && segs[0].toLowerCase() === 'wp-content' && segs[1].toLowerCase() === 'themes') {
+    return p + '/style.css';
+  }
+  if (segs.length === 3 && segs[0].toLowerCase() === 'wp-content' && segs[1].toLowerCase() === 'plugins') {
+    return p + '/' + base + '.php';
+  }
+  return p;
 }
 
 function createFilesStore() {
@@ -394,7 +421,7 @@ function createFilesStore() {
      * @param lineNumber - Optional line number to scroll to
      */
     async loadFile(path, lineNumber = null) {
-      const relativePath = toSiteRelativePath(path);
+      const relativePath = packageDirToEditorFile(toSiteRelativePath(path));
       if (!relativePath) {
         errors.add({ message: 'Missing file path', code: 'FILES_CONTENT_ERROR' });
         return;

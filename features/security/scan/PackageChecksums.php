@@ -1,10 +1,15 @@
 <?php
 /**
- * WordPress.org plugin/theme file checksums.
+ * WordPress.org plugin file checksums (themes have no published map).
  *
  * Soft-fails for premium/custom packages (HTTP 404).
  * Reporting: Type A (mapped outliers), Type B (extras rollup/top-K),
  * Type C (bulk divergence → one package finding). See plans/checksum-integrity-results-improvement.md.
+ *
+ * Themes: wordpress.org publishes plugin-checksums and core checksums only.
+ * Do not GET theme-checksums/*.json — that URL 404s for every slug and is not
+ * an API. Identity / zip baseline still run for themes. If a theme map ships,
+ * add THEME_URL and use it from fetch_map() the same way as PLUGIN_URL.
  */
 require_once __DIR__ . '/SitePaths.php';
 require_once __DIR__ . '/PackageAnnotations.php';
@@ -13,7 +18,8 @@ require_once __DIR__ . '/PackageVerificationBaseline.php';
 final class CleanSweep_PackageChecksums {
 
     private const PLUGIN_URL = 'https://downloads.wordpress.org/plugin-checksums/%s/%s.json';
-    private const THEME_URL = 'https://downloads.wordpress.org/theme-checksums/%s/%s.json';
+    // Holder: wordpress.org does not publish this. Do not request it.
+    // private const THEME_URL = 'https://downloads.wordpress.org/theme-checksums/%s/%s.json';
     private const CACHE_TTL = 604800;
 
     /** Below this covered count, never use match_rate / A_RATE for Type C. */
@@ -144,9 +150,11 @@ final class CleanSweep_PackageChecksums {
             return $empty;
         }
 
-        $map = self::fetch_map($type, $slug, $version);
         $dir_n = rtrim(str_replace('\\', '/', $dir), '/') . '/';
         $baseline = CleanSweep_PackageVerificationBaseline::get($type, $slug);
+
+        // Themes: no wordpress.org file-checksum API. Never HTTP a 404 endpoint.
+        $map = ($type === 'theme') ? null : self::fetch_map($type, $slug, $version);
 
         // No wordpress.org map: use verification baseline when present (Pro / premium).
         if ($map === null) {
@@ -157,11 +165,15 @@ final class CleanSweep_PackageChecksums {
                 }
             }
             $ann = CleanSweep_PackageAnnotations::for_package($pkg);
-            $note = 'not listed on wordpress.org';
+            $note = ($type === 'theme')
+                ? 'wordpress.org does not publish theme file checksums'
+                : 'not listed on wordpress.org';
             if ($ann !== []) {
                 $note .= ' [' . implode('; ', $ann) . ']';
             }
-            $note .= ' Upload a trusted zip via Clean Sweep to create a verification baseline.';
+            if ($type !== 'theme' || $ann !== []) {
+                $note .= ' Upload a trusted zip via Clean Sweep to create a verification baseline.';
+            }
             $identity = self::identity_finding($pkg, $dir_n);
             $findings = [];
             if ($identity !== null) {
@@ -699,8 +711,8 @@ final class CleanSweep_PackageChecksums {
             'dir' => $dir,
             'single_file' => $pkg['single_file'] ?? null,
             'org_info' => (!empty($org) && !empty($org['version'])) ? $org : [],
-            'checksum_status' => 'unavailable',
-            'checksum_outcome' => 'unverifiable',
+            'checksum_status' => $type === 'theme' ? 'n/a' : 'unavailable',
+            'checksum_outcome' => $type === 'theme' ? 'n/a' : 'unverifiable',
         ]);
         if (($verdict['kind'] ?? 'ok') === 'ok') {
             CleanSweep_PackageIdentity::forget($type, $slug);
@@ -740,7 +752,7 @@ final class CleanSweep_PackageChecksums {
      * Number of files in the official checksum map, or null if unpublished / fetch failed.
      */
     public static function official_file_count(string $type, string $slug, string $version): ?int {
-        if ($slug === '' || $version === '') {
+        if ($slug === '' || $version === '' || $type === 'theme') {
             return null;
         }
         $map = self::fetch_map($type, $slug, $version);
@@ -754,6 +766,11 @@ final class CleanSweep_PackageChecksums {
      * @return array<string,string>|null rel => md5
      */
     private static function fetch_map(string $type, string $slug, string $version): ?array {
+        // wordpress.org has no theme-checksums endpoint. Do not probe it.
+        if ($type === 'theme') {
+            return null;
+        }
+
         $cache = self::cache_path($type, $slug, $version);
         if (is_readable($cache) && (time() - (int) @filemtime($cache)) < self::CACHE_TTL) {
             $cached = json_decode((string) @file_get_contents($cache), true);
@@ -762,8 +779,7 @@ final class CleanSweep_PackageChecksums {
             }
         }
 
-        $tpl = $type === 'theme' ? self::THEME_URL : self::PLUGIN_URL;
-        $url = sprintf($tpl, rawurlencode($slug), rawurlencode($version));
+        $url = sprintf(self::PLUGIN_URL, rawurlencode($slug), rawurlencode($version));
         $body = self::http_get($url);
         if ($body === null || $body === '') {
             return null;
@@ -874,10 +890,15 @@ final class CleanSweep_PackageChecksums {
         $type = (string) ($pkg['type'] ?? 'plugin');
         $label = $type . ' ' . $slug;
         $main = rtrim($dir_n, '/') . '/';
-        // Prefer main plugin file path for editor when single-file; else package dir marker.
+        // Prefer a real file the editor can open (not the package directory).
         $file = $main;
         if (!empty($pkg['single_file'])) {
             $file = $main . $pkg['single_file'];
+        } elseif ($type === 'theme') {
+            $guess = $main . 'style.css';
+            if (is_file($guess)) {
+                $file = $guess;
+            }
         } elseif ($type === 'plugin' && $slug !== '') {
             $guess = $main . $slug . '.php';
             if (is_file($guess)) {

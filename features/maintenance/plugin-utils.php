@@ -54,6 +54,20 @@ function clean_sweep_format_relative_time($timestamp) {
 }
 
 /**
+ * Display name from a wordpress.org info `author` field (string or object).
+ */
+function clean_sweep_wporg_author_display($author) {
+    if (is_array($author)) {
+        $author = $author['display_name'] ?? $author['user_nicename'] ?? $author['name'] ?? '';
+    }
+    if (!is_string($author) || $author === '') {
+        return null;
+    }
+    $out = trim(strip_tags($author));
+    return $out !== '' ? $out : null;
+}
+
+/**
  * Fetch additional plugin information from WordPress.org API
  */
 function clean_sweep_fetch_plugin_info($slug) {
@@ -133,7 +147,7 @@ function clean_sweep_fetch_theme_info($slug) {
         return [];
     }
 
-    $cache_key = 'cs_wporg_theme_v2_' . $slug;
+    $cache_key = 'cs_wporg_theme_v3_' . $slug;
     if (function_exists('get_transient')) {
         $cached = get_transient($cache_key);
         if (is_array($cached)) {
@@ -172,7 +186,7 @@ function clean_sweep_fetch_theme_info($slug) {
             'requires' => $data['requires'] ?? null,
             'screenshot_url' => $data['screenshot_url'] ?? null,
             'name' => $data['name'] ?? null,
-            'author' => isset($data['author']) ? trim(strip_tags((string) $data['author'])) : null,
+            'author' => clean_sweep_wporg_author_display($data['author'] ?? null),
             'slug' => $data['slug'] ?? $slug,
         ];
 

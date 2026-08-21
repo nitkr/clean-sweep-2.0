@@ -1,7 +1,8 @@
 <?php
 /**
- * Compare every installed wordpress.org plugin/theme to official checksums.
- * Quick / Standard / Deep all check the full set. Premium/custom → unavailable.
+ * Compare every installed wordpress.org plugin to official checksums.
+ * Themes have no wordpress.org checksum API — identity / zip baseline only.
+ * Quick / Standard / Deep all walk the full installed set. Premium/custom → unavailable.
  */
 require_once dirname(__DIR__) . '/PackageChecksums.php';
 

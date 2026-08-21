@@ -24,6 +24,20 @@ final class CleanSweep_PackageIdentity {
     ];
 
     /**
+     * Theme directory author is often a nicename (wordpressdotorg); style.css
+     * says "the WordPress team". Same publisher, not a stolen identity.
+     *
+     * @var string[]
+     */
+    private static $WP_ORG_AUTHOR_ALIASES = [
+        'wordpressdotorg',
+        'wordpress.org',
+        'wordpress',
+        'the wordpress team',
+        'automattic',
+    ];
+
+    /**
      * @param array $ctx {
      *   type: plugin|theme,
      *   slug: string,
@@ -270,12 +284,9 @@ final class CleanSweep_PackageIdentity {
             $reasons[] = 'Local name "' . $name . '" does not match WordPress.org "' . $org_name . '" for slug ' . $slug;
         }
 
-        if ($org_author !== '' && $author !== '' && $org_author !== $author) {
-            // Allow org author contained in local (or vice versa) for "Author (Company)"
-            if (strpos($author, $org_author) === false && strpos($org_author, $author) === false) {
-                $signals[] = 'author_mismatch';
-                $reasons[] = 'Local author does not match the WordPress.org listing';
-            }
+        if ($org_author !== '' && $author !== '' && !self::authors_match($author, $org_author)) {
+            $signals[] = 'author_mismatch';
+            $reasons[] = 'Local author does not match the WordPress.org listing';
         }
 
         $shape = !empty($tree['tiny']);
@@ -283,19 +294,22 @@ final class CleanSweep_PackageIdentity {
         $checksum_unavail = in_array((string) ($ctx['checksum_outcome'] ?? ''), ['unverifiable', 'skipped'], true)
             || (string) ($ctx['checksum_status'] ?? '') === 'unavailable';
 
+        // Themes have no checksum map. "Older than the directory latest" is an
+        // update, not an unpublished fake. Only plugins may use map 404 as catalog.
         $catalog = false;
-        if ($latest_differs && $checksum_unavail) {
-            $catalog = true;
-        } elseif ($latest_differs && $shape) {
-            // Confirm unpublished local version via checksum map (one extra HTTP)
-            if (class_exists('CleanSweep_PackageChecksums', false)
-                && method_exists('CleanSweep_PackageChecksums', 'official_file_count')) {
-                $n = CleanSweep_PackageChecksums::official_file_count($type, $slug, $version);
-                if ($n === null) {
+        if ($type !== 'theme') {
+            if ($latest_differs && $checksum_unavail) {
+                $catalog = true;
+            } elseif ($latest_differs && $shape) {
+                if (class_exists('CleanSweep_PackageChecksums', false)
+                    && method_exists('CleanSweep_PackageChecksums', 'official_file_count')) {
+                    $n = CleanSweep_PackageChecksums::official_file_count($type, $slug, $version);
+                    if ($n === null) {
+                        $catalog = true;
+                    }
+                } else {
                     $catalog = true;
                 }
-            } else {
-                $catalog = true;
             }
         }
         if ($catalog) {
@@ -305,7 +319,8 @@ final class CleanSweep_PackageIdentity {
 
         if ($shape) {
             $official_n = null;
-            if (class_exists('CleanSweep_PackageChecksums', false)
+            if ($type !== 'theme'
+                && class_exists('CleanSweep_PackageChecksums', false)
                 && method_exists('CleanSweep_PackageChecksums', 'official_file_count')
                 && $org_version !== '') {
                 $official_n = CleanSweep_PackageChecksums::official_file_count($type, $slug, $org_version);
@@ -461,6 +476,23 @@ final class CleanSweep_PackageIdentity {
         $author = html_entity_decode(strip_tags($author), ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $author = strtolower(trim(preg_replace('/\s+/', ' ', $author) ?? ''));
         return $author;
+    }
+
+    /** True when local and directory authors are the same publisher. */
+    public static function authors_match(string $a, string $b): bool {
+        $a = self::normalize_author($a);
+        $b = self::normalize_author($b);
+        if ($a === '' || $b === '') {
+            return false;
+        }
+        if ($a === $b) {
+            return true;
+        }
+        if (strpos($a, $b) !== false || strpos($b, $a) !== false) {
+            return true;
+        }
+        return in_array($a, self::$WP_ORG_AUTHOR_ALIASES, true)
+            && in_array($b, self::$WP_ORG_AUTHOR_ALIASES, true);
     }
 
     public static function is_generic_author(string $author): bool {
