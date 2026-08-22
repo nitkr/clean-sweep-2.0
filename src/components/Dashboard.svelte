@@ -41,11 +41,24 @@
     if ($scanning.scanning) {
       const pct = Math.round($scanning.progressPercent || 0);
       const paused = $scanning.progressStatus === 'paused';
+      const malwareN = Number($scanning.liveProgress?.malware_threats) || 0;
+      const integrityN = Number($scanning.liveProgress?.integrity_violations) || 0;
+      const foundN = Number($scanning.liveProgress?.threats_found) || malwareN + integrityN;
+      let label = paused ? `Continuing… ${pct}%` : `Scanning ${pct}%`;
+      if (malwareN > 0) {
+        label += ` · ${malwareN} found so far`;
+      } else if (foundN > 0) {
+        label += ` · ${foundN} finding${foundN === 1 ? '' : 's'} so far`;
+      }
+      let detail = $scanning.progressMessage || 'In progress';
+      if (malwareN > 0) {
+        detail = `${malwareN} signature match${malwareN === 1 ? '' : 'es'} so far · open Scanner to review`;
+      }
       return {
-        status: paused ? 'running' : 'running',
-        label: paused ? `Continuing… ${pct}%` : `Scanning ${pct}%`,
-        detail: $scanning.progressMessage || 'In progress',
-        color: 'emerald',
+        status: 'running',
+        label,
+        detail,
+        color: malwareN > 0 ? 'red' : 'emerald',
         live: true,
       };
     }
@@ -407,6 +420,9 @@
               <p class="text-sm font-medium text-emerald-800 dark:text-emerald-200">
                 Malware scan {$scanning.progressStatus === 'paused' ? 'continuing' : 'running'}
                 · {Math.round($scanning.progressPercent || 0)}%
+                {#if ($scanning.liveProgress?.malware_threats || 0) > 0}
+                  · {$scanning.liveProgress.malware_threats} found so far
+                {/if}
               </p>
               <p class="text-xs text-emerald-800/80 dark:text-emerald-200/60 truncate">{$scanning.progressMessage || 'Open Scanner for details'}</p>
             </div>

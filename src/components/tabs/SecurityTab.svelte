@@ -173,6 +173,12 @@
     $scanning.liveProgress?.threats_found,
     $scanning.results?.summary?.total_threats
   ));
+  let liveMalwareCount = $derived(Number($scanning.liveProgress?.malware_threats) || 0);
+  let liveIntegrityCount = $derived(
+    Number($scanning.liveProgress?.integrity_violations) ||
+      Number($scanning.integrityViolations) ||
+      0
+  );
   let malwareThreatCount = $derived(
     $scanning.results?.summary?.malware_threats
       ?? ($scanning.results?.malware_threats?.length)
@@ -184,6 +190,7 @@
           t?.pattern !== 'package_divergent' &&
           t?.pattern !== 'package_extras_rollup'
       ).length)
+      ?? liveMalwareCount
       ?? 0
   );
   let integrityThreatCount = $derived(
@@ -192,7 +199,8 @@
       Number($scanning.integrityViolations) || 0,
       Number($scanning.results?.summary?.integrity_violations) || 0,
       Number($scanning.results?.integrity_violations_list?.length) || 0,
-      ($scanning.results?.threats || []).filter((t) => t?.checksum || t?.source === 'integrity').length
+      ($scanning.results?.threats || []).filter((t) => t?.checksum || t?.source === 'integrity').length,
+      liveIntegrityCount
     )
   );
 
@@ -222,11 +230,17 @@
             : 'Scanning';
       const db = $scanning.liveProgress?.db_rows_scanned || 0;
       const files = totalFilesScanned || 0;
-      const detail =
-        db > 0 ? `${db.toLocaleString()} rows` : files > 0 ? `${files.toLocaleString()} files` : '';
+      const found = liveMalwareCount;
+      const detail = found > 0
+        ? `${found} found so far`
+        : db > 0
+          ? `${db.toLocaleString()} rows`
+          : files > 0
+            ? `${files.toLocaleString()} files`
+            : '';
       return {
         label: detail ? `${st} · ${detail}` : st,
-        color: 'emerald',
+        color: found > 0 ? 'red' : 'emerald',
         live: true,
       };
     }
@@ -638,8 +652,27 @@
           <div class="text-lg font-bold text-ink">{totalFilesScanned > 0 ? totalFilesScanned.toLocaleString() : '—'}</div>
         </div>
         <div class="p-3 bg-panel border border-line rounded-xl">
-          <div class="text-[10px] text-muted mb-0.5">Threats</div>
-          <div class="text-lg font-bold {totalThreats > 0 ? 'text-red-700 dark:text-red-400' : 'text-ink'}">{totalThreats || '—'}</div>
+          <div class="text-[10px] text-muted mb-0.5">
+            {$scanning.scanning && liveIntegrityCount > 0 && liveMalwareCount === 0
+              ? 'Integrity'
+              : 'Signatures'}
+          </div>
+          <div class="text-lg font-bold {(liveMalwareCount || malwareThreatCount || totalThreats) > 0 ? 'text-red-700 dark:text-red-400' : 'text-ink'}">
+            {$scanning.scanning
+              ? (liveMalwareCount || liveIntegrityCount || totalThreats || '—')
+              : (malwareThreatCount || totalThreats || '—')}
+          </div>
+          {#if $scanning.scanning && (liveMalwareCount > 0 || liveIntegrityCount > 0)}
+            <div class="text-[10px] text-faint mt-0.5">
+              {#if liveMalwareCount > 0 && liveIntegrityCount > 0}
+                {liveMalwareCount} signature · {liveIntegrityCount} integrity
+              {:else if liveIntegrityCount > 0}
+                {liveIntegrityCount} verification finding{liveIntegrityCount === 1 ? '' : 's'}
+              {:else}
+                so far
+              {/if}
+            </div>
+          {/if}
         </div>
         <div class="p-3 bg-panel border border-line rounded-xl col-span-2 sm:col-span-1">
           <div class="text-[10px] text-muted mb-0.5">Status</div>
@@ -657,6 +690,7 @@
         </div>
       </div>
 
+      {#if !$scanning.scanning}
       <!-- Profile + run -->
       <div class="bg-panel border border-line rounded-xl overflow-hidden mb-6">
         <div class="px-5 py-4 border-b border-line">
@@ -814,6 +848,7 @@
           </div>
         </div>
       </div>
+      {/if}
 
       {#if $scanning.scanning}
         <ScanProgressCard
@@ -827,6 +862,8 @@
           filesComplete={filesPhaseComplete}
           dbRowsScanned={totalRecordsScanned}
           threatsFound={totalThreats}
+          malwareFound={liveMalwareCount}
+          integrityFound={liveIntegrityCount}
           dbSkipped={($scanning.profileId === 'deep' || selectedProfile === 'deep') && (($scanning.deepScope || deepScope) === 'files' || ($scanning.deepScope || deepScope) === 'paths')}
           filesSkipped={($scanning.profileId === 'deep' || selectedProfile === 'deep') && ($scanning.deepScope || deepScope) === 'database'}
           pending={$scanning.workQueueStats?.pending ?? $scanning.pendingWorkCount ?? 0}
@@ -847,6 +884,61 @@
           on:continue={resumeScan}
           on:cancel={() => scanning.cancelScan()}
         />
+
+        <div class="space-y-3 mb-6">
+          <div class="flex items-start justify-between gap-3 flex-wrap">
+            <div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <h2 class="text-sm font-semibold text-ink">Findings so far</h2>
+                <span class="text-[10px] px-2 py-0.5 rounded-full border font-medium bg-sky-500/10 text-sky-800 dark:text-sky-300 border-sky-500/30">
+                  Preview · scan still running
+                </span>
+              </div>
+              <p class="text-[11px] text-muted mt-1 leading-relaxed">
+                {#if liveMalwareCount > 0}
+                  {liveMalwareCount} signature match{liveMalwareCount === 1 ? '' : 'es'}
+                  {#if liveIntegrityCount > 0}
+                    · {liveIntegrityCount} integrity finding{liveIntegrityCount === 1 ? '' : 's'} (listed when the scan finishes)
+                  {/if}
+                {:else if liveIntegrityCount > 0}
+                  {liveIntegrityCount} verification finding{liveIntegrityCount === 1 ? '' : 's'} so far. Signature matches will appear here as they are found.
+                {:else}
+                  No signature matches yet. This is not a clean bill of health — the scan is still running.
+                {/if}
+              </p>
+            </div>
+          </div>
+
+          {#if $scanning.previewError && !($scanning.previewThreats?.length)}
+            <div class="p-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-xs text-amber-900 dark:text-amber-200">
+              {$scanning.previewError}
+            </div>
+          {/if}
+
+          {#if $scanning.previewLoading && !($scanning.previewThreats?.length) && liveMalwareCount > 0}
+            <div class="p-3 rounded-xl border border-line bg-panel text-xs text-muted">
+              Loading findings…
+            </div>
+          {:else if $scanning.previewThreats?.length}
+            {#if $scanning.previewCapped}
+              <p class="text-[11px] text-faint">
+                Showing the first {$scanning.previewThreats.length} signature matches. The rest appear when the scan finishes.
+              </p>
+            {:else if $scanning.previewTotal > $scanning.previewThreats.length}
+              <p class="text-[11px] text-faint">
+                Showing {$scanning.previewThreats.length} of {$scanning.previewTotal}. More may load as the scan continues.
+              </p>
+            {/if}
+            <MalwareResultsList
+              threats={$scanning.previewThreats}
+              selectedThreatId={$scanning.selectedThreat?.id || null}
+              onSelect={handleThreatClick}
+              preview={true}
+              hasIntegrityBaseline={false}
+              likelySource={null}
+            />
+          {/if}
+        </div>
       {/if}
 
       {#if $scanning.results && !$scanning.scanning}

@@ -31,6 +31,10 @@
   export let dbRowsScanned = 0;
   /** @type {number} */
   export let threatsFound = 0;
+  /** @type {number} Signature matches (excludes integrity) */
+  export let malwareFound = 0;
+  /** @type {number} */
+  export let integrityFound = 0;
   /** @type {number} */
   export let pending = 0;
   /** @type {number} */
@@ -355,13 +359,23 @@
       </div>
       <div class="rounded-lg bg-app border border-line px-3 py-2 text-center">
         <div
-          class="text-sm font-semibold tabular-nums {threatsFound > 0
+          class="text-sm font-semibold tabular-nums {malwareFound > 0 || threatsFound > 0
             ? 'text-red-700 dark:text-red-400'
             : 'text-ink'}"
         >
-          {threatsFound > 0 ? threatsFound.toLocaleString() : '—'}
+          {(malwareFound > 0 ? malwareFound : threatsFound) > 0
+            ? (malwareFound > 0 ? malwareFound : threatsFound).toLocaleString()
+            : '—'}
         </div>
-        <div class="text-[10px] text-muted mt-0.5">Threats</div>
+        <div class="text-[10px] text-muted mt-0.5">
+          {#if malwareFound > 0 && integrityFound > 0}
+            Signatures · {integrityFound} integrity
+          {:else if integrityFound > 0 && malwareFound === 0}
+            Integrity
+          {:else}
+            Signatures
+          {/if}
+        </div>
       </div>
     </div>
 

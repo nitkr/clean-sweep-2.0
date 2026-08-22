@@ -587,12 +587,12 @@
             type="button"
             onclick={closeEditor}
             class="text-xs text-muted hover:text-ink flex items-center gap-1"
-            title={isThreatView ? 'Back to scan results' : 'Close file'}
+            title={isThreatView ? ($scanning.scanning ? 'Back to scan' : 'Back to scan results') : 'Close file'}
           >
             <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 18L18 6M6 6l12 12"/>
             </svg>
-            {isThreatView ? 'Back to results' : 'Close'}
+            {isThreatView ? ($scanning.scanning ? 'Back to scan' : 'Back to results') : 'Close'}
           </button>
           {#if editorMode === 'file' && !isThreatView}
             <button
