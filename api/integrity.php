@@ -114,8 +114,8 @@ function clean_sweep_handle_get_baseline_info() {
         $payload['journal_tamper_reason'] = $bind['reason'];
     }
     $payload['toolkit'] = $GLOBALS['clean_sweep_toolkit_integrity'] ?? clean_sweep_toolkit_integrity();
-    $payload['has_baseline'] = !empty($payload['core_sealed']) || !empty($payload['snapshot_imported']);
-    $payload['mode'] = $payload['core_sealed'] ? 'core' : 'none';
+    $payload['has_baseline'] = !empty($payload['core_sealed']) || !empty($payload['core_pinned']) || !empty($payload['snapshot_imported']);
+    $payload['mode'] = $payload['core_sealed'] ? 'core' : (!empty($payload['core_pinned']) ? 'pinned' : 'none');
     $payload['file_count'] = $payload['core_file_count'];
     $payload['established_at'] = !empty($payload['core_sealed_at'])
         ? date('Y-m-d H:i:s', (int) $payload['core_sealed_at'])
@@ -128,7 +128,7 @@ function clean_sweep_handle_get_baseline_info() {
             (new CleanSweep_Census(new CleanSweep_VisitStore($state)))->run_phase('site_owned');
             $payload = $state->status_payload();
             $payload['toolkit'] = $GLOBALS['clean_sweep_toolkit_integrity'] ?? clean_sweep_toolkit_integrity();
-            $payload['has_baseline'] = !empty($payload['core_sealed']) || !empty($payload['snapshot_imported']);
+            $payload['has_baseline'] = !empty($payload['core_sealed']) || !empty($payload['core_pinned']) || !empty($payload['snapshot_imported']);
             $payload['not_sealed'] = (new CleanSweep_Snapshot($state))->scope_summary()['not_sealed'];
             if (!empty($bind['visit_key'])) {
                 $payload['visit_key'] = $bind['visit_key'];

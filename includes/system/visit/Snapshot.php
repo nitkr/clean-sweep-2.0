@@ -20,12 +20,13 @@ final class CleanSweep_Snapshot {
         if (($tk['kind'] ?? 'ok') === 'patched' || ($tk['kind'] ?? 'ok') === 'extra') {
             return ['success' => false, 'error' => 'Refusing to export: Clean Sweep files were added or modified'];
         }
+        $pin = $this->sealer->pin_for_snapshot();
         $state = $this->state->load();
         $persist = class_exists('CleanSweep_SnapshotCompare')
             ? (new CleanSweep_SnapshotCompare())->persistence_snapshot()
-            : ['admins' => [], 'cron_hooks' => []];
+            : ['admins' => [], 'cron_hooks' => [], 'cron_events' => []];
         $all_media = !empty($state['include_all_media']);
-        $watch = $this->hashes_only($this->collect_watch($all_media));
+        $watch = $this->hashes_only($this->collect_watch($all_media, false));
         $this->persist_watch_samples($watch);
         $payload = [
             'format' => 'clean-sweep-snapshot-v1',
@@ -38,6 +39,9 @@ final class CleanSweep_Snapshot {
             'extra_php' => $watch['extra_php'] ?? [],
             'options' => $state['options'] ?? [],
             'toolkit_self_check' => $tk['kind'] ?? 'ok',
+            'pin_warnings' => $pin['warnings'] ?? [],
+            'pin_warning_groups' => $pin['warning_groups'] ?? [],
+            'baseline_kind' => ($state['scopes']['core']['origin'] ?? 'snapshot'),
         ];
         $secret = bin2hex(random_bytes(16));
         $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -59,8 +63,8 @@ final class CleanSweep_Snapshot {
         $wc = $this->watch_counts($watch);
         $this->state->event(
             'snapshot:downloaded',
-            'sealed ' . (int) (($state['scopes']['core']['file_count'] ?? 0))
-            . ' core · watch extra-php ' . $wc['extra_php']
+            'pinned ' . (int) ($pin['file_count'] ?? 0)
+            . ' files · watch extra-php ' . $wc['extra_php']
             . ', uploads ' . $wc['uploads']
             . ', site-owned ' . $wc['site_owned']
         );
@@ -70,6 +74,9 @@ final class CleanSweep_Snapshot {
             'data' => $out,
             'secret' => $secret,
             'scopes' => $this->scope_summary($state),
+            'pin_warnings' => $pin['warnings'] ?? [],
+            'pin_warning_groups' => $pin['warning_groups'] ?? [],
+            'pinned_file_count' => (int) ($pin['file_count'] ?? 0),
         ];
     }
 
@@ -142,9 +149,15 @@ final class CleanSweep_Snapshot {
         $this->state->save($state);
 
         $violations = [];
-        $compare = ['updates' => [], 'tamper' => [], 'persistence' => ['new_admins' => [], 'new_cron' => []]];
-        $drift = ['new' => [], 'changed' => [], 'gone' => [], 'watched' => 0, 'previous' => 0];
-        $curr_watch = $this->collect_watch(!empty($payload['include_all_media']));
+        $compare = ['updates' => [], 'tamper' => [], 'package_churn' => [], 'persistence' => ['new_admins' => [], 'new_cron' => []]];
+        $drift = ['new' => [], 'changed' => [], 'gone' => [], 'priority' => [], 'packages' => [], 'watched' => 0, 'previous' => 0];
+        $skip_pkgs = [];
+        foreach ($payload['scopes']['packages'] ?? [] as $pk => $pkg) {
+            if (is_array($pkg) && (!empty($pkg['pinned']) || !empty($pkg['sealed']))) {
+                $skip_pkgs[] = (string) $pk;
+            }
+        }
+        $curr_watch = $this->collect_watch(!empty($payload['include_all_media']), true, $skip_pkgs);
         if (class_exists('CleanSweep_SnapshotCompare')) {
             $cmp = new CleanSweep_SnapshotCompare();
             if (class_exists('CleanSweep_ScopeSealer')) {
@@ -161,24 +174,67 @@ final class CleanSweep_Snapshot {
             $drift = $cmp->drift($prev_watch, $curr_watch, $payload['scopes'] ?? [], $drift_buckets);
         }
         $store = new CleanSweep_VisitStore($this->state);
-        foreach (array_merge($drift['changed'] ?? [], $drift['new'] ?? [], $drift['gone'] ?? []) as $item) {
+        foreach (array_merge($drift['priority'] ?? [], $drift['changed'] ?? [], $drift['new'] ?? [], $drift['gone'] ?? []) as $item) {
+            $path = (string) ($item['path'] ?? '');
+            if ($path === '') {
+                continue;
+            }
             $store->add_unexpected([
                 [
-                    'path' => $item['path'] ?? '',
+                    'path' => $path,
                     'reason' => $item['type'] ?? 'change',
-                    'sample' => $curr_watch[$item['bucket'] ?? ''][$item['path'] ?? ''] ?? [],
+                    'sample' => $curr_watch[$item['bucket'] ?? ''][$path] ?? [],
                 ],
             ]);
         }
-        $payload_paths = [];
-        foreach (array_merge($drift['changed'] ?? [], $drift['new'] ?? [], $drift['gone'] ?? []) as $item) {
-            if (!empty($item['path'])) {
-                $payload_paths[] = $item['path'];
+        $cmp_paths = class_exists('CleanSweep_SnapshotCompare') ? new CleanSweep_SnapshotCompare() : null;
+        foreach ($compare['tamper'] ?? [] as $v) {
+            if (!is_array($v)) {
+                continue;
+            }
+            $path = (string) ($v['file'] ?? $v['path'] ?? '');
+            if ($path === '') {
+                continue;
+            }
+            $store->add_unexpected([
+                [
+                    'path' => $path,
+                    'reason' => $v['type'] ?? 'change',
+                    'sample' => [],
+                ],
+            ]);
+        }
+        $payload_paths = $cmp_paths
+            ? $cmp_paths->persistence_payload_paths($compare['tamper'] ?? [], $drift)
+            : [];
+        $persist_violations = [];
+        foreach ($compare['tamper'] ?? [] as $v) {
+            if (!is_array($v)) {
+                continue;
+            }
+            $path = (string) ($v['file'] ?? $v['path'] ?? '');
+            $scope = (string) ($v['scope'] ?? '');
+            if ($path === '') {
+                continue;
+            }
+            // Created always-on is the persistence payload, not the writer.
+            if (($v['type'] ?? '') === 'created'
+                && $cmp_paths && $cmp_paths->is_always_on_path($path, $scope)) {
+                $persist_violations[] = $v;
             }
         }
         $likely = null;
         if (class_exists('CleanSweep_Correlator')) {
-            $likely = (new CleanSweep_Correlator($store))->run($compare['tamper'] ?? $violations, [], $payload_paths);
+            // Modified theme/plugin bootstrap stays out of payload_keys so it can
+            // be named as a writer even when no new mu-plugin appeared.
+            $likely = (new CleanSweep_Correlator($store))->run($persist_violations, [], $payload_paths);
+            if (is_array($likely) && empty($likely['writer']) && $cmp_paths) {
+                $fb = $this->fallback_compare_writer($compare['tamper'] ?? [], $cmp_paths);
+                if ($fb !== null) {
+                    $likely = array_merge($likely, $fb);
+                    $store->set_likely_source($likely);
+                }
+            }
         }
         $compare['drift'] = $drift;
         $compare['likely_source'] = $likely;
@@ -214,6 +270,14 @@ final class CleanSweep_Snapshot {
         if (is_array($owned)) {
             $compared += count($owned);
         }
+        $mu = $payload['scopes']['mu_plugins']['files'] ?? [];
+        if (is_array($mu)) {
+            $compared += count($mu);
+        }
+        $up = $payload['scopes']['uploads_exec']['files'] ?? [];
+        if (is_array($up)) {
+            $compared += count($up);
+        }
         foreach (($payload['scopes']['packages'] ?? []) as $pkg) {
             if (!is_array($pkg)) {
                 continue;
@@ -238,27 +302,153 @@ final class CleanSweep_Snapshot {
         }
         $persist = is_array($compare['persistence'] ?? null) ? $compare['persistence'] : [];
         $drift = is_array($compare['drift'] ?? null) ? $compare['drift'] : [];
-        $drift_hits = count($drift['new'] ?? []) + count($drift['changed'] ?? []) + count($drift['gone'] ?? []);
+        $priority_hits = count($drift['priority'] ?? []);
+        $churn = $compare['package_churn'] ?? [];
+        $tamper = $compare['tamper'] ?? [];
+        $file_problems = count($tamper);
+        $persist_problems = !empty($persist['new_admins']) || !empty($persist['new_cron']);
         $compare['compared'] = $compared;
         $compare['matched'] = max(0, $compared - count($violations));
         $compare['changed'] = $changed;
         $compare['missing'] = $missing;
         $compare['exported_at'] = $payload['exported_at'] ?? null;
         $compare['host'] = $payload['host'] ?? null;
+        $compare['baseline_kind'] = $payload['baseline_kind'] ?? ($payload['scopes']['core']['origin'] ?? null);
         $compare['watch_counts'] = $this->watch_counts($this->watch_from_payload($payload));
-        $compare['sealed_clean'] = $violations === []
-            && empty($persist['new_admins'])
-            && empty($persist['new_cron']);
-        $compare['clean'] = !empty($compare['sealed_clean']) && $drift_hits === 0;
+        $groups = $payload['pin_warning_groups'] ?? null;
+        if (!is_array($groups) || $groups === []) {
+            $groups = class_exists('CleanSweep_SnapshotCompare')
+                ? CleanSweep_SnapshotCompare::pin_warning_groups_from_list(
+                    is_array($payload['pin_warnings'] ?? null) ? $payload['pin_warnings'] : []
+                )
+                : [];
+        }
+        $compare['pin_context'] = [
+            'root_php' => count($groups['root_php'] ?? []),
+            'mu_plugins' => count($groups['mu_plugins'] ?? []),
+            'wp_content' => count($groups['wp_content'] ?? []),
+            'uploads_exec' => count($groups['uploads_exec'] ?? []),
+            'bootstrap' => count($groups['bootstrap'] ?? []),
+            'site_owned' => count($groups['site_owned'] ?? []),
+            'groups' => $groups,
+        ];
+        $compare['file_clean'] = $file_problems === 0 && $priority_hits === 0;
+        $compare['persist_clean'] = !$persist_problems;
+        $compare['sealed_clean'] = $file_problems === 0;
+        $compare['clean'] = !empty($compare['file_clean']) && !empty($compare['persist_clean'])
+            && $churn === [];
         return $compare;
     }
 
+    /**
+     * Name a writer from compare rows when correlator had no bootstrap hit:
+     * packed PHP first (any path), else the only changed PHP file, else a package-root PHP.
+     *
+     * @param array<int,array> $tamper
+     * @return array{writer:array,writer_is_payload:bool,confidence:string,summary:string}|null
+     */
+    private function fallback_compare_writer(array $tamper, CleanSweep_SnapshotCompare $cmp): ?array {
+        $php = [];
+        $packed = [];
+        $bootstrap = [];
+        foreach ($tamper as $v) {
+            if (!is_array($v) || ($v['type'] ?? '') === 'deleted') {
+                continue;
+            }
+            $path = (string) ($v['file'] ?? $v['path'] ?? '');
+            $scope = (string) ($v['scope'] ?? '');
+            if ($path === '' || !$this->path_is_php($path)) {
+                continue;
+            }
+            $php[] = $v;
+            if ($cmp->is_bootstrap_path($path, $scope)) {
+                $bootstrap[] = $v;
+            }
+            if ($this->path_looks_packed($path)) {
+                $packed[] = $v;
+            }
+        }
+        $pick = null;
+        $why = '';
+        $evidence = ['package_entrypoint'];
+        $score = 62;
+        if ($packed !== []) {
+            foreach ($packed as $v) {
+                if ($cmp->is_bootstrap_path((string) ($v['file'] ?? ''), (string) ($v['scope'] ?? ''))) {
+                    $pick = $v;
+                    break;
+                }
+            }
+            $pick = $pick ?: $packed[0];
+            $why = 'Packed PHP changed since the snapshot';
+            $evidence = ['signature'];
+            $score = 74;
+        } elseif (count($php) === 1) {
+            $pick = $php[0];
+            $why = 'Only PHP file that changed since the snapshot';
+        } elseif ($bootstrap !== []) {
+            $pick = $bootstrap[0];
+            $why = 'Plugin/theme root PHP changed since the snapshot';
+        }
+        if ($pick === null) {
+            return null;
+        }
+        $path = (string) ($pick['file'] ?? $pick['path'] ?? '');
+        return [
+            'writer' => [
+                'path' => $path,
+                'why' => $why,
+                'evidence' => $evidence,
+                'role' => 'writer',
+                'score' => $score,
+            ],
+            'writer_is_payload' => false,
+            'confidence' => $packed !== [] ? 'high' : 'medium',
+            'summary' => 'Likely writer: ' . $path . ' (' . $why . ')',
+        ];
+    }
+
+    private function path_is_php(string $path): bool {
+        return (bool) preg_match('/\.(?:php\d*|phtml|phar)$/i', str_replace('\\', '/', $path));
+    }
+
+    private function path_looks_packed(string $rel): bool {
+        $rel = ltrim(str_replace('\\', '/', $rel), '/');
+        $root = function_exists('clean_sweep_detect_site_root')
+            ? clean_sweep_detect_site_root()
+            : (defined('ABSPATH') ? rtrim(str_replace('\\', '/', ABSPATH), '/') . '/' : '');
+        $abs = $root . $rel;
+        if ($abs === '' || !is_readable($abs) || is_dir($abs)) {
+            return false;
+        }
+        $fh = @fopen($abs, 'rb');
+        if (!$fh) {
+            return false;
+        }
+        $size = (int) @filesize($abs);
+        $blob = (string) fread($fh, 24576);
+        if ($size > 49152) {
+            fseek($fh, (int) max(0, (int) ($size / 2) - 8192));
+            $blob .= (string) fread($fh, 16384);
+        }
+        if ($size > 24576) {
+            fseek($fh, -24576, SEEK_END);
+            $blob .= (string) fread($fh, 24576);
+        }
+        fclose($fh);
+        return (bool) preg_match(
+            '/\bgzinflate\s*\(|\bgzdecode\s*\(|\bgzuncompress\s*\(|\beval\s*\(|create_function\s*\(|auto_prepend_file/i',
+            $blob
+        );
+    }
+
     /** @return array<string,array<string,array{hash:?string}>> */
-    private function collect_watch(bool $all_media): array {
+    private function collect_watch(bool $all_media, bool $include_extra_php = true, array $skip_package_keys = []): array {
         if (!class_exists('CleanSweep_Census')) {
             return ['site_owned' => [], 'extra_php' => [], 'uploads' => [], 'wp_content' => []];
         }
-        return (new CleanSweep_Census(new CleanSweep_VisitStore($this->state)))->collect_watch($all_media);
+        return (new CleanSweep_Census(new CleanSweep_VisitStore($this->state)))
+            ->collect_watch($all_media, $include_extra_php, $skip_package_keys);
     }
 
     /** @param array<string,array<string,mixed>> $watch */
@@ -324,7 +514,11 @@ final class CleanSweep_Snapshot {
         $c = count($drift['new'] ?? []);
         $g = count($drift['gone'] ?? []);
         $sealed = (int) ($compare['compared'] ?? 0);
-        $bits = ['sealed ' . $sealed];
+        $bits = ['baseline ' . $sealed];
+        $prio = count($drift['priority'] ?? []);
+        if ($prio) {
+            $bits[] = $prio . ' high-value';
+        }
         if ($n || $c || $g) {
             $bits[] = 'watch ' . $n . ' changed, ' . $c . ' new, ' . $g . ' gone';
         } else {
@@ -338,21 +532,38 @@ final class CleanSweep_Snapshot {
         $core = $state['scopes']['core'] ?? null;
         $packages = $state['scopes']['packages'] ?? [];
         $sealed = [];
+        $pinned = [];
         foreach ($packages as $k => $p) {
             if (!empty($p['sealed'])) {
                 $sealed[] = $k;
             }
+            if (!empty($p['pinned'])) {
+                $pinned[] = $k;
+            }
         }
+        $core_pinned = is_array($core) && !empty($core['pinned']);
+        $core_sealed = is_array($core) && !empty($core['sealed']);
         return [
-            'core_sealed' => is_array($core) && !empty($core['sealed']),
+            'core_sealed' => $core_sealed,
+            'core_pinned' => $core_pinned,
+            'core_origin' => is_array($core) ? ($core['origin'] ?? null) : null,
             'core_file_count' => is_array($core) ? (int) ($core['file_count'] ?? 0) : 0,
             'packages_sealed' => $sealed,
+            'packages_pinned' => $pinned,
+            'packages_sealed_count' => count($sealed),
+            'packages_pinned_count' => count($pinned),
             'site_owned' => !empty($state['scopes']['site_owned']),
-            'not_sealed' => $this->not_sealed_message($core, $sealed),
+            'not_sealed' => $this->not_sealed_message($core, $sealed, $core_pinned, count($pinned)),
         ];
     }
 
-    private function not_sealed_message($core, array $sealed): string {
+    private function not_sealed_message($core, array $sealed, bool $core_pinned, int $pinned_n): string {
+        if ($core_pinned || $pinned_n > 0) {
+            $kind = (is_array($core) && ($core['origin'] ?? '') === 'reinstall')
+                ? 'Core reinstall-sealed'
+                : 'Baseline pinned on snapshot download';
+            return $kind . '. Next visit, import this file to see what changed. Unchanged is not the same as clean.';
+        }
         $bits = [];
         if (!(is_array($core) && !empty($core['sealed']))) {
             $bits[] = 'WordPress core';
@@ -362,6 +573,6 @@ final class CleanSweep_Snapshot {
         if ($sealed) {
             return 'Sealed packages: ' . implode(', ', $sealed) . '. Still untrusted: ' . implode(', ', $bits);
         }
-        return 'Not sealed: ' . implode(', ', $bits);
+        return 'Not sealed: ' . implode(', ', $bits) . '. Download a snapshot to pin current hashes.';
     }
 }

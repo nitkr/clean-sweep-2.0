@@ -33,7 +33,7 @@ Scanner results restore after a page refresh (malware via last scan, vulnerabili
 | --- | --- | --- |
 | Scan | **Scanner** | Signature scan of files and the database, WordPress.org checksums, package verification. Profiles: Quick, Standard (default), Deep. Pause / resume on shared hosts. Review hits on the same screen. |
 | Scan | **Vulnerabilities** | Separate WPVulnerability.com check for known CVEs. Use it to decide what to replace, not as a malware verdict. Last check restores after refresh. |
-| Watch | **Security** | Live file watch (optional must-use agent), snapshots, integrity seal after cleanup. |
+| Watch | **Security** | Live file watch (optional must-use agent), snapshots (pin current hashes on download, even after a manual clean), integrity seal after Clean Sweep reinstall. |
 | Replace | **Core files** | Reinstall WordPress core. Keeps `wp-config.php` and `wp-content`. |
 | Replace | **Extensions** | Analyze plugins/themes. Reinstall from WordPress.org or WPMU DEV (backup first). Flags likely fake / impersonating packages (stolen .org slug or decoy plugin). Already-active packages stay active. |
 | Replace | **Upload** | Upload a clean ZIP to plugins, themes, uploads, or a custom path. New uploaded packages stay inactive. |
@@ -53,5 +53,5 @@ Typical order on a compromised site. Skip steps that do not apply. The dashboard
 4. Audit cron and persistence.
 5. Check known vulnerabilities if you need CVE context before replacing packages.
 6. Replace compromised core, plugins, and themes (or upload a clean ZIP).
-7. Seal integrity after cleanup.
+7. Download a snapshot to pin current hashes: core, plugin/theme PHP, mu-plugins, unofficial WP-root PHP, PHP sitting directly in `wp-content/`, uploads PHP (and PHP-in-image), and `.htaccess`/`.user.ini` in those trees. Cache and the media library are not sealed. Unchanged extras are not re-listed as new on compare.
 8. Remove Clean Sweep when the site is stable.
