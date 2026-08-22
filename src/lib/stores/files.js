@@ -589,24 +589,27 @@ function createFilesStore() {
         });
       });
       
-      // Update the tree with infected status
+      // Update the tree with infected status; clear marks no longer in this set.
       update(s => {
         const updateNode = (nodes) => {
           return nodes.map(node => {
             const infection = infectedPaths.get(node.path);
+            let next = node;
             if (infection) {
-              return { ...node, ...infection };
+              next = { ...node, ...infection };
+            } else if (node.infected) {
+              next = { ...node, infected: false, riskLevel: undefined, threatType: undefined };
             }
-            if (node.children) {
-              return { ...node, children: updateNode(node.children) };
+            if (next.children) {
+              return { ...next, children: updateNode(next.children) };
             }
-            return node;
+            return next;
           });
         };
         
         return {
           ...s,
-          tree: updateNode(s.tree),
+          tree: updateNode(s.tree || []),
           infectedFiles: infectedPaths
         };
       });

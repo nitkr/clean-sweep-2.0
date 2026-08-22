@@ -41,7 +41,10 @@
     if ($scanning.scanning) {
       const pct = Math.round($scanning.progressPercent || 0);
       const paused = $scanning.progressStatus === 'paused';
-      const malwareN = Number($scanning.liveProgress?.malware_threats) || 0;
+      const malwareN =
+        ($scanning.previewThreats?.length || 0) > 0
+          ? $scanning.previewThreats.length
+          : Number($scanning.liveProgress?.malware_threats) || 0;
       const integrityN = Number($scanning.liveProgress?.integrity_violations) || 0;
       const foundN = Number($scanning.liveProgress?.threats_found) || malwareN + integrityN;
       let label = paused ? `Continuing… ${pct}%` : `Scanning ${pct}%`;

@@ -196,8 +196,12 @@
     }
     if (dbSkipped) parts.push('DB skipped');
     if (filesSkipped) parts.push('Files skipped');
-    if (threatsFound > 0) {
-      parts.push(`${threatsFound} threat${threatsFound === 1 ? '' : 's'}`);
+    if (malwareFound > 0) {
+      parts.push(`${malwareFound} signature match${malwareFound === 1 ? '' : 'es'}`);
+    } else if (integrityFound > 0) {
+      parts.push(`${integrityFound} integrity finding${integrityFound === 1 ? '' : 's'}`);
+    } else if (threatsFound > 0) {
+      parts.push(`${threatsFound} finding${threatsFound === 1 ? '' : 's'}`);
     }
     if (stepsHint) parts.push(stepsHint);
     return parts.join(' · ');

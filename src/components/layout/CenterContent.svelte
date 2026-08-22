@@ -610,6 +610,39 @@
         </div>
       </div>
 
+      {#if isThreatView && ($scanning.scanning || $scanning.previewPartial)}
+        <div class="px-4 py-1.5 border-b border-line bg-emerald-500/10 text-[11px] flex items-center justify-between gap-3 flex-wrap">
+          <p class="text-emerald-900 dark:text-emerald-200 min-w-0 truncate">
+            {#if $scanning.scanning}
+              Scan still running
+              {#if ($scanning.previewThreats?.length || $scanning.liveProgress?.malware_threats)}
+                · {($scanning.previewThreats?.length || $scanning.liveProgress?.malware_threats)} signature match{($scanning.previewThreats?.length || $scanning.liveProgress?.malware_threats) === 1 ? '' : 'es'} so far
+              {/if}
+            {:else}
+              Preview findings. Scan is no longer running.
+            {/if}
+          </p>
+          <div class="flex items-center gap-2 flex-shrink-0">
+            <button
+              type="button"
+              onclick={closeEditor}
+              class="text-[11px] font-medium text-emerald-900 dark:text-emerald-100 hover:underline"
+            >
+              Back to scan
+            </button>
+            {#if $scanning.scanning}
+              <button
+                type="button"
+                onclick={() => scanning.cancelScan()}
+                class="text-[11px] text-muted hover:text-ink"
+              >
+                Cancel scan
+              </button>
+            {/if}
+          </div>
+        </div>
+      {/if}
+
       {#if editorError}
         <div class="px-4 py-2 bg-red-500/10 border-b border-red-500/30 text-xs text-red-700 dark:text-red-300">
           {editorError}

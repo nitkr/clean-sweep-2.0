@@ -101,6 +101,7 @@ function createScanningStore() {
      * Populated while scanning so the user can inspect hits without waiting.
      */
     previewThreats: [],
+    previewIntegrityThreats: [],
     previewPartial: false,
     previewLoading: false,
     previewError: null,
@@ -108,6 +109,12 @@ function createScanningStore() {
     previewMalwareTotal: 0,
     previewIntegrityTotal: 0,
     previewCapped: false,
+    previewAfterLine: 0,
+    previewEof: false,
+    previewCaughtUpAt: 0,
+    previewIntegrityAttempted: false,
+    previewReportFailed: false,
+    previewStoppedReason: null,
     // Last displayed %; queue-based progress is allowed to drop when discovery grows
     progressHighWater: 0,
     /** 'queue' | 'phase' | '' — server says which progress formula it used */
@@ -151,7 +158,9 @@ function createScanningStore() {
   /** Mid-scan preview fetch (invalidated on complete / new scan) */
   const PREVIEW_PAGE_SIZE = 50;
   const PREVIEW_CAP = 100;
+  const PREVIEW_INTEGRITY_CAP = 15;
   const PREVIEW_FETCH_MIN_MS = 2500;
+  const PREVIEW_MAX_PAGES = 8;
   let previewFetchGen = 0;
   let previewFetchInFlight = false;
   let lastPreviewFetchAt = 0;
@@ -197,6 +206,7 @@ function createScanningStore() {
   function emptyPreviewState() {
     return {
       previewThreats: [],
+      previewIntegrityThreats: [],
       previewPartial: false,
       previewLoading: false,
       previewError: null,
@@ -204,6 +214,12 @@ function createScanningStore() {
       previewMalwareTotal: 0,
       previewIntegrityTotal: 0,
       previewCapped: false,
+      previewAfterLine: 0,
+      previewEof: false,
+      previewCaughtUpAt: 0,
+      previewIntegrityAttempted: false,
+      previewReportFailed: false,
+      previewStoppedReason: null,
     };
   }
 
@@ -216,14 +232,31 @@ function createScanningStore() {
     return Math.max(0, total - integrity);
   }
 
+  function stableFallbackId(t) {
+    const key = [
+      t.file || t.path || '',
+      t.pattern || t.signature_id || '',
+      t.line_number ?? '',
+      t.table || '',
+      t.row_id ?? '',
+      t.column || '',
+      t.source || '',
+    ].join('|');
+    let h = 2166136261;
+    for (let i = 0; i < key.length; i++) {
+      h ^= key.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return 't_' + (h >>> 0).toString(16);
+  }
+
   function normalizeThreatList(allThreats) {
     if (!Array.isArray(allThreats)) return [];
     const seenIds = new Set();
-    let fallbackCounter = 0;
     return allThreats.filter((t) => {
       if (!t) return false;
       if (!t.id || typeof t.id !== 'string' || t.id.length < 8) {
-        t.id = 'threat_' + fallbackCounter++ + '_' + Date.now();
+        t.id = stableFallbackId(t);
       }
       if (!t.risk_level && t.threat_level) t.risk_level = t.threat_level;
       if (seenIds.has(t.id)) return false;
@@ -232,14 +265,25 @@ function createScanningStore() {
     });
   }
 
+  function countMalwarePreview(list) {
+    if (!Array.isArray(list) || list.length === 0) return 0;
+    return list.filter((t) => !isIntegrityThreat(t)).length;
+  }
+
+  function paintPreviewInfections(s) {
+    const all = []
+      .concat(s.previewThreats || [])
+      .concat(s.previewIntegrityThreats || []);
+    files.updateInfectedFiles(all);
+  }
+
   function invalidatePreviewFetch() {
     previewFetchGen++;
     previewFetchInFlight = false;
   }
 
   /**
-   * Load malware-first findings while a scan is still running.
-   * Triggered when live malware_threats outpaces the preview list (not every poll).
+   * Incremental malware-first preview via JSONL line cursor (not unique-row offset).
    */
   async function loadPreviewThreats(scanId) {
     if (!scanId || previewFetchInFlight) return;
@@ -254,17 +298,27 @@ function createScanningStore() {
     }));
 
     try {
-      while (true) {
+      let pages = 0;
+      while (pages < PREVIEW_MAX_PAGES) {
+        pages++;
         const snap = getStateSnapshot();
         if (!snap?.scanning || snap.scanId !== scanId) break;
-        const have = snap.previewThreats?.length || 0;
-        if (have >= PREVIEW_CAP) break;
+        const have = countMalwarePreview(snap.previewThreats);
+        if (have >= PREVIEW_CAP) {
+          update((s) => ({
+            ...s,
+            previewCapped: true,
+            previewLoading: false,
+            previewMalwareTotal: Math.max(have, s.previewMalwareTotal || 0),
+          }));
+          break;
+        }
 
-        const offset = have;
-        const limit = Math.min(PREVIEW_PAGE_SIZE, PREVIEW_CAP - offset);
-        const resp = await adapters.malware.getThreats(scanId, offset, limit, {
-          prefer: 'malware',
+        const after = Number(snap.previewAfterLine) || 0;
+        const limit = Math.min(PREVIEW_PAGE_SIZE, PREVIEW_CAP - have);
+        const resp = await adapters.malware.getThreats(scanId, 0, limit, {
           source: 'malware',
+          after_line: after,
         });
         if (gen !== previewFetchGen) return;
         if (!resp?.success || !resp.data) {
@@ -277,16 +331,10 @@ function createScanningStore() {
         }
 
         const batch = normalizeThreatList(resp.data.threats || []);
-        const totalMatched =
-          typeof resp.data.total === 'number' ? resp.data.total : null;
-        const malwareMeta =
-          typeof resp.data.malware_threats === 'number'
-            ? resp.data.malware_threats
-            : totalMatched;
-        const integrityMeta =
-          typeof resp.data.integrity_violations === 'number'
-            ? resp.data.integrity_violations
-            : null;
+        const nextLine =
+          typeof resp.data.next_line === 'number' ? resp.data.next_line : after;
+        const eof = !!resp.data.eof;
+        const cursorMoved = nextLine > after;
 
         let added = 0;
         let nextList = [];
@@ -299,30 +347,65 @@ function createScanningStore() {
           const fresh = batch.filter((t) => t.id && !seen.has(t.id));
           added = fresh.length;
           nextList = existing.concat(fresh).slice(0, PREVIEW_CAP);
-          const reported = malwareMeta ?? nextList.length;
+          const malwareHave = countMalwarePreview(nextList);
+          const liveMalware = s.liveProgress?.malware_threats || 0;
           return {
             ...s,
             previewThreats: nextList,
             previewPartial: true,
             previewLoading: false,
             previewError: null,
-            previewTotal: reported,
-            previewMalwareTotal: reported,
-            previewIntegrityTotal:
-              integrityMeta != null ? integrityMeta : s.previewIntegrityTotal,
-            previewCapped:
-              nextList.length >= PREVIEW_CAP && reported > PREVIEW_CAP,
+            previewAfterLine: nextLine,
+            previewEof: eof,
+            previewTotal: malwareHave,
+            previewMalwareTotal: Math.max(malwareHave, liveMalware, s.previewMalwareTotal || 0),
+            previewCapped: malwareHave >= PREVIEW_CAP && (liveMalware > PREVIEW_CAP || !eof),
+            previewCaughtUpAt: eof
+              ? Math.max(liveMalware, malwareHave, s.previewCaughtUpAt || 0)
+              : s.previewCaughtUpAt,
           };
         });
 
-        if (nextList.length > 0) {
-          files.updateInfectedFiles(nextList);
-        }
+        const afterSnap = getStateSnapshot();
+        if (afterSnap) paintPreviewInfections(afterSnap);
 
-        if (added === 0) break;
-        if (nextList.length >= PREVIEW_CAP) break;
-        if (batch.length < limit) break;
-        if (totalMatched != null && nextList.length >= totalMatched) break;
+        if (!afterSnap?.scanning || afterSnap.scanId !== scanId) break;
+        if (countMalwarePreview(afterSnap.previewThreats) >= PREVIEW_CAP) break;
+        if (eof && added === 0) break;
+        if (!cursorMoved && added === 0) break;
+        if (eof) break;
+      }
+
+      const snapAfter = getStateSnapshot();
+      const needIntegrity =
+        snapAfter?.scanning &&
+        snapAfter.scanId === scanId &&
+        !snapAfter.previewIntegrityAttempted &&
+        (Number(snapAfter.liveProgress?.integrity_violations) || 0) > 0 &&
+        !(snapAfter.previewIntegrityThreats?.length);
+
+      if (needIntegrity && gen === previewFetchGen) {
+        const ireq = await adapters.malware.getThreats(scanId, 0, PREVIEW_INTEGRITY_CAP, {
+          source: 'integrity',
+          after_line: 0,
+        });
+        if (gen !== previewFetchGen) return;
+        const ibatch = normalizeThreatList(ireq?.success ? (ireq.data?.threats || []) : []);
+        update((s) => {
+          if (!s.scanning || s.scanId !== scanId) {
+            return { ...s, previewIntegrityAttempted: true };
+          }
+          const liveInt = Number(s.liveProgress?.integrity_violations) || ibatch.length;
+          return {
+            ...s,
+            previewIntegrityThreats: ibatch.slice(0, PREVIEW_INTEGRITY_CAP),
+            previewIntegrityTotal: Math.max(liveInt, ibatch.length),
+            previewIntegrityAttempted: true,
+            previewPartial: true,
+          };
+        });
+        const painted = getStateSnapshot();
+        if (painted) paintPreviewInfections(painted);
       }
     } catch (err) {
       if (gen !== previewFetchGen) return;
@@ -335,6 +418,7 @@ function createScanningStore() {
     } finally {
       if (gen === previewFetchGen) {
         previewFetchInFlight = false;
+        update((s) => (s.previewLoading ? { ...s, previewLoading: false } : s));
       }
     }
   }
@@ -350,13 +434,38 @@ function createScanningStore() {
     }
     const snap = getStateSnapshot();
     if (!snap?.scanning || snap.scanId !== scanId) return;
-    const have = snap.previewThreats?.length || 0;
-    if (have >= PREVIEW_CAP) return;
+
+    const malwareHave = countMalwarePreview(snap.previewThreats);
     const malwareN = malwareCountFromCounters(counters);
-    if (malwareN <= have) return;
+    const integrityN = Number(counters.integrity_violations) || 0;
+    const integrityHave = snap.previewIntegrityThreats?.length || 0;
+
+    if (malwareHave >= PREVIEW_CAP) {
+      const shouldCap = malwareN > PREVIEW_CAP || snap.previewCapped;
+      if (shouldCap && !snap.previewCapped) {
+        update((s) => ({
+          ...s,
+          previewCapped: true,
+          previewMalwareTotal: Math.max(malwareN, s.previewMalwareTotal || 0, malwareHave),
+        }));
+      }
+    }
+
+    const caughtUp =
+      !!snap.previewEof && malwareN <= (Number(snap.previewCaughtUpAt) || malwareHave);
+    const needMalware =
+      malwareHave < PREVIEW_CAP &&
+      !caughtUp &&
+      (malwareN > malwareHave || (malwareHave > 0 && snap.previewEof === false));
+    const needIntegrity =
+      integrityN > 0 && integrityHave === 0 && !snap.previewIntegrityAttempted;
+
+    if (!needMalware && !needIntegrity) return;
     if (previewFetchInFlight) return;
     const now = Date.now();
-    if (have > 0 && now - lastPreviewFetchAt < PREVIEW_FETCH_MIN_MS) return;
+    if ((malwareHave > 0 || integrityHave > 0) && now - lastPreviewFetchAt < PREVIEW_FETCH_MIN_MS) {
+      return;
+    }
     loadPreviewThreats(scanId);
   }
 
@@ -594,12 +703,16 @@ function createScanningStore() {
                 }
                 pollCancel = null;
                 notFoundStreak = 0;
+                invalidatePreviewFetch();
                 update(s => ({
                   ...s,
                   scanning: false,
                   progressStatus: 'failed',
                   isContinuation: false,
                   progressMessage: 'Lost connection to scan state. Progress may still be on the server. Try refresh or Start again.',
+                  previewLoading: false,
+                  previewPartial: !!(s.previewThreats?.length || s.previewIntegrityThreats?.length),
+                  previewStoppedReason: 'lost',
                 }));
                 clearScanPointer();
                 return;
@@ -835,7 +948,11 @@ function createScanningStore() {
                     scanning: false,
                     progressStatus: 'completed',
                     isContinuation: false,
-                    progressMessage: 'Scan finished but loading results failed. Try refresh.',
+                    previewLoading: false,
+                    previewPartial: true,
+                    previewReportFailed: true,
+                    previewStoppedReason: 'report_failed',
+                    progressMessage: 'Scan finished but loading the full report failed. Findings collected so far are still below.',
                   }));
                   persistPointer({
                     scan_id: scanId,
@@ -855,7 +972,9 @@ function createScanningStore() {
                 scanning: false,
                 progressStatus: status.status,
                 isContinuation: false,
-                ...emptyPreviewState(),
+                previewLoading: false,
+                previewPartial: !!(s.previewThreats?.length || s.previewIntegrityThreats?.length),
+                previewStoppedReason: status.status === 'cancelled' ? 'cancelled' : 'failed',
               }));
               clearScanPointer();
             }
@@ -1097,8 +1216,8 @@ function createScanningStore() {
         ...s,
         scanning: true,
         error: null,
-        results: null,
-        ...(isResuming ? { previewPartial: true } : emptyPreviewState()),
+        // Keep last completed report until start ACK succeeds (failed start restores it).
+        ...(isResuming ? { previewPartial: true, previewStoppedReason: null } : emptyPreviewState()),
         resultsScanLabel: isResuming ? s.resultsScanLabel : null,
         resultsScope: isResuming ? s.resultsScope : null,
         checksumNote: isResuming ? s.checksumNote : null,
@@ -1243,9 +1362,17 @@ function createScanningStore() {
           });
           update(s => ({
             ...s,
+            results: isResuming ? s.results : null,
             resultsRestoredBanner: null,
-            resultsFinishedAt: null,
+            resultsFinishedAt: isResuming ? s.resultsFinishedAt : null,
+            previewStoppedReason: null,
+            previewReportFailed: false,
+            ...(isResuming ? {} : emptyPreviewState()),
+            previewPartial: true,
           }));
+          if (!isResuming) {
+            files.updateInfectedFiles([]);
+          }
           attachStatusPoll(scanId);
           if (isResuming) {
             const snap = getStateSnapshot();
@@ -1262,7 +1389,7 @@ function createScanningStore() {
             ...s,
             scanning: false,
             error: response.code ? `${errMsg} (${response.code})` : errMsg,
-            progressStatus: 'error',
+            progressStatus: s.results ? 'completed' : 'error',
             isContinuation: false,
           }));
           app.setError(errMsg);
@@ -1274,7 +1401,7 @@ function createScanningStore() {
           ...s,
           scanning: false,
           error: e.message,
-          progressStatus: 'error',
+          progressStatus: s.results ? 'completed' : 'error',
           isContinuation: false,
         }));
         errors.add({ message: e.message, code: 'SCAN_ERROR' });
@@ -1317,7 +1444,9 @@ function createScanningStore() {
         scanning: false,
         progressStatus: 'cancelled',
         isContinuation: false,
-        ...emptyPreviewState(),
+        previewLoading: false,
+        previewPartial: !!(s.previewThreats?.length || s.previewIntegrityThreats?.length),
+        previewStoppedReason: 'cancelled',
         continuationCount: 0,
         pauseReason: null,
         hasResumeData: false,

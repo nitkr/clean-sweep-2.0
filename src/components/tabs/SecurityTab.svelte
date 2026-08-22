@@ -179,6 +179,21 @@
       Number($scanning.integrityViolations) ||
       0
   );
+  let previewMalwareList = $derived($scanning.previewThreats || []);
+  let previewIntegrityList = $derived($scanning.previewIntegrityThreats || []);
+  let previewAll = $derived(previewIntegrityList.concat(previewMalwareList));
+  /** List is source of truth once any cards exist; live counter only before the first page. */
+  let signatureDisplayCount = $derived(
+    previewMalwareList.length > 0 ? previewMalwareList.length : liveMalwareCount
+  );
+  let showPreviewPanel = $derived(
+    !!$scanning.scanning ||
+      (!!$scanning.previewPartial &&
+        !$scanning.results &&
+        (previewAll.length > 0 ||
+          !!$scanning.previewReportFailed ||
+          !!$scanning.previewStoppedReason))
+  );
   let malwareThreatCount = $derived(
     $scanning.results?.summary?.malware_threats
       ?? ($scanning.results?.malware_threats?.length)
@@ -190,18 +205,19 @@
           t?.pattern !== 'package_divergent' &&
           t?.pattern !== 'package_extras_rollup'
       ).length)
-      ?? liveMalwareCount
       ?? 0
   );
   let integrityThreatCount = $derived(
-    Math.max(
-      Number($scanning.checksumFindings) || 0,
-      Number($scanning.integrityViolations) || 0,
-      Number($scanning.results?.summary?.integrity_violations) || 0,
-      Number($scanning.results?.integrity_violations_list?.length) || 0,
-      ($scanning.results?.threats || []).filter((t) => t?.checksum || t?.source === 'integrity').length,
-      liveIntegrityCount
-    )
+    $scanning.results
+      ? Math.max(
+          Number($scanning.results?.summary?.integrity_violations) || 0,
+          Number($scanning.results?.integrity_violations_list?.length) || 0,
+          ($scanning.results?.threats || []).filter((t) => t?.checksum || t?.source === 'integrity').length
+        )
+      : Math.max(
+          Number($scanning.integrityViolations) || 0,
+          liveIntegrityCount
+        )
   );
 
   function scrollToResults(id) {
@@ -230,7 +246,7 @@
             : 'Scanning';
       const db = $scanning.liveProgress?.db_rows_scanned || 0;
       const files = totalFilesScanned || 0;
-      const found = liveMalwareCount;
+      const found = signatureDisplayCount;
       const detail = found > 0
         ? `${found} found so far`
         : db > 0
@@ -653,19 +669,19 @@
         </div>
         <div class="p-3 bg-panel border border-line rounded-xl">
           <div class="text-[10px] text-muted mb-0.5">
-            {$scanning.scanning && liveIntegrityCount > 0 && liveMalwareCount === 0
+            {$scanning.scanning && signatureDisplayCount === 0 && liveIntegrityCount > 0
               ? 'Integrity'
               : 'Signatures'}
           </div>
-          <div class="text-lg font-bold {(liveMalwareCount || malwareThreatCount || totalThreats) > 0 ? 'text-red-700 dark:text-red-400' : 'text-ink'}">
+          <div class="text-lg font-bold {(signatureDisplayCount || malwareThreatCount || liveIntegrityCount) > 0 ? 'text-red-700 dark:text-red-400' : 'text-ink'}">
             {$scanning.scanning
-              ? (liveMalwareCount || liveIntegrityCount || totalThreats || '—')
-              : (malwareThreatCount || totalThreats || '—')}
+              ? (signatureDisplayCount || liveIntegrityCount || '—')
+              : (malwareThreatCount || '—')}
           </div>
-          {#if $scanning.scanning && (liveMalwareCount > 0 || liveIntegrityCount > 0)}
+          {#if $scanning.scanning && (signatureDisplayCount > 0 || liveIntegrityCount > 0)}
             <div class="text-[10px] text-faint mt-0.5">
-              {#if liveMalwareCount > 0 && liveIntegrityCount > 0}
-                {liveMalwareCount} signature · {liveIntegrityCount} integrity
+              {#if signatureDisplayCount > 0 && liveIntegrityCount > 0}
+                {signatureDisplayCount} loaded · {liveIntegrityCount} integrity
               {:else if liveIntegrityCount > 0}
                 {liveIntegrityCount} verification finding{liveIntegrityCount === 1 ? '' : 's'}
               {:else}
@@ -862,7 +878,7 @@
           filesComplete={filesPhaseComplete}
           dbRowsScanned={totalRecordsScanned}
           threatsFound={totalThreats}
-          malwareFound={liveMalwareCount}
+          malwareFound={signatureDisplayCount}
           integrityFound={liveIntegrityCount}
           dbSkipped={($scanning.profileId === 'deep' || selectedProfile === 'deep') && (($scanning.deepScope || deepScope) === 'files' || ($scanning.deepScope || deepScope) === 'paths')}
           filesSkipped={($scanning.profileId === 'deep' || selectedProfile === 'deep') && ($scanning.deepScope || deepScope) === 'database'}
@@ -884,53 +900,80 @@
           on:continue={resumeScan}
           on:cancel={() => scanning.cancelScan()}
         />
+      {/if}
 
+      {#if showPreviewPanel}
+        {@const previewChip = $scanning.scanning
+          ? { text: 'Preview · scan still running', class: 'bg-sky-500/10 text-sky-800 dark:text-sky-300 border-sky-500/30' }
+          : $scanning.previewReportFailed
+            ? { text: 'Preview · full report failed', class: 'bg-amber-500/10 text-amber-900 dark:text-amber-200 border-amber-500/30' }
+            : $scanning.previewStoppedReason === 'cancelled'
+              ? { text: 'Preview · scan cancelled', class: 'bg-zinc-500/10 text-muted border-line' }
+              : $scanning.previewStoppedReason === 'failed' || $scanning.previewStoppedReason === 'lost'
+                ? { text: 'Preview · scan did not finish', class: 'bg-amber-500/10 text-amber-900 dark:text-amber-200 border-amber-500/30' }
+                : { text: 'Preview · incomplete', class: 'bg-sky-500/10 text-sky-800 dark:text-sky-300 border-sky-500/30' }}
         <div class="space-y-3 mb-6">
           <div class="flex items-start justify-between gap-3 flex-wrap">
             <div>
               <div class="flex items-center gap-2 flex-wrap">
                 <h2 class="text-sm font-semibold text-ink">Findings so far</h2>
-                <span class="text-[10px] px-2 py-0.5 rounded-full border font-medium bg-sky-500/10 text-sky-800 dark:text-sky-300 border-sky-500/30">
-                  Preview · scan still running
+                <span class="text-[10px] px-2 py-0.5 rounded-full border font-medium {previewChip.class}">
+                  {previewChip.text}
                 </span>
               </div>
               <p class="text-[11px] text-muted mt-1 leading-relaxed">
-                {#if liveMalwareCount > 0}
-                  {liveMalwareCount} signature match{liveMalwareCount === 1 ? '' : 'es'}
+                {#if $scanning.previewReportFailed}
+                  The scan finished but the full report could not be loaded. You can still inspect the findings below.
+                {:else if signatureDisplayCount > 0}
+                  {signatureDisplayCount} signature match{signatureDisplayCount === 1 ? '' : 'es'}
+                  {#if $scanning.previewCapped}
+                    (first {previewMalwareList.length}; more when the scan finishes)
+                  {/if}
                   {#if liveIntegrityCount > 0}
-                    · {liveIntegrityCount} integrity finding{liveIntegrityCount === 1 ? '' : 's'} (listed when the scan finishes)
+                    · {liveIntegrityCount} integrity
+                    {#if previewIntegrityList.length && previewIntegrityList.length < liveIntegrityCount}
+                      (showing {previewIntegrityList.length})
+                    {/if}
                   {/if}
                 {:else if liveIntegrityCount > 0}
-                  {liveIntegrityCount} verification finding{liveIntegrityCount === 1 ? '' : 's'} so far. Signature matches will appear here as they are found.
-                {:else}
+                  {liveIntegrityCount} verification finding{liveIntegrityCount === 1 ? '' : 's'} so far.
+                  {#if previewIntegrityList.length}
+                    Showing {previewIntegrityList.length} to inspect now.
+                  {:else}
+                    A sample appears here as soon as it is written.
+                  {/if}
+                {:else if $scanning.scanning}
                   No signature matches yet. This is not a clean bill of health — the scan is still running.
+                {:else}
+                  No signature matches were collected before the scan stopped.
                 {/if}
               </p>
             </div>
           </div>
 
-          {#if $scanning.previewError && !($scanning.previewThreats?.length)}
+          {#if $scanning.previewError && !previewAll.length}
             <div class="p-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-xs text-amber-900 dark:text-amber-200">
               {$scanning.previewError}
             </div>
           {/if}
 
-          {#if $scanning.previewLoading && !($scanning.previewThreats?.length) && liveMalwareCount > 0}
+          {#if ($scanning.previewLoading || (signatureDisplayCount > 0 && !previewAll.length && $scanning.scanning && !$scanning.previewError)) && !previewAll.length}
             <div class="p-3 rounded-xl border border-line bg-panel text-xs text-muted">
               Loading findings…
             </div>
-          {:else if $scanning.previewThreats?.length}
+          {:else if previewAll.length}
             {#if $scanning.previewCapped}
               <p class="text-[11px] text-faint">
-                Showing the first {$scanning.previewThreats.length} signature matches. The rest appear when the scan finishes.
+                Showing the first {previewMalwareList.length} signature matches. The rest appear when the scan finishes.
               </p>
-            {:else if $scanning.previewTotal > $scanning.previewThreats.length}
+            {/if}
+            {#if previewIntegrityList.length && liveIntegrityCount > previewIntegrityList.length}
               <p class="text-[11px] text-faint">
-                Showing {$scanning.previewThreats.length} of {$scanning.previewTotal}. More may load as the scan continues.
+                Integrity sample: {previewIntegrityList.length} of {liveIntegrityCount}. Full verification list when the scan finishes.
               </p>
             {/if}
             <MalwareResultsList
-              threats={$scanning.previewThreats}
+              threats={previewAll}
               selectedThreatId={$scanning.selectedThreat?.id || null}
               onSelect={handleThreatClick}
               preview={true}
