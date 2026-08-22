@@ -765,6 +765,15 @@ final class CleanSweep_PackageChecksums {
     /**
      * @return array<string,string>|null rel => md5
      */
+    /**
+     * Official wordpress.org MD5 map for a free plugin (cached). Themes always null.
+     *
+     * @return array<string,array<int,string>>|null
+     */
+    public static function official_md5_map(string $type, string $slug, string $version): ?array {
+        return self::fetch_map($type, $slug, $version);
+    }
+
     private static function fetch_map(string $type, string $slug, string $version): ?array {
         // wordpress.org has no theme-checksums endpoint. Do not probe it.
         if ($type === 'theme') {

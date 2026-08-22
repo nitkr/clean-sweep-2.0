@@ -20,7 +20,11 @@ function createIntegrityStore() {
     visitStatus: null,
     lastSecret: null,
     lastExportScopes: null,
+    lastPinWarnings: [],
+    lastPinWarningGroups: null,
+    pinnedFileCount: 0,
     importing: false,
+    exporting: false,
     liveWatchBusy: false,
     
     // Check state
@@ -179,6 +183,7 @@ function createIntegrityStore() {
     },
 
     async exportSnapshot() {
+      update(s => ({ ...s, exporting: true, error: null }));
       try {
         const response = await adapters.integrity.exportSnapshot();
         if (response.success && response.data?.data) {
@@ -195,6 +200,9 @@ function createIntegrityStore() {
             ...s,
             lastSecret: response.data.secret || null,
             lastExportScopes: response.data.scopes || null,
+            lastPinWarnings: response.data.pin_warnings || [],
+            lastPinWarningGroups: response.data.pin_warning_groups || null,
+            pinnedFileCount: response.data.pinned_file_count || 0,
             error: null,
           }));
           await this.loadBaselineInfo();
@@ -205,6 +213,8 @@ function createIntegrityStore() {
       } catch (e) {
         update(s => ({ ...s, error: e.message }));
         return null;
+      } finally {
+        update(s => ({ ...s, exporting: false }));
       }
     },
 
@@ -219,17 +229,18 @@ function createIntegrityStore() {
         const response = await adapters.integrity.importSnapshot(json, secret, confirmLegacy);
         if (response.success) {
           await this.loadBaselineInfo();
-          update(s => ({ ...s, importing: false }));
           return { ok: true, compare: response.data?.compare };
         }
-        update(s => ({ ...s, importing: false, error: response.error || 'Import failed' }));
+        update(s => ({ ...s, error: response.error || 'Import failed' }));
         return {
           ok: false,
           needsLegacy: !!(response.details?.needs_legacy_confirm || response.data?.needs_legacy_confirm || /legacy/i.test(response.error || '')),
         };
       } catch (e) {
-        update(s => ({ ...s, importing: false, error: e.message }));
+        update(s => ({ ...s, error: e.message }));
         return false;
+      } finally {
+        update(s => ({ ...s, importing: false }));
       }
     },
 
@@ -446,6 +457,8 @@ function createIntegrityStore() {
         visitStatus: null,
         lastSecret: null,
         lastExportScopes: null,
+        lastPinWarnings: [],
+        pinnedFileCount: 0,
         importing: false,
         checking: false,
         checkResults: null,

@@ -288,19 +288,27 @@ final class CleanSweep_VisitState {
         $core = $s['scopes']['core'] ?? null;
         $packages = $s['scopes']['packages'] ?? [];
         $sealed_packages = [];
+        $pinned_packages = 0;
         foreach ($packages as $key => $meta) {
             if (!empty($meta['sealed'])) {
                 $sealed_packages[] = $key;
+            }
+            if (!empty($meta['pinned'])) {
+                $pinned_packages++;
             }
         }
         return [
             'toolkit' => null, // filled by caller
             'core_sealed' => is_array($core) && !empty($core['sealed']),
+            'core_pinned' => is_array($core) && !empty($core['pinned']),
+            'core_origin' => is_array($core) ? ($core['origin'] ?? null) : null,
             'core_file_count' => is_array($core) ? (int) ($core['file_count'] ?? 0) : 0,
             'core_sealed_at' => is_array($core) ? ($core['sealed_at'] ?? null) : null,
+            'core_pinned_at' => is_array($core) ? ($core['pinned_at'] ?? null) : null,
             'site_owned_recorded' => !empty($s['scopes']['site_owned']),
             'packages_sealed' => $sealed_packages,
             'packages_sealed_count' => count($sealed_packages),
+            'packages_pinned_count' => $pinned_packages,
             'snapshot_downloaded' => !empty($s['snapshot_downloaded']),
             'snapshot_skipped' => !empty($s['snapshot_skipped']),
             'snapshot_imported' => !empty($s['snapshot_imported']),
@@ -310,7 +318,9 @@ final class CleanSweep_VisitState {
             'likely_source' => is_array($s['likely_source'] ?? null) ? $s['likely_source'] : null,
             'last_compare' => is_array($s['last_compare'] ?? null) ? $s['last_compare'] : null,
             'journal_tamper' => !empty($s['journal_tamper']),
-            'visit_watch' => !empty($s['scopes']['core']['sealed']) || !empty($s['samples']),
+            'visit_watch' => !empty($s['scopes']['core']['sealed'])
+                || !empty($s['scopes']['core']['pinned'])
+                || !empty($s['samples']),
             'watch_counts' => [
                 'site_owned' => is_array($s['samples']['site_owned'] ?? null) ? count($s['samples']['site_owned']) : 0,
                 'extra_php' => is_array($s['samples']['extra_php'] ?? null) ? count($s['samples']['extra_php']) : 0,

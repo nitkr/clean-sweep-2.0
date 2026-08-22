@@ -164,16 +164,14 @@ final class CleanSweep_Correlator {
 
         if ($has_payload) {
             $this->link_by_time_and_new($candidates, $seen, $payload_keys, $payload_meta, $unexpected, $core_violations);
-            if ($core_violations) {
-                $this->add_site_owned_writers($candidates, $seen, $payload_keys, $core_violations);
-                $this->add_wp_content_writers($candidates, $seen, $payload_keys, $core_violations);
-            }
+            $this->add_site_owned_writers($candidates, $seen, $payload_keys, $core_violations);
+            $this->add_wp_content_writers($candidates, $seen, $payload_keys, $core_violations);
         }
+        $this->add_bootstrap_writers($candidates, $seen, $payload_keys, $unexpected, $core_violations);
+        $this->add_package_change_writers($candidates, $seen, $payload_keys, $unexpected, $core_violations);
 
         $this->apply_schedule_and_vulns($candidates);
-        if ($core_violations || $has_payload) {
-            $this->boost_content_writes($candidates, $payload_keys);
-        }
+        $this->boost_content_writes($candidates, $payload_keys);
         // Live watch events (Phase 3) — additive only; never used to discard malware signals
         $this->apply_watch_events($candidates, $seen, $payload_keys, $core_violations);
         $this->apply_path_priors($candidates);
@@ -738,11 +736,6 @@ final class CleanSweep_Correlator {
                 if ($hostile === [] && !$drifted) {
                     continue;
                 }
-                // Drift-only without core change or hostile: keep as soft persistence noise only
-                // if core also drifted (reinfection context).
-                if ($hostile === [] && $drifted && !$core_violations) {
-                    continue;
-                }
 
                 $seen[$key] = true;
                 $row = $this->score_path((string) $path, $sample, 'pre-boot config', $core_violations);
@@ -1144,9 +1137,137 @@ final class CleanSweep_Correlator {
         if ($slug !== '' && preg_match('#(?:^|/)plugins/' . preg_quote($slug, '#') . '/' . preg_quote($slug, '#') . '\.php$#i', $p)) {
             return true;
         }
+        if (preg_match('#(?:^|/)themes/[^/]+/functions\.php$#i', $p)) {
+            return true;
+        }
+        if (preg_match('#(?:^|/)plugins/[^/]+\.(?:php\d*|phtml|phar)$#', $p)
+            && substr_count($p, '/') <= 2) {
+            return true;
+        }
         // Site-relative depth only
         return (bool) preg_match('#(?:^|/)plugins/[^/]+/[^/]+\.php$#', $p)
             && substr_count($p, '/') <= 3;
+    }
+
+    /**
+     * Theme/plugin bootstrap files that changed — likely droppers, not payload.
+     *
+     * @param array<int,array> $candidates
+     * @param array<string,true> $seen
+     * @param array<string,true> $payload_keys
+     * @param array<int,array> $unexpected
+     */
+    private function add_bootstrap_writers(
+        array &$candidates,
+        array &$seen,
+        array $payload_keys,
+        array $unexpected,
+        array $core_violations
+    ): void {
+        foreach ($unexpected as $u) {
+            if (!is_array($u)) {
+                continue;
+            }
+            $path = (string) ($u['path'] ?? '');
+            $key = $this->path_key($path);
+            if ($path === '' || isset($seen[$key]) || isset($payload_keys[$key])) {
+                continue;
+            }
+            $ctx = $this->path_kind($path);
+            if ($ctx['kind'] !== 'theme' && $ctx['kind'] !== 'plugin') {
+                continue;
+            }
+            $base = strtolower(basename(str_replace('\\', '/', $path)));
+            $n = str_replace('\\', '/', strtolower($path));
+            if ($ctx['kind'] === 'theme') {
+                $theme_root = (bool) preg_match('#(?:^|/)themes/[^/]+/[^/]+\.(?:php\d*|phtml|phar)$#', $n);
+                if (!$theme_root) {
+                    continue;
+                }
+            }
+            if ($ctx['kind'] === 'plugin' && !$this->looks_package_main_file($path, $ctx)) {
+                continue;
+            }
+            $seen[$key] = true;
+            $sample = is_array($u['sample'] ?? null) ? $u['sample'] : [];
+            $row = $this->score_path($path, $sample, 'package bootstrap', $core_violations);
+            $row['score'] = 62;
+            $row['why'] = $ctx['kind'] === 'theme'
+                ? 'Theme PHP changed (' . $base . ') — package root, often used as a dropper'
+                : 'Plugin main/bootstrap file changed (' . $base . ')';
+            $row['evidence'] = ['package_entrypoint'];
+            $row['role'] = 'writer';
+            $abs = $this->abs_path($path);
+            if ($abs !== '' && is_readable($abs) && !is_dir($abs)) {
+                $blob = $this->read_for_content($abs, $this->caps->size($abs));
+                if (is_string($blob) && $blob !== '' && (bool) preg_match(
+                    '/\bgzinflate\s*\(|\bgzdecode\s*\(|\bgzuncompress\s*\(|\beval\s*\(|create_function\s*\(|auto_prepend_file/i',
+                    $blob
+                )) {
+                    $row['evidence'][] = 'signature';
+                    $row['why'] .= '; packed PHP in bootstrap file';
+                }
+            }
+            $candidates[] = $row;
+        }
+    }
+
+    /**
+     * Any other changed plugin/theme PHP can be the writer if content names a payload.
+     * Not sufficient on path alone (avoids naming every vendor file).
+     *
+     * @param array<int,array> $candidates
+     * @param array<string,true> $seen
+     * @param array<string,true> $payload_keys
+     * @param array<int,array> $unexpected
+     */
+    private function add_package_change_writers(
+        array &$candidates,
+        array &$seen,
+        array $payload_keys,
+        array $unexpected,
+        array $core_violations
+    ): void {
+        foreach ($unexpected as $u) {
+            if (!is_array($u)) {
+                continue;
+            }
+            $path = (string) ($u['path'] ?? '');
+            $key = $this->path_key($path);
+            if ($path === '' || isset($seen[$key]) || isset($payload_keys[$key])) {
+                continue;
+            }
+            if (!preg_match('/\.(?:php\d*|phtml|phar)$/i', $path)) {
+                continue;
+            }
+            $ctx = $this->path_kind($path);
+            if (!in_array($ctx['kind'], ['plugin', 'theme', 'other', 'uploads'], true)) {
+                continue;
+            }
+            if ($this->is_deep_vendor_path($path)) {
+                continue;
+            }
+            $seen[$key] = true;
+            $sample = is_array($u['sample'] ?? null) ? $u['sample'] : [];
+            $row = $this->score_path($path, $sample, 'changed PHP', $core_violations);
+            $row['score'] = 42;
+            $row['why'] = 'Changed PHP in ' . $ctx['kind'] . ($ctx['slug'] ? ' ' . $ctx['slug'] : '');
+            $row['evidence'] = [];
+            $row['role'] = 'writer';
+            $abs = $this->abs_path($path);
+            if ($abs !== '' && is_readable($abs) && !is_dir($abs)) {
+                $blob = $this->read_for_content($abs, $this->caps->size($abs));
+                if (is_string($blob) && $blob !== '' && (bool) preg_match(
+                    '/\bgzinflate\s*\(|\bgzdecode\s*\(|\bgzuncompress\s*\(|\beval\s*\(|create_function\s*\(|auto_prepend_file/i',
+                    $blob
+                )) {
+                    $row['score'] = 74;
+                    $row['evidence'][] = 'signature';
+                    $row['why'] .= '; packed PHP';
+                }
+            }
+            $candidates[] = $row;
+        }
     }
 
     private function score_path(string $path, array $sample, string $reason, array $core_violations): array {
@@ -1211,6 +1332,9 @@ final class CleanSweep_Correlator {
             return true;
         }
         if (preg_match('#(?:^|/)clean-sweep/#', $p)) {
+            return true;
+        }
+        if ($base === 'clean-sweep.php' && !preg_match('#(?:^|/)wp-content/#', $p)) {
             return true;
         }
         return false;
@@ -1616,56 +1740,56 @@ final class CleanSweep_Correlator {
         $payload_bases = [];
         foreach ($payload_keys as $k => $_) {
             $b = basename(str_replace('\\', '/', $k));
-            if ($b !== '') {
+            if ($b !== '' && $b !== '.' && $b !== '..') {
                 $payload_bases[$b] = true;
             }
-        }
-        $core_names = ['wp-load.php', 'wp-settings.php', 'wp-config.php', 'wp-config-sample.php'];
-        foreach ($core_names as $b) {
-            $payload_bases[$b] = true;
         }
 
         $checked = 0;
         foreach ($candidates as &$c) {
-            if ($checked >= 40) {
+            if ($checked >= 80) {
                 break;
             }
             $role = (string) ($c['role'] ?? '');
             if ($role === 'payload' || $role === 'noise') {
                 continue;
             }
-            $path = $this->abs_path((string) ($c['path'] ?? ''));
+            $rel = (string) ($c['path'] ?? '');
+            if ($this->is_deep_vendor_path($rel)) {
+                continue;
+            }
+            $path = $this->abs_path($rel);
             if ($path === '' || !is_readable($path) || is_dir($path)) {
                 continue;
             }
             $size = $this->caps->size($path);
-            if ($size === null) {
-                // filesize disabled — try a small read with hard cap via fopen if available
-                if (!$this->caps->fopen) {
-                    continue;
-                }
-            } elseif ($size > 180000 || $size <= 0) {
-                continue;
-            }
-            $checked++;
-            $data = @file_get_contents($path, false, null, 0, 180000);
+            $data = $this->read_for_content($path, $size);
             if (!is_string($data) || $data === '') {
                 continue;
             }
+            $checked++;
 
             $has_write = (bool) preg_match(
-                '/\b(file_put_contents|fwrite|fputs|file_put|copy)\s*\(/i',
+                '/\b(file_put_contents|fwrite|fputs|file_put|copy|rename|move_uploaded_file|tempnam)\s*\(/i',
+                $data
+            ) || (bool) preg_match(
+                '/[\'\"](?:copy|rename|file_put_contents|fwrite|tempnam)[\'\"]/',
                 $data
             );
-            $core_hits = 0;
+            $payload_hits = 0;
             foreach (array_keys($payload_bases) as $base) {
                 if ($base !== '' && stripos($data, $base) !== false) {
-                    $core_hits++;
+                    $payload_hits++;
                 }
             }
-            if ($has_write && $core_hits >= 1) {
+            $packed = (bool) preg_match(
+                '/\bgzinflate\s*\(|\bgzdecode\s*\(|\bgzuncompress\s*\(|\beval\s*\(|create_function\s*\(|auto_prepend_file/i',
+                $data
+            );
+            $bootstrap = in_array('package_entrypoint', $c['evidence'] ?? [], true);
+            if ($payload_hits >= 1 || ($packed && ($has_write || $bootstrap))) {
                 $c['score'] = (int) ($c['score'] ?? 0) + 42;
-                $c['why'] = trim(($c['why'] ?? '') . '; content references write APIs and core/payload paths');
+                $c['why'] = trim(($c['why'] ?? '') . '; file content names a dropped payload');
                 if (!isset($c['evidence']) || !is_array($c['evidence'])) {
                     $c['evidence'] = [];
                 }
@@ -1811,13 +1935,43 @@ final class CleanSweep_Correlator {
         return $ka !== '' && $ka === $kb;
     }
 
+    /** Head / mid / tail so large packed files are still readable. */
+    private function read_for_content(string $abs, ?int $size): ?string {
+        if ($this->caps->fopen) {
+            $fh = @fopen($abs, 'rb');
+            if (!$fh) {
+                return null;
+            }
+            $blob = (string) fread($fh, 65536);
+            $n = $size !== null && $size > 0 ? $size : 0;
+            if ($n > 131072) {
+                fseek($fh, (int) max(0, (int) ($n / 2) - 16384));
+                $blob .= (string) fread($fh, 32768);
+            }
+            if ($n > 65536) {
+                fseek($fh, -65536, SEEK_END);
+                $blob .= (string) fread($fh, 65536);
+            }
+            fclose($fh);
+            return $blob !== '' ? $blob : null;
+        }
+        $data = @file_get_contents($abs, false, null, 0, 524288);
+        return is_string($data) && $data !== '' ? $data : null;
+    }
+
     private function abs_path(string $rel): string {
+        $rel = str_replace('\\', '/', $rel);
+        if (preg_match('#^plugin:([^/]+)/(.*)$#', $rel, $m)) {
+            $rel = 'wp-content/plugins/' . $m[1] . '/' . $m[2];
+        } elseif (preg_match('#^theme:([^/]+)/(.*)$#', $rel, $m)) {
+            $rel = 'wp-content/themes/' . $m[1] . '/' . $m[2];
+        }
         if ($rel !== '' && ($rel[0] === '/' || preg_match('#^[A-Za-z]:/#', $rel))) {
             return $rel;
         }
         if (!function_exists('clean_sweep_detect_site_root')) {
             return $rel;
         }
-        return clean_sweep_detect_site_root() . ltrim(str_replace('\\', '/', $rel), '/');
+        return clean_sweep_detect_site_root() . ltrim($rel, '/');
     }
 }

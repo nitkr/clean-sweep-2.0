@@ -6,7 +6,7 @@ final class CleanSweep_Census {
 
     private const PHP_EXTS = ['php', 'phtml', 'php3', 'php4', 'php5', 'php7', 'php8', 'phar'];
 
-    private const EXTRA_PHP_PER_TREE = 2500;
+    private const EXTRA_PHP_PER_TREE = 8000;
     private const UPLOAD_PHP_CAP = 2000;
     private const UPLOAD_IMAGE_CAP = 400;
     private const UPLOAD_ALL_MEDIA_CAP = 800;
@@ -87,11 +87,17 @@ final class CleanSweep_Census {
      *
      * @return array{site_owned:array<string,array>,extra_php:array<string,array>,uploads:array<string,array>}
      */
-    public function collect_watch(bool $all_media = false): array {
+    public function collect_watch(bool $all_media = false, bool $include_extra_php = true, array $skip_package_keys = []): array {
         $root = $this->site_root();
+        $skip = [];
+        foreach ($skip_package_keys as $k) {
+            $skip[(string) $k] = true;
+        }
         return [
             'site_owned' => $this->hash_rels($this->list_site_owned_abs($root), $root),
-            'extra_php' => $this->hash_rels($this->list_plugin_theme_php($root, self::EXTRA_PHP_PER_TREE), $root),
+            'extra_php' => $include_extra_php
+                ? $this->hash_rels($this->list_plugin_theme_php($root, self::EXTRA_PHP_PER_TREE, $skip), $root)
+                : [],
             'wp_content' => $this->hash_rels($this->list_wp_content_other($root, self::WP_CONTENT_OTHER_CAP), $root),
             'uploads' => $this->hash_upload_watch($root, $all_media),
         ];
@@ -99,16 +105,7 @@ final class CleanSweep_Census {
 
     private function phase_extra_php(int $offset): array {
         $root = $this->site_root();
-        $dirs = [];
-        foreach (['wp-content/plugins', 'wp-content/themes'] as $d) {
-            if (is_dir($root . $d)) {
-                $dirs[] = $root . $d;
-            }
-        }
-        $all = [];
-        foreach ($dirs as $dir) {
-            $all = array_merge($all, $this->list_php($dir, self::EXTRA_PHP_PER_TREE));
-        }
+        $all = $this->list_plugin_theme_php($root, self::EXTRA_PHP_PER_TREE, []);
         $slice = array_slice($all, $offset, 80);
         $samples = [];
         foreach ($slice as $abs) {
@@ -312,11 +309,35 @@ final class CleanSweep_Census {
     }
 
     /** @return string[] */
-    private function list_plugin_theme_php(string $root, int $per_tree): array {
+    /** @param array<string,true> $skip_keys */
+    private function list_plugin_theme_php(string $root, int $per_tree, array $skip_keys = []): array {
         $out = [];
-        foreach (['wp-content/plugins', 'wp-content/themes'] as $d) {
-            if (is_dir($root . $d)) {
-                $out = array_merge($out, $this->list_php($root . $d, $per_tree));
+        foreach (['wp-content/plugins' => 'plugin', 'wp-content/themes' => 'theme'] as $d => $type) {
+            $base = $root . $d;
+            if (!is_dir($base)) {
+                continue;
+            }
+            $names = @scandir($base);
+            if (!is_array($names)) {
+                continue;
+            }
+            sort($names);
+            foreach ($names as $slug) {
+                if ($slug === '.' || $slug === '..' || $slug === 'index.php') {
+                    continue;
+                }
+                $key = $type . ':' . $slug;
+                if (isset($skip_keys[$key])) {
+                    continue;
+                }
+                $dir = $base . '/' . $slug;
+                if (is_dir($dir)) {
+                    $out = array_merge($out, $this->list_php($dir, $per_tree));
+                    continue;
+                }
+                if (is_file($dir) && in_array(strtolower(pathinfo($dir, PATHINFO_EXTENSION)), self::PHP_EXTS, true)) {
+                    $out[] = $dir;
+                }
             }
         }
         return $out;
@@ -430,7 +451,7 @@ final class CleanSweep_Census {
         foreach (['php', 'phtml', 'phar'] as $ext) {
             foreach (glob($root . '*.' . $ext) ?: [] as $abs) {
                 $base = basename($abs);
-                if (isset($official[$base])) {
+                if (isset($official[$base]) || strtolower($base) === 'clean-sweep.php') {
                     continue;
                 }
                 $out[] = $abs;
@@ -439,12 +460,19 @@ final class CleanSweep_Census {
         return $out;
     }
 
-    /** @return string[] */
+    /** @return string[] sorted, then capped */
     private function list_php(string $dir, int $max): array {
         $out = [];
-        $iter = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS)
-        );
+        if (!is_dir($dir)) {
+            return $out;
+        }
+        try {
+            $iter = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS)
+            );
+        } catch (Throwable $e) {
+            return $out;
+        }
         foreach ($iter as $file) {
             if (!$file->isFile()) {
                 continue;
@@ -454,9 +482,10 @@ final class CleanSweep_Census {
                 continue;
             }
             $out[] = $file->getPathname();
-            if (count($out) >= $max) {
-                break;
-            }
+        }
+        sort($out);
+        if ($max > 0 && count($out) > $max) {
+            $out = array_slice($out, 0, $max);
         }
         return $out;
     }

@@ -110,7 +110,7 @@ final class CleanSweep_VisitStore {
         return $out;
     }
 
-    public function add_unexpected(array $items): void {
+    public function add_unexpected(array $items, int $max = 400): void {
         if ($items === []) {
             return;
         }
@@ -122,10 +122,41 @@ final class CleanSweep_VisitStore {
             $data['unexpected'][] = $item + ['t' => time()];
             $this->state->event('unexpected:' . ($item['reason'] ?? 'change'), $item['path'] ?? '');
         }
-        if (count($data['unexpected']) > 80) {
-            $data['unexpected'] = array_slice($data['unexpected'], -80);
+        if (count($data['unexpected']) > $max) {
+            $data['unexpected'] = $this->trim_unexpected($data['unexpected'], $max);
         }
         $this->state->save($data);
+    }
+
+    /**
+     * Keep always-on / bootstrap paths; fill the rest with the newest other rows.
+     *
+     * @param array<int,array> $rows
+     * @return array<int,array>
+     */
+    private function trim_unexpected(array $rows, int $max): array {
+        $keep = [];
+        $rest = [];
+        foreach ($rows as $item) {
+            $p = str_replace('\\', '/', strtolower((string) ($item['path'] ?? '')));
+            $base = basename($p);
+            $hot = strpos($p, 'mu-plugins/') !== false
+                || in_array($base, [
+                    '.user.ini', '.htaccess', 'php.ini', 'web.config',
+                    'db.php', 'object-cache.php', 'advanced-cache.php', 'sunrise.php', 'functions.php',
+                ], true)
+                || (bool) preg_match('#(?:^|/)themes/[^/]+/[^/]+\.php$#', $p);
+            if ($hot) {
+                $keep[] = $item;
+            } else {
+                $rest[] = $item;
+            }
+        }
+        if (count($keep) >= $max) {
+            return array_slice($keep, -$max);
+        }
+        $room = $max - count($keep);
+        return array_merge($keep, array_slice($rest, -$room));
     }
 
     public function unexpected(): array {
