@@ -55,6 +55,7 @@ final class CleanSweep_FileDiscoveryWorker implements CleanSweep_Worker {
             $parent = $this->norm_path(dirname($resume_after));
             if ($parent !== $start_norm || (!file_exists($resume_after) && !is_link($resume_after))) {
                 $resume_after = '';
+                $resume_offset = 0;
             }
         }
         $skipping_until = $resume_after !== '';
@@ -166,10 +167,12 @@ final class CleanSweep_FileDiscoveryWorker implements CleanSweep_Worker {
                     'base_dir' => $base_dir,
                     'max_depth' => $max_depth,
                     'defer_package_trees' => $defer_packages,
-                    'resume_after' => $path,
-                    'resume_offset' => $iterations,
                     'file_batch_enqueued' => $file_batch_enqueued,
                 ]);
+                if (!$skip_item) {
+                    $follow['resume_after'] = $path;
+                    $follow['resume_offset'] = $iterations;
+                }
                 return CleanSweep_WorkerResult::moreWork([
                     'iterations' => $iterations,
                     'dirs_enqueued' => $dirs_enqueued,
