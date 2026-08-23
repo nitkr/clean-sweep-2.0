@@ -558,7 +558,8 @@ final class CleanSweep_Census {
         if ($samples !== []) {
             $this->store->put_samples($phase, $samples, false);
         }
-        $follow_resume = ($skip_item && $resume_after !== '') ? $resume_after : $path;
+        // Always advance to the current path. Keeping the original resume_after
+        // while skipping restarted the same tree every slice and never finished.
         return [
             'done' => false,
             'next' => $phase,
@@ -568,7 +569,7 @@ final class CleanSweep_Census {
             'follow_on_payload' => array_merge($extra, [
                 'phase' => $phase,
                 'offset' => 0,
-                'resume_after' => $follow_resume,
+                'resume_after' => $path,
             ]),
         ];
     }
