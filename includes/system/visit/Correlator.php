@@ -218,9 +218,11 @@ final class CleanSweep_Correlator {
             }
         }
 
+        $reinfection = $core_changed || $has_payload;
         $out = [
             'summary' => $summary,
             'core_changed' => $core_changed,
+            'reinfection' => $reinfection,
             'writer_is_payload' => (bool) $writer_is_payload,
             'confidence' => $confidence,
             'core_files' => array_values(array_filter(array_map(static function ($v) {
@@ -230,7 +232,10 @@ final class CleanSweep_Correlator {
             'entry' => $entry,
             'candidates' => $writer_list,
         ];
-        $this->store->set_likely_source($out);
+        // First malware pass with no sealed/hash drift is not attribution — skip storing.
+        if ($reinfection) {
+            $this->store->set_likely_source($out);
+        }
         return $out;
     }
 

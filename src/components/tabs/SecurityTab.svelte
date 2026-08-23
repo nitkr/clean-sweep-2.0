@@ -1130,7 +1130,9 @@
             checksumFindings={$scanning.checksumFindings || 0}
             checksumVersion={$scanning.checksumVersion}
             hasIntegrityBaseline={!!$scanning.hasIntegrityBaseline}
-            likelySource={$scanning.likelySource || $integrity.visitStatus?.likely_source}
+            likelySource={($scanning.likelySource?.reinfection || $scanning.likelySource?.core_changed || $scanning.likelySource?.core_files?.length)
+              ? $scanning.likelySource
+              : null}
           />
         </div>
       {/if}

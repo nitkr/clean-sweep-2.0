@@ -48,6 +48,9 @@ final class CleanSweep_FinalizeWorker implements CleanSweep_Worker {
                     $threats = (new CleanSweep_ThreatStore($state->scan_id))->all();
                 }
                 $likely = (new CleanSweep_Correlator())->run($violations, $threats, [], false);
+                if (is_array($likely) && empty($likely['reinfection']) && empty($likely['core_changed'])) {
+                    $likely = null;
+                }
             }
         }
 
