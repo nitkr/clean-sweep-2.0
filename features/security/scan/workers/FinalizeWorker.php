@@ -55,10 +55,11 @@ final class CleanSweep_FinalizeWorker implements CleanSweep_Worker {
         if ($likely) {
             $opts['likely_source'] = $likely;
         }
+        $prior_carry = is_array($opts['file_carry'] ?? null) ? $opts['file_carry'] : [];
         $opts['file_carry'] = [
-            'carried' => (int) ($carry['carried'] ?? 0),
-            'from_scan_id' => $carry['from_scan_id'] ?? null,
-            'from_profile' => $carry['from_profile'] ?? null,
+            'carried' => (int) ($prior_carry['carried'] ?? 0) + (int) ($carry['carried'] ?? 0),
+            'from_scan_id' => $carry['from_scan_id'] ?? ($prior_carry['from_scan_id'] ?? null),
+            'from_profile' => $carry['from_profile'] ?? ($prior_carry['from_profile'] ?? null),
             'files_scanned' => (int) $state->files_scanned,
             'files_visited' => (int) $state->files_visited,
             'files_skipped_unchanged' => (int) $state->files_skipped_unchanged,

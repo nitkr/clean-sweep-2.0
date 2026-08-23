@@ -15,6 +15,7 @@ api/vulnerabilities.php
 bin/generate-visit-manifest.php
 bin/run-scan.php
 bin/test-deep-scope-plan.php
+bin/test-file-threat-carry.php
 bin/test-upload-fixtures.php
 clean-sweep.php
 config.php

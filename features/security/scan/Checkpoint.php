@@ -181,18 +181,42 @@ final class CleanSweep_Checkpoint {
         string $profile_id,
         int $completed_ttl_seconds = 172800
     ): ?CleanSweep_ScanState {
-        $dir = defined('CLEAN_SWEEP_PROGRESS_DIR') ? CLEAN_SWEEP_PROGRESS_DIR : __DIR__ . '/../../../logs/';
+        foreach (self::findPreviousForCarry($current_scan_id, $profile_id, $completed_ttl_seconds) as $state) {
+            if (($state->status ?? '') === 'completed') {
+                return $state;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Prior scans whose file-signature JSONL may be reused when this run
+     * hash-skips unchanged files. Includes cancelled/failed: hashes are saved
+     * per batch and cancel does not roll them back.
+     *
+     * @return list<CleanSweep_ScanState> Newest first
+     */
+    public static function findPreviousForCarry(
+        string $current_scan_id,
+        string $profile_id,
+        int $ttl_seconds = 172800,
+        ?string $dir = null
+    ): array {
+        $dir = $dir ?? (defined('CLEAN_SWEEP_PROGRESS_DIR') ? CLEAN_SWEEP_PROGRESS_DIR : __DIR__ . '/../../../logs/');
         $files = glob(rtrim($dir, '/') . '/checkpoint_*.json');
         if (!is_array($files) || $files === []) {
-            return null;
+            return [];
         }
         $want_quick = ($profile_id === 'quick');
         $now = time();
-        $best = null;
-        $best_score = 0;
+        $found = [];
         foreach ($files as $file) {
             $raw = json_decode((string) @file_get_contents($file), true);
-            if (!is_array($raw) || ($raw['status'] ?? '') !== 'completed') {
+            if (!is_array($raw)) {
+                continue;
+            }
+            $status = (string) ($raw['status'] ?? '');
+            if (!in_array($status, ['completed', 'cancelled', 'failed'], true)) {
                 continue;
             }
             $id = (string) ($raw['scan_id'] ?? '');
@@ -206,16 +230,23 @@ final class CleanSweep_Checkpoint {
             }
             $finished = (int) ($raw['finished_at'] ?? 0);
             $updated = (int) ($raw['last_updated'] ?? 0);
-            $score = max($finished, $updated, @filemtime($file) ?: 0);
+            $score = max($finished, $updated);
+            if ($score <= 0) {
+                $score = (int) (@filemtime($file) ?: 0);
+            }
             $age_base = $finished > 0 ? $finished : $score;
-            if (($now - $age_base) > $completed_ttl_seconds) {
+            if (($now - $age_base) > $ttl_seconds) {
                 continue;
             }
-            if ($score >= $best_score) {
-                $best_score = $score;
-                $best = $raw;
-            }
+            $found[] = ['score' => $score, 'raw' => $raw];
         }
-        return $best ? CleanSweep_ScanState::fromArray($best) : null;
+        usort($found, static function ($a, $b) {
+            return $b['score'] <=> $a['score'];
+        });
+        $out = [];
+        foreach ($found as $row) {
+            $out[] = CleanSweep_ScanState::fromArray($row['raw']);
+        }
+        return $out;
     }
 }

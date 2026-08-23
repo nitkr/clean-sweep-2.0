@@ -181,6 +181,28 @@ final class CleanSweep_Scanner {
         ]);
         $this->checkpoint->save($state);
 
+        // Seed hash-skipped file hits from prior completed/cancelled/failed
+        // scans so live preview is not empty while this run walks new files.
+        if ($want_files && $this->profile->get_enable_differential_scan()) {
+            require_once __DIR__ . '/FileThreatCarry.php';
+            $seed = CleanSweep_FileThreatCarry::apply($state, false);
+            if (!empty($seed['carried'])) {
+                $state->threats_found = (int) $state->threats_found + (int) $seed['carried'];
+                $state->options['file_carry'] = [
+                    'carried' => (int) $seed['carried'],
+                    'from_scan_id' => $seed['from_scan_id'] ?? null,
+                    'from_profile' => $seed['from_profile'] ?? null,
+                    'seeded_at_start' => true,
+                ];
+                $this->checkpoint->save($state);
+                clean_sweep_log_message(
+                    "CleanSweep_Scanner: seeded {$seed['carried']} prior file hit(s) into {$scan_id}" .
+                    (!empty($seed['from_scan_id']) ? " (from {$seed['from_scan_id']})" : ''),
+                    'info'
+                );
+            }
+        }
+
         $scope = (string)($config['scan_scope'] ?? 'full');
         $coerced = !empty($config['scope_coerced_from_folder']);
         clean_sweep_log_message(
