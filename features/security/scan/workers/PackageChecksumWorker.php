@@ -91,7 +91,9 @@ final class CleanSweep_PackageChecksumWorker implements CleanSweep_Worker {
             $checked_pkgs++;
         }
 
-        CleanSweep_PackageChecksums::save_latest($latest);
+        if ($checked_pkgs > 0) {
+            CleanSweep_PackageChecksums::save_latest($latest);
+        }
 
         if ($findings > 0) {
             $ctx->incrementCounter('threats_found', $findings);

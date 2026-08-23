@@ -578,7 +578,8 @@ class CleanSweep_FileScanner {
             }
 
             if ($this->context && $this->context->shouldStop()) {
-                clean_sweep_log_message("File scan cancelled at file {$file_count}", 'info');
+                $why = $this->context->isCancelled() ? 'cancelled' : 'time budget';
+                clean_sweep_log_message("File scan paused ({$why}) at file {$file_count}", 'info');
                 break;
             }
 
