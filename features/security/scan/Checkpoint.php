@@ -171,4 +171,51 @@ final class CleanSweep_Checkpoint {
         }
         return CleanSweep_ScanState::fromArray($raw);
     }
+
+    /**
+     * Most recent completed scan that shares this profile's file-hash universe
+     * (Quick is separate; Standard/Deep/custom share).
+     */
+    public static function findPreviousCompleted(
+        string $current_scan_id,
+        string $profile_id,
+        int $completed_ttl_seconds = 172800
+    ): ?CleanSweep_ScanState {
+        $dir = defined('CLEAN_SWEEP_PROGRESS_DIR') ? CLEAN_SWEEP_PROGRESS_DIR : __DIR__ . '/../../../logs/';
+        $files = glob(rtrim($dir, '/') . '/checkpoint_*.json');
+        if (!is_array($files) || $files === []) {
+            return null;
+        }
+        $want_quick = ($profile_id === 'quick');
+        $now = time();
+        $best = null;
+        $best_score = 0;
+        foreach ($files as $file) {
+            $raw = json_decode((string) @file_get_contents($file), true);
+            if (!is_array($raw) || ($raw['status'] ?? '') !== 'completed') {
+                continue;
+            }
+            $id = (string) ($raw['scan_id'] ?? '');
+            if ($id === '' || $id === $current_scan_id) {
+                continue;
+            }
+            $prev_profile = (string) ($raw['profile_id'] ?? '');
+            $is_quick = ($prev_profile === 'quick');
+            if ($want_quick !== $is_quick) {
+                continue;
+            }
+            $finished = (int) ($raw['finished_at'] ?? 0);
+            $updated = (int) ($raw['last_updated'] ?? 0);
+            $score = max($finished, $updated, @filemtime($file) ?: 0);
+            $age_base = $finished > 0 ? $finished : $score;
+            if (($now - $age_base) > $completed_ttl_seconds) {
+                continue;
+            }
+            if ($score >= $best_score) {
+                $best_score = $score;
+                $best = $raw;
+            }
+        }
+        return $best ? CleanSweep_ScanState::fromArray($best) : null;
+    }
 }

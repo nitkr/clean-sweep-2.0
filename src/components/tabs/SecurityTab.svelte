@@ -155,6 +155,23 @@
       0;
     return Math.max(live, peak, final || 0);
   });
+  let filesSkippedUnchanged = $derived(
+    Number($scanning.results?.summary?.files_skipped_unchanged)
+      || Number($scanning.liveProgress?.files_skipped_unchanged)
+      || Number($scanning.results?.file_carry?.files_skipped_unchanged)
+      || 0
+  );
+  let filesCarried = $derived(
+    Number($scanning.results?.summary?.carried_forward)
+      || Number($scanning.results?.file_carry?.carried)
+      || ($scanning.results?.threats || []).filter((t) => t?.carried_forward).length
+      || 0
+  );
+  let filesCarriedFrom = $derived(
+    $scanning.results?.summary?.carried_from_profile
+      || $scanning.results?.file_carry?.from_profile
+      || null
+  );
   let filesPhaseComplete = $derived.by(() => {
     const phase = ($scanning.liveProgress?.phase || '').toLowerCase();
     return (
@@ -666,6 +683,9 @@
         <div class="p-3 bg-panel border border-line rounded-xl">
           <div class="text-[10px] text-muted mb-0.5">Files</div>
           <div class="text-lg font-bold text-ink">{totalFilesScanned > 0 ? totalFilesScanned.toLocaleString() : '—'}</div>
+          {#if filesSkippedUnchanged > 0}
+            <div class="text-[10px] text-faint mt-0.5">{filesSkippedUnchanged.toLocaleString()} unchanged</div>
+          {/if}
         </div>
         <div class="p-3 bg-panel border border-line rounded-xl">
           <div class="text-[10px] text-muted mb-0.5">
@@ -942,6 +962,8 @@
                   {:else}
                     A sample appears here as soon as it is written.
                   {/if}
+                {:else if $scanning.scanning && filesSkippedUnchanged > 0}
+                  Unchanged files are not re-scanned. Previous file matches are applied when this scan finishes.
                 {:else if $scanning.scanning}
                   No signature matches yet. This is not a clean bill of health — the scan is still running.
                 {:else}
@@ -990,6 +1012,9 @@
             <button type="button" onclick={() => scrollToResults('results-files')} class="bg-panel border border-line rounded-xl p-4 text-center hover:border-primary/40 transition-colors">
               <div class="text-2xl font-bold text-primary">{totalFilesScanned.toLocaleString()}</div>
               <div class="text-xs text-muted">Files</div>
+              {#if filesSkippedUnchanged > 0}
+                <div class="text-[10px] text-faint mt-1">{filesSkippedUnchanged.toLocaleString()} unchanged</div>
+              {/if}
             </button>
             <button type="button" onclick={() => scrollToResults('results-database')} class="bg-panel border border-line rounded-xl p-4 text-center hover:border-amber-500/40 transition-colors">
               <div class="text-2xl font-bold text-amber-700 dark:text-amber-400">{totalRecordsScanned.toLocaleString()}</div>
@@ -1017,16 +1042,34 @@
             {:else if $scanning.resultsScope === 'database'}
               · <span class="text-faint">Files skipped</span>
             {/if}
-            · {totalFilesScanned.toLocaleString()} files
+            · {totalFilesScanned.toLocaleString()} files scanned
+            {#if filesSkippedUnchanged > 0}
+              · <span class="text-faint">{filesSkippedUnchanged.toLocaleString()} unchanged (not re-scanned)</span>
+            {/if}
             · {totalRecordsScanned.toLocaleString()} DB rows
             · {scanDurationLabel}
             · <span class={malwareThreatCount > 0 ? 'text-red-700 dark:text-red-300' : 'text-emerald-700 dark:text-emerald-300'}>
               {malwareThreatCount} signature match{malwareThreatCount === 1 ? '' : 'es'}
             </span>
+            {#if filesCarried > 0}
+              · <span class="text-ink">{filesCarried} carried from last {filesCarriedFrom === 'deep' ? 'Deep' : filesCarriedFrom === 'standard' ? 'Standard' : filesCarriedFrom === 'quick' ? 'Quick' : 'scan'} (unchanged)</span>
+            {/if}
             {#if integrityThreatCount > 0}
               · <span class="text-violet-800 dark:text-violet-300">{integrityThreatCount} integrity</span>
             {/if}
           </div>
+          {#if filesCarried > 0 || filesSkippedUnchanged > 0}
+            <div class="p-3 rounded-lg border border-sky-500/25 bg-sky-500/5 text-xs text-muted leading-relaxed">
+              Unchanged files were not signature-scanned again (same hash as the last
+              {filesCarriedFrom === 'deep' ? ' Deep' : filesCarriedFrom === 'standard' ? ' Standard' : ''}
+              scan).
+              {#if filesCarried > 0}
+                {filesCarried} file match{filesCarried === 1 ? '' : 'es'} from that scan {filesCarried === 1 ? 'is' : 'are'} still listed.
+              {:else}
+                No file signature hits were on those unchanged paths.
+              {/if}
+            </div>
+          {/if}
 
           <div class="p-3 rounded-lg border border-orange-500/20 bg-orange-500/5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <p class="text-xs text-muted">

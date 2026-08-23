@@ -22,12 +22,16 @@ final class CleanSweep_FinalizeWorker implements CleanSweep_Worker {
         // Compute final cumulative threat count from the CleanSweep_ThreatStore
         // (authoritative) and the in-memory counter (fast).
         $threat_count = $state->threats_found;
+        $carry = ['carried' => 0, 'from_scan_id' => null, 'from_profile' => null];
         if ($state->scan_id) {
             require_once dirname(__DIR__) . '/ThreatStore.php';
-            $store_count = (new CleanSweep_ThreatStore($state->scan_id))->count();
-            if ($store_count > $threat_count) {
-                $threat_count = $store_count;
+            require_once dirname(__DIR__) . '/FileThreatCarry.php';
+            $carry = CleanSweep_FileThreatCarry::apply($state);
+            if (!empty($carry['carried'])) {
+                $ctx->incrementCounter('threats_found', (int) $carry['carried']);
             }
+            $store_count = (new CleanSweep_ThreatStore($state->scan_id))->count();
+            $threat_count = max($store_count, (int) $state->threats_found);
         }
 
         // Mark complete. The orchestrator will see the completed status
@@ -43,7 +47,7 @@ final class CleanSweep_FinalizeWorker implements CleanSweep_Worker {
                 if ($state->scan_id) {
                     $threats = (new CleanSweep_ThreatStore($state->scan_id))->all();
                 }
-                $likely = (new CleanSweep_Correlator())->run($violations, $threats);
+                $likely = (new CleanSweep_Correlator())->run($violations, $threats, [], false);
             }
         }
 
@@ -51,6 +55,14 @@ final class CleanSweep_FinalizeWorker implements CleanSweep_Worker {
         if ($likely) {
             $opts['likely_source'] = $likely;
         }
+        $opts['file_carry'] = [
+            'carried' => (int) ($carry['carried'] ?? 0),
+            'from_scan_id' => $carry['from_scan_id'] ?? null,
+            'from_profile' => $carry['from_profile'] ?? null,
+            'files_scanned' => (int) $state->files_scanned,
+            'files_visited' => (int) $state->files_visited,
+            'files_skipped_unchanged' => (int) $state->files_skipped_unchanged,
+        ];
         $ctx->mergeState([
             'status' => 'completed',
             'phase' => 'complete',

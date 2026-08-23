@@ -34,6 +34,10 @@ final class CleanSweep_ScanState {
 
     // --- Counters (cumulative, monotonic) ---
     public int $files_scanned = 0;
+    /** @var int Files visited including differential skips */
+    public int $files_visited = 0;
+    /** @var int Files hash-matched and not signature-scanned */
+    public int $files_skipped_unchanged = 0;
     public int $db_rows_scanned = 0;
     public int $threats_found = 0;
     public int $integrity_violations = 0;
@@ -100,6 +104,8 @@ final class CleanSweep_ScanState {
         // the flat top-level field is present.
         $file_state = is_array($raw['file_state'] ?? null) ? $raw['file_state'] : [];
         $s->files_scanned = (int)($raw['files_scanned'] ?? $file_state['files_scanned'] ?? 0);
+        $s->files_visited = (int)($raw['files_visited'] ?? 0);
+        $s->files_skipped_unchanged = (int)($raw['files_skipped_unchanged'] ?? 0);
         $s->total_files_estimate = (int)($raw['total_files_estimate'] ?? $file_state['total_files'] ?? 0);
         $s->last_file_path = $raw['last_file_path'] ?? $file_state['last_file_path'] ?? null;
 
@@ -146,6 +152,8 @@ final class CleanSweep_ScanState {
         // + this class's with() only persist top-level properties, so
         // anything nested here would be silently dropped.
         $out['files_scanned'] = $this->files_scanned;
+        $out['files_visited'] = $this->files_visited;
+        $out['files_skipped_unchanged'] = $this->files_skipped_unchanged;
         $out['total_files_estimate'] = $this->total_files_estimate;
         if ($this->last_file_path !== null) $out['last_file_path'] = $this->last_file_path;
 

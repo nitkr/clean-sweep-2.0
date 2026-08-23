@@ -394,6 +394,8 @@ class CleanSweep_FileScanner {
             'wp_content' => [],
             'total_files_scanned' => 0,
             'files_visited' => 0,
+            'files_skipped_unchanged' => 0,
+            'scanned_paths' => [],
             'file_threats_found' => 0,
         ];
 
@@ -443,6 +445,7 @@ class CleanSweep_FileScanner {
                 }
                 $results['total_files_scanned']++;
                 $this->counters['files_scanned']++;
+                $results['scanned_paths'][] = $wp_config;
                 if ($this->differential && $this->differential->is_enabled()) {
                     $this->file_hashes[$wp_config] = CleanSweep_DifferentialScanner::hash_file($wp_config);
                 }
@@ -503,6 +506,9 @@ class CleanSweep_FileScanner {
 
                 $results['total_files_scanned']++;
                 $this->counters['files_scanned']++;
+                $results['scanned_paths'][] = $file_path;
+            } else {
+                $results['files_skipped_unchanged']++;
             }
 
             // Count every visited file (including differential skips) toward

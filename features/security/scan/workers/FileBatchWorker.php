@@ -158,6 +158,18 @@ final class CleanSweep_FileBatchWorker implements CleanSweep_Worker {
 
         // Persist cumulative counters (sole owner).
         $ctx->incrementCounter('files_scanned', (int)$result['total_files_scanned']);
+        $visited = (int)($result['files_visited'] ?? $result['total_files_scanned'] ?? 0);
+        $skipped = (int)($result['files_skipped_unchanged'] ?? 0);
+        if ($visited > 0) {
+            $ctx->incrementCounter('files_visited', $visited);
+        }
+        if ($skipped > 0) {
+            $ctx->incrementCounter('files_skipped_unchanged', $skipped);
+        }
+        if (!empty($result['scanned_paths']) && is_array($result['scanned_paths'])) {
+            require_once dirname(__DIR__) . '/ScannedPathStore.php';
+            (new CleanSweep_ScannedPathStore($state->scan_id))->appendMany($result['scanned_paths']);
+        }
         if (!empty($result['file_threats_found'])) {
             $ctx->incrementCounter('threats_found', (int)$result['file_threats_found']);
         }

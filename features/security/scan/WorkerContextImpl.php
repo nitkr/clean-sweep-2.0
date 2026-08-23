@@ -183,6 +183,14 @@ final class CleanSweep_WorkerContextImpl implements CleanSweep_WorkerContext {
                     $partial['files_scanned'] = $current->files_scanned + (int)$delta;
                     $this->state->files_scanned = $partial['files_scanned'];
                     break;
+                case 'files_visited':
+                    $partial['files_visited'] = $current->files_visited + (int)$delta;
+                    $this->state->files_visited = $partial['files_visited'];
+                    break;
+                case 'files_skipped_unchanged':
+                    $partial['files_skipped_unchanged'] = $current->files_skipped_unchanged + (int)$delta;
+                    $this->state->files_skipped_unchanged = $partial['files_skipped_unchanged'];
+                    break;
                 case 'db_rows_scanned':
                     $partial['db_rows_scanned'] = $current->db_rows_scanned + (int)$delta;
                     $this->state->db_rows_scanned = $partial['db_rows_scanned'];

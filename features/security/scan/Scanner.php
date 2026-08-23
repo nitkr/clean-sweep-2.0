@@ -330,12 +330,15 @@ final class CleanSweep_Scanner {
             'pause_reason' => $state->pause_reason,
             'counters' => [
                 'files_scanned' => $state->files_scanned,
+                'files_visited' => $state->files_visited,
+                'files_skipped_unchanged' => $state->files_skipped_unchanged,
                 'db_rows_scanned' => $state->db_rows_scanned,
                 'threats_found' => $state->threats_found,
                 'integrity_violations' => $state->integrity_violations,
                 // malware ≈ total threats minus integrity (integrity may be double-counted if both counters used)
                 'malware_threats' => max(0, (int)$state->threats_found - (int)$state->integrity_violations),
             ],
+            'file_carry' => is_array($options['file_carry'] ?? null) ? $options['file_carry'] : null,
             // Phase 2: separate integrity metadata from malware counters
             'has_integrity_baseline' => $has_baseline,
             'integrity_note' => $integrity_note,

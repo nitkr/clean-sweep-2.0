@@ -79,6 +79,8 @@ function createScanningStore() {
     // (or 0) until the new scan finishes.
     liveProgress: {
       files_scanned: 0,
+      files_visited: 0,
+      files_skipped_unchanged: 0,
       db_rows_scanned: 0,
       threats_found: 0,
       malware_threats: 0,
@@ -514,11 +516,12 @@ function createScanningStore() {
     return { threats: all, meta };
   }
 
-  function applyThreatResults(scanId, allThreats, counters = {}, finishedAtOverride = null, startedAtOverride = null) {
+  function applyThreatResults(scanId, allThreats, counters = {}, finishedAtOverride = null, startedAtOverride = null, extras = {}) {
     const malwareThreats = allThreats.filter((t) => !isIntegrityThreat(t));
     const integrityThreats = allThreats.filter((t) => isIntegrityThreat(t));
     const finishedAt = finishedAtOverride || Math.floor(Date.now() / 1000);
     const threats = normalizeThreatList(allThreats);
+    const carriedN = threats.filter((t) => t.carried_forward).length;
     const malwareCount =
       typeof counters.malware_threats === 'number'
         ? counters.malware_threats
@@ -527,17 +530,25 @@ function createScanningStore() {
       integrityThreats.length,
       Number(counters.integrity_violations) || 0
     );
+    const fileCarry = extras.file_carry && typeof extras.file_carry === 'object'
+      ? extras.file_carry
+      : null;
     const results = {
       threats,
       malware_threats: malwareThreats,
       integrity_violations_list: integrityThreats,
+      file_carry: fileCarry,
       summary: {
         total_threats: threats.length,
         malware_threats: malwareCount,
         integrity_violations: integrityCount,
         files_scanned: counters.files_scanned ?? 0,
+        files_visited: counters.files_visited ?? 0,
+        files_skipped_unchanged: counters.files_skipped_unchanged ?? 0,
         db_rows_scanned: counters.db_rows_scanned ?? 0,
         threats_found: counters.threats_found ?? threats.length,
+        carried_forward: fileCarry?.carried ?? carriedN,
+        carried_from_profile: fileCarry?.from_profile ?? null,
       },
     };
     if (threats.length > 0) {
@@ -746,6 +757,8 @@ function createScanningStore() {
 
             scanning.setLiveProgress({
               files_scanned: filesN,
+              files_visited: counters.files_visited ?? 0,
+              files_skipped_unchanged: counters.files_skipped_unchanged ?? 0,
               db_rows_scanned: dbN,
               threats_found: thrN,
               malware_threats: malwareN,
@@ -933,7 +946,8 @@ function createScanningStore() {
                     allThreats,
                     mergedCounters,
                     finishedAt,
-                    status.started_at || null
+                    status.started_at || null,
+                    { file_carry: status.file_carry || null }
                   );
                   update((s) => ({
                     ...s,
@@ -1050,6 +1064,8 @@ function createScanningStore() {
     setLiveProgress: (progress) => {
       update(s => {
         const files = progress.files_scanned ?? 0;
+        const skipped = progress.files_skipped_unchanged ?? s.liveProgress?.files_skipped_unchanged ?? 0;
+        const visited = progress.files_visited ?? s.liveProgress?.files_visited ?? 0;
         const dbRows = progress.db_rows_scanned ?? 0;
         const threats = progress.threats_found ?? 0;
         const malware = progress.malware_threats ?? s.liveProgress?.malware_threats ?? 0;
@@ -1062,7 +1078,7 @@ function createScanningStore() {
         const lastFile = progress.last_file_path ?? s.liveProgress?.last_file_path ?? '';
         const lastTable = progress.last_db_table ?? s.liveProgress?.last_db_table ?? '';
         const lastDbId = progress.last_db_id ?? s.liveProgress?.last_db_id ?? '';
-        const activityKey = [files, dbRows, threats, items, pending, completed, lastFile, lastTable, lastDbId].join('|');
+        const activityKey = [files, skipped, visited, dbRows, threats, items, pending, completed, lastFile, lastTable, lastDbId].join('|');
         const prevKey = s.liveProgress?.activity_key || '';
         const now = Date.now();
         const activityChanged = activityKey !== prevKey;
@@ -1071,6 +1087,8 @@ function createScanningStore() {
           ...s,
           liveProgress: {
             files_scanned: files,
+            files_visited: visited,
+            files_skipped_unchanged: skipped,
             db_rows_scanned: dbRows,
             threats_found: threats,
             malware_threats: malware,
@@ -1109,6 +1127,8 @@ function createScanningStore() {
         progressHighWater: 0,
         liveProgress: {
           files_scanned: 0,
+          files_visited: 0,
+          files_skipped_unchanged: 0,
           db_rows_scanned: 0,
           threats_found: 0,
           malware_threats: 0,
@@ -1242,6 +1262,8 @@ function createScanningStore() {
             }
           : {
               files_scanned: 0,
+              files_visited: 0,
+              files_skipped_unchanged: 0,
               db_rows_scanned: 0,
               threats_found: 0,
               malware_threats: 0,
@@ -1753,7 +1775,14 @@ function createScanningStore() {
         deepScope: status.scan_scope || s.deepScope || 'full',
         folderPathDisplay: status.folder_path_display ?? s.folderPathDisplay,
       }));
-      applyThreatResults(scanId, allThreats, mergedCounters, finishedAt, status.started_at || null);
+      applyThreatResults(
+        scanId,
+        allThreats,
+        mergedCounters,
+        finishedAt,
+        status.started_at || null,
+        { file_carry: status.file_carry || null }
+      );
       update(s => ({
         ...s,
         resultsFinishedAt: finishedAt,
