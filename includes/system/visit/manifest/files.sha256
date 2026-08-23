@@ -1,5 +1,5 @@
 # Clean Sweep shipped watchable paths. Extra files not listed are kind A.
-# Generated 2026-08-20T18:15:51+00:00 paths only
+# Generated 2026-08-23T05:57:22+00:00 paths only
 api/bootstrap.php
 api/cleanup.php
 api/core.php
@@ -56,11 +56,13 @@ features/security/profiles/ScanProfile.php
 features/security/scan/Checkpoint.php
 features/security/scan/DbScanPlanner.php
 features/security/scan/DefaultWorkerRegistry.php
+features/security/scan/FileThreatCarry.php
 features/security/scan/HostDetector.php
 features/security/scan/PackageAnnotations.php
 features/security/scan/PackageChecksums.php
 features/security/scan/PackageVerificationBaseline.php
 features/security/scan/ScanState.php
+features/security/scan/ScannedPathStore.php
 features/security/scan/Scanner.php
 features/security/scan/Scheduler.php
 features/security/scan/SitePaths.php
