@@ -1,10 +1,15 @@
-<p>
+<p align="center">
   <a href="README.md">Docs</a>
-  · <a href="start.md">Start</a>
-  · <a href="guide.md">Guide</a>
-  · <a href="safety.md">Safety</a>
-  · <strong>Troubleshooting</strong>
-  · <a href="develop.md">Develop</a>
+  ·
+  <a href="start.md">Start</a>
+  ·
+  <a href="guide.md">Guide</a>
+  ·
+  <a href="safety.md">Safety</a>
+  ·
+  <strong>Troubleshooting</strong>
+  ·
+  <a href="develop.md">Develop</a>
 </p>
 
 # Troubleshooting
@@ -17,6 +22,9 @@ The web user needs write access to `wp-content`, plugins, themes, and the Clean 
 
 **Scan pauses or the progress bar sits still**  
 On shared hosts the scan yields on purpose. Keep the Scanner tab open. Use Resume if it stopped.
+
+> [!NOTE]
+> Restricted hosts pause in short slices. Leave the Scanner tab open so the run can continue.
 
 **Download or reinstall failed**  
 Need outbound HTTPS to WordPress.org (and WPMU DEV if you use those plugins).

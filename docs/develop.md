@@ -1,10 +1,15 @@
-<p>
+<p align="center">
   <a href="README.md">Docs</a>
-  · <a href="start.md">Start</a>
-  · <a href="guide.md">Guide</a>
-  · <a href="safety.md">Safety</a>
-  · <a href="troubleshooting.md">Troubleshooting</a>
-  · <strong>Develop</strong>
+  ·
+  <a href="start.md">Start</a>
+  ·
+  <a href="guide.md">Guide</a>
+  ·
+  <a href="safety.md">Safety</a>
+  ·
+  <a href="troubleshooting.md">Troubleshooting</a>
+  ·
+  <strong>Develop</strong>
 </p>
 
 # Source tree and UI build

@@ -1,10 +1,15 @@
-<p>
+<p align="center">
   <a href="README.md">Docs</a>
-  · <strong>Start</strong>
-  · <a href="guide.md">Guide</a>
-  · <a href="safety.md">Safety</a>
-  · <a href="troubleshooting.md">Troubleshooting</a>
-  · <a href="develop.md">Develop</a>
+  ·
+  <strong>Start</strong>
+  ·
+  <a href="guide.md">Guide</a>
+  ·
+  <a href="safety.md">Safety</a>
+  ·
+  <a href="troubleshooting.md">Troubleshooting</a>
+  ·
+  <a href="develop.md">Develop</a>
 </p>
 
 # Quick start
@@ -21,7 +26,8 @@ From this repository (**Code → Download ZIP**) or a clone:
 4. Keep the **Scanner** tab open during long scans so auto-resume can continue.
 5. When finished, use **Remove Clean Sweep**.
 
-Read [Safety](safety.md) before you start on a live site.
+> [!WARNING]
+> Read [Safety](safety.md) before you start on a live site. Backup first.
 
 ## Requirements
 

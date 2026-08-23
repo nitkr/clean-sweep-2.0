@@ -1,15 +1,26 @@
-<p>
+<p align="center">
   <a href="README.md">Docs</a>
-  · <a href="start.md">Start</a>
-  · <strong>Guide</strong>
-  · <a href="safety.md">Safety</a>
-  · <a href="troubleshooting.md">Troubleshooting</a>
-  · <a href="develop.md">Develop</a>
+  ·
+  <a href="start.md">Start</a>
+  ·
+  <strong>Guide</strong>
+  ·
+  <a href="safety.md">Safety</a>
+  ·
+  <a href="troubleshooting.md">Troubleshooting</a>
+  ·
+  <a href="develop.md">Develop</a>
 </p>
 
 # Using Clean Sweep
 
-The screenshot on the [landing page](../README.md) is the **dashboard**: last results, a suggested cleanup path, and the same tools as the left sidebar.
+The **dashboard** is last results, a suggested cleanup path, and the same tools as the left sidebar.
+
+<p align="center">
+  <img src="../demo.png" alt="Clean Sweep dashboard — last results, suggested cleanup path, and sidebar tools" width="880">
+</p>
+
+<p align="center"><sub>Start on the dashboard, then Scanner.</sub></p>
 
 ## Sidebar
 

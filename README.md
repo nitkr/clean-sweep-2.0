@@ -1,27 +1,36 @@
-# Clean Sweep
+<p align="center">
+  <img src="logo.svg" width="72" height="72" alt="Clean Sweep">
+</p>
+
+<h1 align="center">Clean Sweep</h1>
 
 <p align="center">
   Drop-in WordPress <strong>malware cleanup toolkit</strong>. Copy the folder onto an infected site, work from the browser, then delete it when the site is stable.
 </p>
 
 <p align="center">
-  Version 2.0
-  ·
-  <a href="docs/README.md">Documentation</a>
+  Version 2.0 · PHP 8.0+ · WordPress 6.0+ · GPL-2.0
+</p>
+
+<p align="center">
+  <a href="docs/README.md">Docs</a>
   ·
   <a href="docs/start.md">Quick start</a>
   ·
   <a href="docs/guide.md">Guide</a>
   ·
+  <a href="docs/safety.md">Safety</a>
+  ·
   <a href="docs/troubleshooting.md">Troubleshooting</a>
 </p>
 
 <p align="center">
-  <img src="demo.png" alt="Clean Sweep dashboard — last results, suggested cleanup path, and tools" width="880">
+  <img src="demo.png" alt="Clean Sweep dashboard — last results, suggested cleanup path, and sidebar tools" width="880">
 </p>
 
-<p align="center"><sub>Dashboard after a visit: last results, suggested cleanup path, and Scanner / Security / Core / Extensions / Users / Cron in the sidebar.</sub></p>
+<p align="center"><sub>Start on the dashboard, then Scanner. Last results, suggested cleanup path, and the sidebar tools.</sub></p>
 
+> [!IMPORTANT]
 > Not a plugin you leave installed. Drop it next to `wp-config.php`, clean the site, then **Remove Clean Sweep**.
 
 ---
@@ -36,13 +45,16 @@ The GitHub zip is a run tree: `assets/dist/` is already built. You do not need `
 4. Keep the **Scanner** tab open during long scans so auto-resume can continue.
 5. When finished, use **Remove Clean Sweep**.
 
-PHP 8.0+ · WordPress 6.0+ · write access to the install. Full list: [Quick start](docs/start.md).
+> [!NOTE]
+> Keep the Scanner tab open on long runs. Shared hosts pause the scan in short slices; it continues while this tab is open.
+
+Write access to the install is required. Full list: [Quick start](docs/start.md).
 
 ---
 
 ## Documentation
 
-Click a page. Every docs page has the same top links so you can jump without coming back here.
+Every docs page has the same top links so you can jump without coming back here.
 
 <table>
   <tr>
@@ -81,14 +93,14 @@ Click a page. Every docs page has the same top links so you can jump without com
 
 ## What it does
 
-| | Tool | |
-| --- | --- | --- |
-| Scan | **Scanner** | Files + database signatures, checksums. Quick / Standard / Deep. |
-| Scan | **Vulnerabilities** | Known CVEs — context for what to replace, not a malware verdict. |
-| Watch | **Security** | Live file watch, snapshots, integrity seal. |
-| Replace | **Core / Extensions / Upload** | Reinstall core, plugins, themes, or upload a clean ZIP. |
-| Audit | **Users / Cron** | Hidden admins, sessions, WP-Cron and Action Scheduler. |
-| Done | **Remove Clean Sweep** | Deletes the toolkit and leftover agents / visit data. |
+| Tool | What it is for |
+| --- | --- |
+| **Scanner** | Files + database signatures, checksums. Quick / Standard / Deep. |
+| **Vulnerabilities** | Known CVEs — context for what to replace, not a malware verdict. |
+| **Security** | Live file watch, snapshots, integrity seal. |
+| **Core / Extensions / Upload** | Reinstall core, plugins, themes, or upload a clean ZIP. |
+| **Users / Cron** | Hidden admins, sessions, WP-Cron and Action Scheduler. |
+| **Remove Clean Sweep** | Deletes the toolkit and leftover agents / visit data. |
 
 Extensions also flags likely fake / impersonating packages (stolen WordPress.org slug or decoy plugin).
 

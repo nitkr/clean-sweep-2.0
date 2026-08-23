@@ -1,11 +1,15 @@
-<p>
+<p align="center">
   <strong>Docs</strong>
-  · <a href="README.md">Overview</a>
-  · <a href="start.md">Start</a>
-  · <a href="guide.md">Guide</a>
-  · <a href="safety.md">Safety</a>
-  · <a href="troubleshooting.md">Troubleshooting</a>
-  · <a href="develop.md">Develop</a>
+  ·
+  <a href="start.md">Start</a>
+  ·
+  <a href="guide.md">Guide</a>
+  ·
+  <a href="safety.md">Safety</a>
+  ·
+  <a href="troubleshooting.md">Troubleshooting</a>
+  ·
+  <a href="develop.md">Develop</a>
 </p>
 
 # Documentation
