@@ -174,6 +174,9 @@ class CleanSweep_FileScanner {
      * This is the correct architectural defense against fatal "Maximum execution time exceeded" errors.
      */
     private function should_pause_for_time_limit(): bool {
+        if ($this->context && $this->context->sliceExpired()) {
+            return true;
+        }
         // Check soft phase budget first (already set by profile)
         if ($this->phase_time_limit > 0 && $this->phase_start_time > 0) {
             $elapsed = microtime(true) - $this->phase_start_time;

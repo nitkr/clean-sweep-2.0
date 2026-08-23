@@ -101,7 +101,7 @@ final class CleanSweep_DbSiteDiscoveryWorker implements CleanSweep_Worker {
                 if ($seen >= $per_tick) {
                     break;
                 }
-                if ($ctx->shouldStop()) {
+                if ($ctx->isCancelled()) {
                     break;
                 }
             }
@@ -129,7 +129,7 @@ final class CleanSweep_DbSiteDiscoveryWorker implements CleanSweep_Worker {
             $more = !empty($next);
         }
 
-        if ($more && !$ctx->shouldStop()) {
+        if ($more && !$ctx->isCancelled()) {
             return CleanSweep_WorkerResult::moreWork([
                 'sites_enqueued' => $enqueued_sites,
                 'segments' => $segments,

@@ -98,7 +98,7 @@ final class CleanSweep_PackageChecksumWorker implements CleanSweep_Worker {
             $ctx->incrementCounter('integrity_violations', $findings);
         }
 
-        $next = $start + $per;
+        $next = $start + $checked_pkgs;
         $note = sprintf(
             'Package checksums: %d/%d packages (all installed)',
             min($next, count($all)),
@@ -112,16 +112,19 @@ final class CleanSweep_PackageChecksumWorker implements CleanSweep_Worker {
 
         clean_sweep_log_message("CleanSweep_PackageChecksumWorker: {$note}, {$findings} finding(s)", 'info');
 
-        if ($next < count($all) && !$ctx->shouldStop()) {
+        if ($next < count($all) && !$ctx->isCancelled()) {
             return CleanSweep_WorkerResult::moreWork([
                 'checked_packages' => $checked_pkgs,
                 'findings' => $findings,
-                'follow_on_payload' => ['start' => $next],
+                'follow_on_payload' => [
+                    'start' => $next,
+                    'force' => !empty($payload['force']),
+                ],
                 'duration_seconds' => time() - $started,
             ]);
         }
 
-        if (!$ctx->shouldStop()) {
+        if (!$ctx->isCancelled()) {
             $this->enqueue_package_trees($ctx, $profile);
         }
 

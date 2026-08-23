@@ -45,15 +45,27 @@ final class CleanSweep_FileDiscoveryWorker implements CleanSweep_Worker {
             return CleanSweep_WorkerResult::completed(['skipped' => 'not_a_dir_or_excluded']);
         }
 
+        $queue = ($ctx instanceof CleanSweep_WorkerContextImpl) ? $ctx->queue() : null;
+        $file_batch_enqueued = !empty($payload['file_batch_enqueued']);
+        $resume_offset = max(0, (int) ($payload['resume_offset'] ?? 0));
+
         $iterator = new DirectoryIterator($start_path);
         $direct_count = 0;
-        $child_dirs = [];
         $iterations = 0;
+        $open_batch = false;
+        if ($queue !== null) {
+            $queue->begin_batch($state->scan_id);
+            $open_batch = true;
+        }
 
+        try {
         foreach ($iterator as $item) {
             if ($item->isDot()) continue;
             $path = $item->getPathname();
             $iterations++;
+            if ($iterations <= $resume_offset) {
+                continue;
+            }
 
             if ($item->isLink() && $item->isDir()) {
                 continue;
@@ -62,8 +74,24 @@ final class CleanSweep_FileDiscoveryWorker implements CleanSweep_Worker {
                 if ($defer_packages && $this->is_package_tree_name($path)) {
                     continue;
                 }
-                if (!$profile->is_excluded($path)) {
-                    $child_dirs[] = $path;
+                if (!$profile->is_excluded($path) && $max_depth > 0 && $queue !== null) {
+                    $budget = (int) $profile->get_tree_max_depth($path);
+                    $from_content = (int) $profile->content_relative_depth($path);
+                    $remain = $budget - $from_content;
+                    if ($remain >= 0) {
+                        $disc = CleanSweep_ScanWorkUnit::create(
+                            $state->scan_id,
+                            CleanSweep_ScanWorkUnit::TYPE_FILE_DISCOVERY,
+                            [
+                                'base_dir' => $path,
+                                'start_path' => $path,
+                                'max_depth' => $remain,
+                            ],
+                            120
+                        );
+                        $queue->enqueue($disc);
+                        $dirs_enqueued++;
+                    }
                 }
             } elseif ($item->isFile()) {
                 // Cheap filename gate before pathinfo/exclusion work — uploads/
@@ -80,69 +108,69 @@ final class CleanSweep_FileDiscoveryWorker implements CleanSweep_Worker {
                 }
                 if (!$profile->is_excluded($path) && $profile->should_scan_file($path)) {
                     $direct_count++;
+                    if (!$file_batch_enqueued && $queue !== null) {
+                        // Profile batch size, not the first-file count of 1.
+                        // FileBatchWorker continues via moreWork if the dir is larger.
+                        $batch_count = max(1, $batch_size);
+                        $batch = CleanSweep_ScanWorkUnit::create(
+                            $state->scan_id,
+                            CleanSweep_ScanWorkUnit::TYPE_FILE_BATCH,
+                            [
+                                'base_dir' => $start_path,
+                                'start_index' => 0,
+                                'count' => $batch_count,
+                                'is_discovery_seeded' => true,
+                            ],
+                            82
+                        );
+                        $queue->enqueue($batch);
+                        $file_batch_enqueued = true;
+                        $files_enqueued = $direct_count;
+                    }
                 }
             }
 
-            if ($ctx->shouldStop()) {
+            if ($ctx->isCancelled()) {
+                if ($open_batch) {
+                    $queue->end_batch($state->scan_id);
+                    $open_batch = false;
+                }
                 return CleanSweep_WorkerResult::completed(['cancelled' => true, 'iterations' => $iterations]);
             }
 
-            if ($iterations % 5000 === 0) {
+            if ($ctx->sliceExpired()) {
+                if ($open_batch) {
+                    $queue->end_batch($state->scan_id);
+                    $open_batch = false;
+                }
+                if ($direct_count > 0) {
+                    $ctx->mergeState([
+                        'total_files_estimate' => $state->total_files_estimate + $direct_count,
+                    ]);
+                }
+                $follow = array_merge($payload, [
+                    'start_path' => $start_path,
+                    'base_dir' => $base_dir,
+                    'max_depth' => $max_depth,
+                    'defer_package_trees' => $defer_packages,
+                    'resume_offset' => $iterations,
+                    'file_batch_enqueued' => $file_batch_enqueued,
+                ]);
+                return CleanSweep_WorkerResult::moreWork([
+                    'iterations' => $iterations,
+                    'dirs_enqueued' => $dirs_enqueued,
+                    'files_enqueued' => $files_enqueued,
+                    'duration_seconds' => time() - $start_time,
+                    'follow_on_payload' => $follow,
+                ]);
+            }
+
+            if ($iterations % 500 === 0) {
                 $ctx->progress($iterations, 0, "Discovering {$start_path}");
             }
         }
-
-        $queue = ($ctx instanceof CleanSweep_WorkerContextImpl) ? $ctx->queue() : null;
-
-        if ($queue !== null) {
-            $queue->begin_batch($state->scan_id);
-            try {
-                if ($direct_count > 0) {
-                    // Cap each FILE_BATCH at profile batch size so large dirs
-                    // continue via moreWork rather than one giant unit.
-                    $batch_count = max(1, min($batch_size, $direct_count));
-                    $batch = CleanSweep_ScanWorkUnit::create(
-                        $state->scan_id,
-                        CleanSweep_ScanWorkUnit::TYPE_FILE_BATCH,
-                        [
-                            'base_dir' => $start_path,
-                            'start_index' => 0,
-                            'count' => $batch_count,
-                            'is_discovery_seeded' => true,
-                        ],
-                        // Ahead of CORE/PACKAGE checksums (110/120) so file progress starts early.
-                        82
-                    );
-                    $queue->enqueue($batch);
-                    $files_enqueued = $direct_count;
-                }
-
-                // Expand one BFS level when remaining depth allows it.
-                // max_depth=0 → files in this directory only (no child discovery).
-                // Children are enqueued with max_depth-1 so the tree bottoms out.
-                if ($max_depth > 0) {
-                    foreach ($child_dirs as $child) {
-                        $budget = (int) $profile->get_tree_max_depth($child);
-                        $from_content = (int) $profile->content_relative_depth($child);
-                        $remain = $budget - $from_content;
-                        if ($remain < 0) {
-                            continue;
-                        }
-                        $disc = CleanSweep_ScanWorkUnit::create(
-                            $state->scan_id,
-                            CleanSweep_ScanWorkUnit::TYPE_FILE_DISCOVERY,
-                            [
-                                'base_dir' => $child,
-                                'start_path' => $child,
-                                'max_depth' => $remain,
-                            ],
-                            120
-                        );
-                        $queue->enqueue($disc);
-                        $dirs_enqueued++;
-                    }
-                }
-            } finally {
+        } finally {
+            if ($open_batch) {
                 $queue->end_batch($state->scan_id);
             }
         }

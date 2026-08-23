@@ -89,6 +89,17 @@ interface CleanSweep_WorkerContext {
     public function shouldStop(): bool;
 
     /**
+     * True when this drain's time budget is exhausted. Distinct from cancel:
+     * workers must moreWork (not complete) so remaining children are not dropped.
+     */
+    public function sliceExpired(): bool;
+
+    /**
+     * True when the scan is cancelled / failed / completed (terminal).
+     */
+    public function isCancelled(): bool;
+
+    /**
      * The CPU governor. Workers should call $this->throttle()->file_yield()
      * between files (and $this->throttle()->micro_yield() between signatures
      * in hot loops).

@@ -36,6 +36,9 @@ final class CleanSweep_WorkerContextImpl implements CleanSweep_WorkerContext {
     /** @var int Scan start time (used for elapsed_time_sec in pause_point) */
     private int $started_at;
 
+    /** @var int Unix time when this drain slice must yield (0 = no cap) */
+    private int $slice_deadline_at = 0;
+
     /** @var int Unix time of last shouldStop() disk read */
     private int $last_stop_check_at = 0;
 
@@ -108,6 +111,23 @@ final class CleanSweep_WorkerContextImpl implements CleanSweep_WorkerContext {
 
     public function setSharedPrefilter($prefilter): void {
         $this->shared_prefilter = $prefilter;
+    }
+
+    /**
+     * @param int $drain_start Unix time this drainLocked started
+     * @param int $budget_seconds Host slice budget
+     */
+    public function setSliceDeadline(int $drain_start, int $budget_seconds): void {
+        $budget_seconds = max(1, $budget_seconds);
+        $this->slice_deadline_at = $drain_start + $budget_seconds;
+    }
+
+    public function sliceExpired(): bool {
+        return $this->slice_deadline_at > 0 && time() >= $this->slice_deadline_at;
+    }
+
+    public function isCancelled(): bool {
+        return $this->terminalStop();
     }
 
     public function state(): CleanSweep_ScanState {
@@ -226,6 +246,13 @@ final class CleanSweep_WorkerContextImpl implements CleanSweep_WorkerContext {
     }
 
     public function shouldStop(): bool {
+        if ($this->sliceExpired()) {
+            return true;
+        }
+        return $this->terminalStop();
+    }
+
+    private function terminalStop(): bool {
         $now = time();
         // Mirror CleanSweep_Scanner::drainLocked's 5s cancel throttle — avoids a full
         // checkpoint load+decode on every file in the hot loop.

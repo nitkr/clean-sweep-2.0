@@ -628,6 +628,9 @@ final class CleanSweep_Scanner {
                 $started_at
             );
             $ctx->setDrainResources($shared_differential, $shared_signatures, $shared_prefilter);
+            if (method_exists($ctx, 'setSliceDeadline')) {
+                $ctx->setSliceDeadline($drain_start, $time_budget);
+            }
 
             // Run the worker
             $result = $this->runWorker($worker, $unit, $ctx);
@@ -1461,19 +1464,16 @@ final class CleanSweep_Scanner {
         $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
-        // Accepted only when the peer responded (HTTP code > 0) or curl reports
-        // clean success. A bare timeout with code=0 often means connect failed —
-        // treat that as hard failure so WP-Cron fallback can take over.
+        // Fire-and-forget: HTTP code, clean curl, or a short timeout all mean
+        // the request was attempted. Treating CURLE_OPERATION_TIMEDOUT (often
+        // HTTP 0 after 250ms) as a hard fail stacked WP-Cron on top of the
+        // tab poller and produced a drain-busy storm.
         $timeout = defined('CURLE_OPERATION_TIMEDOUT') ? (int) CURLE_OPERATION_TIMEDOUT : 28;
-        if ($code > 0 || $errno === 0) {
+        if ($code > 0 || $errno === 0 || $errno === $timeout) {
             clean_sweep_log_message(
                 "CleanSweep_Scanner: loopback kick fired for {$scan_id} (HTTP {$code}, errno={$errno})",
                 'debug'
             );
-            return true;
-        }
-        // Timeout after headers/body started arriving still counts as accepted.
-        if ($errno === $timeout && $code > 0) {
             return true;
         }
 
