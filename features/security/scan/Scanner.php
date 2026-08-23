@@ -1184,6 +1184,18 @@ final class CleanSweep_Scanner {
         // Seed only expands immediate children; each tree sets its own budget.
         $seed_depth = 1;
         foreach ($seeds as $root) {
+            if (is_file($root)) {
+                $this->queue->enqueue(CleanSweep_ScanWorkUnit::create(
+                    $scan_id,
+                    CleanSweep_ScanWorkUnit::TYPE_FILE_BATCH,
+                    [
+                        'base_dir' => dirname($root),
+                        'explicit_files' => [$root],
+                    ],
+                    70
+                ));
+                continue;
+            }
             if (!is_dir($root)) {
                 continue;
             }

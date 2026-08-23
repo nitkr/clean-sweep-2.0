@@ -37,7 +37,7 @@
     { id: 'full', label: 'Full scan', desc: 'Files + database (default Deep)' },
     { id: 'files', label: 'Files only', desc: 'Skip database' },
     { id: 'database', label: 'Database only', desc: 'Skip filesystem walk' },
-    { id: 'paths', label: 'Specific paths', desc: 'Files under chosen path(s); DB off' },
+    { id: 'paths', label: 'Specific paths', desc: 'Any path under the WordPress site; DB off' },
   ];
 
   /**
@@ -381,7 +381,7 @@
     }
     if (!forceResume && selectedProfile === 'deep' && deepScope === 'paths' && !String(scanFolder || '').trim()) {
       errors.add({
-        message: 'Enter a path under the WordPress site (e.g. wp-content/plugins/).',
+        message: 'Enter a path under the WordPress site (e.g. wp-admin/, wp-includes/, wp-content/plugins/).',
         code: 'INVALID_FOLDER_PATH',
       });
       return;
@@ -831,17 +831,18 @@
               </div>
               {#if deepScope === 'paths'}
                 <div>
-                  <label class="block text-xs text-muted mb-2">Path under the WordPress site</label>
+                  <label class="block text-xs text-muted mb-2" for="deep-scan-path">Path under the WordPress site</label>
                   <input
+                    id="deep-scan-path"
                     type="text"
                     value={scanFolder}
                     oninput={handleScanFolderChange}
-                    placeholder="e.g., wp-content/plugins/my-plugin/"
+                    placeholder="e.g. wp-admin/, wp-includes/, wp-content/plugins/my-plugin/"
                     disabled={$scanning.scanning}
                     class="w-full px-3 py-2 bg-elevated border border-line rounded-md text-sm text-ink placeholder-zinc-600 focus:outline-none focus:border-primary/50 disabled:opacity-50"
                   />
                   <p class="text-[10px] text-faint mt-1.5">
-                    Files only under this path. Database is skipped unless you use the API <code class="text-ink/80">include_db</code> flag.
+                    Any folder or file under the site root (not only wp-content). Relative to the WordPress install, or an absolute path. Database is skipped unless you use the API <code class="text-ink/80">include_db</code> flag.
                   </p>
                 </div>
               {/if}

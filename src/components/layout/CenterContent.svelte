@@ -630,15 +630,6 @@
             >
               Back to scan
             </button>
-            {#if $scanning.scanning}
-              <button
-                type="button"
-                onclick={() => scanning.cancelScan()}
-                class="text-[11px] text-muted hover:text-ink"
-              >
-                Cancel scan
-              </button>
-            {/if}
           </div>
         </div>
       {/if}
