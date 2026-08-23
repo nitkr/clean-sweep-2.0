@@ -564,13 +564,24 @@ class CleanSweep_PluginReinstaller {
                 ]);
             }
 
-            $is_active_blog = is_plugin_active($plugin_file);
-            $is_active_network = is_multisite() && is_plugin_active_for_network($plugin_file);
+            $act = function_exists('clean_sweep_plugin_activation_state')
+                ? clean_sweep_plugin_activation_state($plugin_file)
+                : [
+                    'blog' => function_exists('is_plugin_active') && is_plugin_active($plugin_file),
+                    'network' => is_multisite() && function_exists('is_plugin_active_for_network')
+                        && is_plugin_active_for_network($plugin_file),
+                ];
+            $is_active_blog = !empty($act['blog']);
+            $is_active_network = !empty($act['network']);
             $should_reactivate = $is_active_blog || $is_active_network;
 
             if ($is_active_network) {
-                deactivate_plugins($plugin_file, true, true);
-            } elseif ($is_active_blog) {
+                if (is_multisite() && function_exists('deactivate_plugins')) {
+                    deactivate_plugins($plugin_file, true, true);
+                } elseif (function_exists('clean_sweep_set_network_plugin_active')) {
+                    clean_sweep_set_network_plugin_active($plugin_file, false);
+                }
+            } elseif ($is_active_blog && function_exists('deactivate_plugins')) {
                 deactivate_plugins($plugin_file, true, false);
             }
 
@@ -624,7 +635,15 @@ class CleanSweep_PluginReinstaller {
 
                 if ($should_reactivate) {
                     if ($is_active_network) {
-                        $reactivation_result = activate_plugin($plugin_file, '', true, true);
+                        if (is_multisite()) {
+                            $reactivation_result = activate_plugin($plugin_file, '', true, true);
+                        } elseif (function_exists('clean_sweep_set_network_plugin_active')) {
+                            $reactivation_result = clean_sweep_set_network_plugin_active($plugin_file, true)
+                                ? true
+                                : new WP_Error('network_activate', 'Could not write network-active plugin list');
+                        } else {
+                            $reactivation_result = activate_plugin($plugin_file, '', false, true);
+                        }
                     } else {
                         $reactivation_result = activate_plugin($plugin_file, '', false, true);
                     }
@@ -941,19 +960,33 @@ class CleanSweep_PluginReinstaller {
             'info'
         );
 
-        $is_active_blog = function_exists('is_plugin_active') ? is_plugin_active($plugin_file) : false;
-        $is_active_network = is_multisite() && function_exists('is_plugin_active_for_network')
-            && is_plugin_active_for_network($plugin_file);
+        $act = function_exists('clean_sweep_plugin_activation_state')
+            ? clean_sweep_plugin_activation_state($plugin_file)
+            : [
+                'blog' => function_exists('is_plugin_active') && is_plugin_active($plugin_file),
+                'network' => is_multisite() && function_exists('is_plugin_active_for_network')
+                    && is_plugin_active_for_network($plugin_file),
+            ];
+        $is_active_blog = !empty($act['blog']);
+        $is_active_network = !empty($act['network']);
         // Also treat slug-only active list entries as active when possible
-        if (!$is_active_blog && !$is_active_network && function_exists('is_plugin_active')) {
+        if (!$is_active_blog && !$is_active_network) {
             $slug = $this->extract_slug_from_plugin_file($plugin_file);
             if ($slug && $slug !== $plugin_file) {
-                // Scan active plugins for this directory
-                $active = (array) get_option('active_plugins', []);
-                foreach ($active as $active_file) {
+                $active = function_exists('clean_sweep_get_blog_active_plugins')
+                    ? clean_sweep_get_blog_active_plugins()
+                    : (array) get_option('active_plugins', []);
+                $network = function_exists('clean_sweep_get_network_active_plugins')
+                    ? clean_sweep_get_network_active_plugins()
+                    : [];
+                foreach (array_merge($active, $network) as $active_file) {
                     if (strpos((string) $active_file, $slug . '/') === 0 || (string) $active_file === $slug) {
                         $plugin_file = (string) $active_file;
-                        $is_active_blog = true;
+                        if (in_array($plugin_file, $network, true)) {
+                            $is_active_network = true;
+                        } else {
+                            $is_active_blog = true;
+                        }
                         break;
                     }
                 }
@@ -962,8 +995,12 @@ class CleanSweep_PluginReinstaller {
         $should_reactivate = $is_active_blog || $is_active_network;
 
         if ($is_active_network) {
-            deactivate_plugins($plugin_file, true, true);
-        } elseif ($is_active_blog) {
+            if (is_multisite() && function_exists('deactivate_plugins')) {
+                deactivate_plugins($plugin_file, true, true);
+            } elseif (function_exists('clean_sweep_set_network_plugin_active')) {
+                clean_sweep_set_network_plugin_active($plugin_file, false);
+            }
+        } elseif ($is_active_blog && function_exists('deactivate_plugins')) {
             deactivate_plugins($plugin_file, true, false);
         }
 
@@ -1081,7 +1118,15 @@ class CleanSweep_PluginReinstaller {
 
         if ($should_reactivate && function_exists('activate_plugin')) {
             if ($is_active_network) {
-                $reactivation_result = activate_plugin($plugin_file, '', true, true);
+                if (is_multisite()) {
+                    $reactivation_result = activate_plugin($plugin_file, '', true, true);
+                } elseif (function_exists('clean_sweep_set_network_plugin_active')) {
+                    $reactivation_result = clean_sweep_set_network_plugin_active($plugin_file, true)
+                        ? true
+                        : new WP_Error('network_activate', 'Could not write network-active plugin list');
+                } else {
+                    $reactivation_result = activate_plugin($plugin_file, '', false, true);
+                }
             } else {
                 $reactivation_result = activate_plugin($plugin_file, '', false, true);
             }

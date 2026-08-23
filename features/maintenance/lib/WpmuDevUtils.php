@@ -6,31 +6,155 @@
  */
 
 /**
- * Check if a plugin is active by querying the database directly
- * This avoids dependency on ABSPATH being defined
- *
- * @param string $plugin Plugin path (e.g., 'wpmudev-updates/update-notifications.php')
- * @return bool True if plugin is active, false otherwise
+ * Sitemeta table name for the live site (recovery WP may not define $wpdb->sitemeta).
  */
-function clean_sweep_is_plugin_active($plugin) {
-    static $active_plugins_cache = null;
-    
-    if ($active_plugins_cache === null) {
-        global $wpdb;
-        $active_plugins_cache = [];
-        
-        if ($wpdb) {
-            $option_value = $wpdb->get_var("SELECT option_value FROM {$wpdb->options} WHERE option_name = 'active_plugins' LIMIT 1");
-            if ($option_value) {
-                $unserialized = maybe_unserialize($option_value);
-                if (is_array($unserialized)) {
-                    $active_plugins_cache = $unserialized;
-                }
-            }
+function clean_sweep_sitemeta_table() {
+    global $wpdb;
+    if (!$wpdb) {
+        return null;
+    }
+    if (!empty($wpdb->sitemeta)) {
+        return $wpdb->sitemeta;
+    }
+    $prefix = !empty($wpdb->base_prefix) ? $wpdb->base_prefix : $wpdb->prefix;
+    return $prefix . 'sitemeta';
+}
+
+/**
+ * Normalize blog + network plugin lists from raw option/sitemeta values.
+ * Sitewide plugins are stored as [ 'dir/file.php' => timestamp, ... ].
+ *
+ * @param mixed $blog_plugins
+ * @param mixed $sitewide
+ * @return array{blog: string[], network: string[]}
+ */
+function clean_sweep_normalize_plugin_file_lists($blog_plugins, $sitewide): array {
+    $blog = [];
+    foreach ((array) $blog_plugins as $p) {
+        if (is_string($p) && $p !== '') {
+            $blog[] = $p;
         }
     }
-    
-    return in_array($plugin, $active_plugins_cache, true);
+    $network = [];
+    foreach ((array) $sitewide as $k => $v) {
+        if (is_string($k) && strpos($k, '.php') !== false) {
+            $network[] = $k;
+        } elseif (is_string($v) && strpos($v, '.php') !== false) {
+            $network[] = $v;
+        }
+    }
+    return ['blog' => array_values(array_unique($blog)), 'network' => array_values(array_unique($network))];
+}
+
+function clean_sweep_plugin_is_active_in_lists(string $plugin, array $blog, array $network): bool {
+    return in_array($plugin, $blog, true) || in_array($plugin, $network, true);
+}
+
+/**
+ * Blog-level active_plugins from the live options table (not recovery memory).
+ *
+ * @return string[]
+ */
+function clean_sweep_get_blog_active_plugins(): array {
+    static $cache = null;
+    if ($cache !== null) {
+        return $cache;
+    }
+    $cache = [];
+    global $wpdb;
+    if ($wpdb) {
+        $option_value = $wpdb->get_var("SELECT option_value FROM {$wpdb->options} WHERE option_name = 'active_plugins' LIMIT 1");
+        $unserialized = maybe_unserialize($option_value);
+        $cache = clean_sweep_normalize_plugin_file_lists($unserialized, [])['blog'];
+    }
+    return $cache;
+}
+
+/**
+ * Network-activated plugins from sitemeta.active_sitewide_plugins.
+ *
+ * @return string[]
+ */
+function clean_sweep_get_network_active_plugins(): array {
+    static $cache = null;
+    if ($cache !== null) {
+        return $cache;
+    }
+    $cache = [];
+    global $wpdb;
+    $table = clean_sweep_sitemeta_table();
+    if (!$wpdb || !$table) {
+        return $cache;
+    }
+    $raw = $wpdb->get_var("SELECT meta_value FROM {$table} WHERE meta_key = 'active_sitewide_plugins' LIMIT 1");
+    $cache = clean_sweep_normalize_plugin_file_lists([], maybe_unserialize($raw))['network'];
+    return $cache;
+}
+
+function clean_sweep_is_plugin_network_active($plugin) {
+    return in_array($plugin, clean_sweep_get_network_active_plugins(), true);
+}
+
+/**
+ * True if the plugin is site-active or network-active on the live target.
+ * Recovery WP is often single-site while the target is Multisite, so this
+ * reads the database instead of is_plugin_active() / is_plugin_active_for_network().
+ *
+ * @param string $plugin e.g. 'wpmudev-updates/update-notifications.php'
+ */
+function clean_sweep_is_plugin_active($plugin) {
+    return clean_sweep_plugin_is_active_in_lists(
+        $plugin,
+        clean_sweep_get_blog_active_plugins(),
+        clean_sweep_get_network_active_plugins()
+    );
+}
+
+/**
+ * @return array{blog: bool, network: bool}
+ */
+function clean_sweep_plugin_activation_state($plugin) {
+    return [
+        'blog' => in_array($plugin, clean_sweep_get_blog_active_plugins(), true),
+        'network' => clean_sweep_is_plugin_network_active($plugin),
+    ];
+}
+
+/**
+ * Add or remove a plugin from sitemeta.active_sitewide_plugins when recovery
+ * is not a real Multisite runtime (activate_plugin network-wide would no-op).
+ */
+function clean_sweep_set_network_plugin_active($plugin, $active) {
+    global $wpdb;
+    $table = clean_sweep_sitemeta_table();
+    if (!$wpdb || !$table || !is_string($plugin) || $plugin === '') {
+        return false;
+    }
+    $raw = @$wpdb->get_var("SELECT meta_value FROM {$table} WHERE meta_key = 'active_sitewide_plugins' LIMIT 1");
+    $list = maybe_unserialize($raw);
+    if (!is_array($list)) {
+        $list = [];
+    }
+    if ($active) {
+        $list[$plugin] = time();
+    } else {
+        unset($list[$plugin]);
+    }
+    $stored = maybe_serialize($list);
+    if ($raw === null) {
+        return $wpdb->insert($table, [
+            'site_id' => 1,
+            'meta_key' => 'active_sitewide_plugins',
+            'meta_value' => $stored,
+        ], ['%d', '%s', '%s']) !== false;
+    }
+    return $wpdb->update(
+        $table,
+        ['meta_value' => $stored],
+        ['meta_key' => 'active_sitewide_plugins'],
+        ['%s'],
+        ['%s']
+    ) !== false;
 }
 
 /**
@@ -57,14 +181,17 @@ function clean_sweep_is_wpmudev_available() {
         global $wpdb;
         if ($wpdb) {
             // Ensure multisite table names are defined even in single-site recovery environment
-            if (empty($wpdb->sitemeta)) {
-                $wpdb->sitemeta = $wpdb->prefix . 'sitemeta';
+            $sitemeta_table = clean_sweep_sitemeta_table();
+            if (empty($wpdb->sitemeta) && $sitemeta_table) {
+                $wpdb->sitemeta = $sitemeta_table;
                 clean_sweep_log_message("🔧 Defined multisite table names for recovery environment", 'info');
             }
 
             if ($target_is_multisite) {
                 // Multisite: Try sitemeta first (normal), then options (converted sites)
-                $sitemeta_key = $wpdb->get_var("SELECT meta_value FROM {$wpdb->sitemeta} WHERE meta_key = 'wpmudev_apikey' LIMIT 1");
+                $sitemeta_key = $sitemeta_table
+                    ? $wpdb->get_var("SELECT meta_value FROM {$sitemeta_table} WHERE meta_key = 'wpmudev_apikey' LIMIT 1")
+                    : null;
                 if (!empty($sitemeta_key)) {
                     $api_key = $sitemeta_key;
                     clean_sweep_log_message("🔑 Found WPMU DEV API key in wp_sitemeta table", 'info');
@@ -106,8 +233,11 @@ function clean_sweep_is_wpmudev_available() {
     $dashboard_path = WP_PLUGIN_DIR . '/' . $dashboard_plugin;
     
     if (!clean_sweep_is_plugin_active($dashboard_plugin)) {
-        clean_sweep_log_message("❌ WPMU DEV Dashboard plugin is not activated in WordPress", 'warning');
+        clean_sweep_log_message("❌ WPMU DEV Dashboard plugin is not activated (site or network)", 'warning');
         return false;
+    }
+    if (clean_sweep_is_plugin_network_active($dashboard_plugin)) {
+        clean_sweep_log_message("✅ WPMU DEV Dashboard is network-activated", 'info');
     }
     
     if (!class_exists('WPMUDEV_Dashboard')) {

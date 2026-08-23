@@ -17,6 +17,7 @@ bin/run-scan.php
 bin/test-deep-scope-plan.php
 bin/test-file-threat-carry.php
 bin/test-upload-fixtures.php
+bin/test-wpmudev-multisite-active.php
 clean-sweep.php
 config.php
 core/clean-sweep-bootstrap.php
