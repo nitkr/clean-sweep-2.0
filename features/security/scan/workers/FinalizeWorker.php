@@ -48,16 +48,15 @@ final class CleanSweep_FinalizeWorker implements CleanSweep_Worker {
                     $threats = (new CleanSweep_ThreatStore($state->scan_id))->all();
                 }
                 $likely = (new CleanSweep_Correlator())->run($violations, $threats, [], false);
-                if (is_array($likely) && empty($likely['reinfection']) && empty($likely['core_changed'])) {
+                if (!is_array($likely) || (empty($likely['reinfection']) && empty($likely['core_changed']))) {
                     $likely = null;
                 }
             }
         }
 
         $opts = $state->options ?? [];
-        if ($likely) {
-            $opts['likely_source'] = $likely;
-        }
+        // Always write: null clears VisitStore leftovers planted on older builds.
+        $opts['likely_source'] = $likely;
         $prior_carry = is_array($opts['file_carry'] ?? null) ? $opts['file_carry'] : [];
         $opts['file_carry'] = [
             'carried' => (int) ($prior_carry['carried'] ?? 0) + (int) ($carry['carried'] ?? 0),

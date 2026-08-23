@@ -1136,7 +1136,7 @@
             checksumFindings={$scanning.checksumFindings || 0}
             checksumVersion={$scanning.checksumVersion}
             hasIntegrityBaseline={!!$scanning.hasIntegrityBaseline}
-            likelySource={($scanning.likelySource?.reinfection || $scanning.likelySource?.core_changed || $scanning.likelySource?.core_files?.length)
+            likelySource={($scanning.likelySource?.reinfection || $scanning.likelySource?.core_changed)
               ? $scanning.likelySource
               : null}
           />

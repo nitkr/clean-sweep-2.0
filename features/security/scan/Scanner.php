@@ -265,8 +265,8 @@ final class CleanSweep_Scanner {
 
     /**
      * Status for the UI poller. Reads checkpoint + queue stats.
-     * May once persist CleanSweep_VisitStore likely_source into checkpoint options
-     * so subsequent polls skip that disk read across FPM workers.
+     * likely_source is this scan's finalize result only — never copied from
+     * VisitStore (that is leftover from another visit / snapshot compare).
      */
     public function status(string $scan_id): array {
         $ckpt = new CleanSweep_Checkpoint($scan_id);
@@ -325,35 +325,8 @@ final class CleanSweep_Scanner {
 
         $options = is_array($state->options) ? $state->options : [];
         $likely = $options['likely_source'] ?? null;
-        // Prefer checkpoint options (persisted once). Fall back to CleanSweep_VisitStore
-        // with a short in-process TTL, then write through to options so other
-        // FPM workers stop re-reading the visit JSON on every poll.
-        static $likely_cache = [];
-        $cache_key = $scan_id;
-        $now = time();
-        if (is_array($likely)) {
-            $likely_cache[$cache_key] = ['at' => $now, 'value' => $likely];
-        } elseif (
-            isset($likely_cache[$cache_key])
-            && is_array($likely_cache[$cache_key]['value'] ?? null)
-            && ($now - (int)$likely_cache[$cache_key]['at']) < 30
-        ) {
-            $likely = $likely_cache[$cache_key]['value'];
-        } else {
-            $visit_boot = CLEAN_SWEEP_ROOT . 'includes/system/visit/bootstrap.php';
-            if (is_readable($visit_boot)) {
-                require_once $visit_boot;
-                if (class_exists('CleanSweep_VisitStore')) {
-                    $likely = (new CleanSweep_VisitStore())->likely_source();
-                    if (is_array($likely)) {
-                        $likely_cache[$cache_key] = ['at' => $now, 'value' => $likely];
-                        $opts = is_array($state->options) ? $state->options : [];
-                        $opts['likely_source'] = $likely;
-                        $ckpt->merge(['options' => $opts]);
-                        $state->options = $opts;
-                    }
-                }
-            }
+        if (!is_array($likely) || (empty($likely['reinfection']) && empty($likely['core_changed']))) {
+            $likely = null;
         }
 
         return [

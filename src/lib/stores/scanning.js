@@ -21,6 +21,13 @@ import {
   COMPLETED_TTL_SECONDS,
 } from '../scanSession.js';
 
+/** This-scan attribution only. Visit leftovers without reinfection must not show. */
+function thisScanLikelySource(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  if (raw.reinfection || raw.core_changed) return raw;
+  return null;
+}
+
 function createScanningStore() {
   const { subscribe, set, update } = writable({
     scanning: false,
@@ -592,6 +599,9 @@ function createScanningStore() {
         resultsScope: profileId === 'deep' ? scope : null,
         startTime: startSec ? startSec * 1000 : s.startTime,
         scanDuration: duration,
+        likelySource: Object.prototype.hasOwnProperty.call(extras, 'likely_source')
+          ? thisScanLikelySource(extras.likely_source)
+          : s.likelySource,
         ...emptyPreviewState(),
       };
     });
@@ -831,7 +841,7 @@ function createScanningStore() {
                   : (status.pause_reason === 'stale_running' ? 'stale_running' : s.pauseReason),
                 hasResumeData: hasPending,
                 hasIntegrityBaseline: status.has_integrity_baseline ?? s.hasIntegrityBaseline,
-                likelySource: status.likely_source ?? s.likelySource,
+                likelySource: thisScanLikelySource(status.likely_source),
                 integrityNote: status.integrity_note ?? s.integrityNote,
                 integrityViolations: status.integrity_violations
                   ?? counters.integrity_violations
@@ -956,7 +966,10 @@ function createScanningStore() {
                     mergedCounters,
                     finishedAt,
                     status.started_at || null,
-                    { file_carry: status.file_carry || null }
+                    {
+                      file_carry: status.file_carry || null,
+                      likely_source: status.likely_source,
+                    }
                   );
                   update((s) => ({
                     ...s,
@@ -1275,6 +1288,7 @@ function createScanningStore() {
         checksumChecked: isResuming ? s.checksumChecked : 0,
         checksumFindings: isResuming ? s.checksumFindings : 0,
         checksumVersion: isResuming ? s.checksumVersion : null,
+        likelySource: isResuming ? s.likelySource : null,
         progressPercent: 0,
         progressHighWater: isResuming ? (s.progressHighWater || 0) : 0,
         progressSource: isResuming ? (s.progressSource || '') : '',
@@ -1747,6 +1761,7 @@ function createScanningStore() {
         checksumChecked: status.checksum_checked ?? s.checksumChecked,
         checksumFindings: status.checksum_findings ?? s.checksumFindings,
         checksumVersion: status.checksum_version ?? s.checksumVersion,
+        likelySource: thisScanLikelySource(status.likely_source),
         deepScope: status.scan_scope || s.deepScope || 'full',
         folderPathDisplay: status.folder_path_display ?? s.folderPathDisplay,
         hasResumeData: !!(status.queue?.has_pending),
@@ -1822,7 +1837,10 @@ function createScanningStore() {
         mergedCounters,
         finishedAt,
         status.started_at || null,
-        { file_carry: status.file_carry || null }
+        {
+          file_carry: status.file_carry || null,
+          likely_source: status.likely_source,
+        }
       );
       update(s => ({
         ...s,
