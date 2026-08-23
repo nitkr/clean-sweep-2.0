@@ -176,18 +176,30 @@
   $: checksumish =
     unitType === 'core_checksum' ||
     unitType === 'package_checksum' ||
-    phaseKey === 'integrity';
+    (!unitType && phaseKey === 'integrity');
   $: dbish =
     unitType === 'db_table_segment' ||
     unitType === 'db_site_discovery' ||
-    phaseKey === 'database' ||
-    phaseKey === 'db' ||
-    filesSkipped;
-  $: filesish = !checksumish && !dbish;
+    (!unitType && (phaseKey === 'database' || phaseKey === 'db' || filesSkipped));
+  $: censusish =
+    unitType === 'visit_census' ||
+    (!unitType && (phaseKey === 'visit_census' || phaseKey === 'census'));
+  // File counts belong to file-batch work. Census / discovery / checksums
+  // must not inherit a leftover files_scanned into the headline.
+  $: filesish =
+    !checksumish &&
+    !dbish &&
+    !censusish &&
+    unitType !== 'file_discovery' &&
+    unitType !== 'root_config' &&
+    unitType !== 'finalization' &&
+    unitType !== 'analysis' &&
+    unitType !== 'integrity_check';
 
   $: filesFlatHint =
     isActive &&
     !discovering &&
+    !censusish &&
     filesish === false &&
     (pending || 0) > 8 &&
     (filesScanned || 0) > 0 &&
@@ -203,8 +215,17 @@
   $: filesLabel = filesComplete && filesScanned > 0 ? 'Files (done)' : 'Files';
   $: filesDisplay =
     filesScanned > 0 ? filesScanned.toLocaleString() : '—';
+  $: technicalMessage = (() => {
+    const m = String(message || '').trim();
+    if (!m) return '';
+    const low = m.toLowerCase();
+    if (low === phaseKey || low === unitType || low === 'visit_census' || low === 'census') {
+      return '';
+    }
+    return m;
+  })();
 
-  let detailsOpen = true;
+  let detailsOpen = false;
 
   function onContinue() {
     dispatch('continue');
@@ -261,16 +282,29 @@
       return p ? `Finding files · ${p}` : 'Finding files to scan';
     }
     if (unitType === 'root_config') return 'Checking root config files';
-    if (unitType === 'visit_census') return 'Visit census';
+    if (unitType === 'visit_census' || (!unitType && censusish)) {
+      const raw = String((currentUnit && currentUnit.phase) || '').toLowerCase();
+      const censusPhase = {
+        site_owned: 'site-owned files',
+        extra_php: 'extra PHP',
+        wp_content: 'wp-content',
+        uploads: 'uploads',
+        options: 'options',
+      }[raw] || (raw ? raw.replace(/_/g, ' ') : '');
+      return censusPhase ? `Visit census · ${censusPhase}` : 'Visit census';
+    }
     if (unitType === 'finalization') return 'Finishing up';
     if (unitType === 'db_site_discovery') return 'Finding site database tables';
-    if (unitType === 'db_table_segment' || phaseKey === 'database' || phaseKey === 'db' || filesSkipped) {
+    if (
+      unitType === 'db_table_segment' ||
+      (!unitType && (phaseKey === 'database' || phaseKey === 'db' || filesSkipped))
+    ) {
       const t = shortTable((currentUnit && currentUnit.table) || lastDbTable);
       return t
         ? `Database · ${t}${lastDbId ? ' #' + lastDbId : ''}`
         : 'Checking database';
     }
-    if (phaseKey === 'integrity') {
+    if (!unitType && phaseKey === 'integrity') {
       return packageChecksumNote || 'Checking core and package checksums';
     }
     if (lastFilePath) {
@@ -396,7 +430,11 @@
         style="width: {barWidth}%; background: {barColor};"
       ></div>
     </div>
-    {#if filesFlatHint}
+    {#if censusish}
+      <p class="text-[11px] text-faint mb-3 leading-snug">
+        Cataloging the site — not a malware scan.{#if filesScanned > 0} The file count is from earlier steps.{/if}
+      </p>
+    {:else if filesFlatHint}
       <p class="text-[11px] text-faint mb-3 leading-snug">
         File count is from this slice. Remaining steps include checksums and database work.
       </p>
@@ -504,7 +542,7 @@
               <dd class="text-ink min-w-0 truncate" title={currentCheck}>{currentCheck}</dd>
             </div>
             <div class="flex gap-2 min-w-0">
-              <dt class="text-faint shrink-0 w-24">Last file</dt>
+              <dt class="text-faint shrink-0 w-24">Last scanned</dt>
               <dd class="font-mono text-ink min-w-0 truncate" title={lastFilePath || ''}>
                 {#if lastFilePath}
                   {relativePath(lastFilePath)}
@@ -543,8 +581,8 @@
           <p class="mt-2 text-[10px] text-faint">
             Queue-driven scan · progress is an estimate · auto-continue while this tab is open
           </p>
-          {#if message}
-            <p class="mt-1 text-[10px] text-faint font-mono truncate" title={message}>{message}</p>
+          {#if technicalMessage}
+            <p class="mt-1 text-[10px] text-faint font-mono truncate" title={technicalMessage}>{technicalMessage}</p>
           {/if}
         {/if}
       </div>

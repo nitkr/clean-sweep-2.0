@@ -826,7 +826,7 @@ class CleanSweep_FileBasedScanWorkQueue implements CleanSweep_ScanWorkQueueInter
      * One JSON read per status poll; glob already listed in_flight/.
      *
      * @param array $in_flight_files Absolute paths from glob()
-     * @return array{type:string,table:?string,base_dir:?string,start:?int}|null
+     * @return array{type:string,table:?string,base_dir:?string,start:?int,phase:?string}|null
      */
     private function peek_current_unit(array $in_flight_files): ?array {
         if ($in_flight_files === []) {
@@ -849,11 +849,13 @@ class CleanSweep_FileBasedScanWorkQueue implements CleanSweep_ScanWorkQueueInter
         if (is_string($base) && strlen($base) > 240) {
             $base = substr($base, -240);
         }
+        $unit_phase = isset($payload['phase']) ? (string) $payload['phase'] : '';
         return [
             'type' => $type,
             'table' => isset($payload['table']) ? (string) $payload['table'] : null,
             'base_dir' => is_string($base) && $base !== '' ? $base : null,
             'start' => isset($payload['start']) ? (int) $payload['start'] : null,
+            'phase' => $unit_phase !== '' ? $unit_phase : null,
         ];
     }
 
