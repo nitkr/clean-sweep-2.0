@@ -227,6 +227,10 @@ final class CleanSweep_Census {
             }
         }
 
+        $miss = $this->cursor_missed_retry('extra_php', $skipping, $samples);
+        if ($miss !== null) {
+            return $miss;
+        }
         if ($samples !== []) {
             $this->store->put_samples('extra_php', $samples, false);
         }
@@ -317,6 +321,10 @@ final class CleanSweep_Census {
             if ($seen >= self::WP_CONTENT_OTHER_CAP && !$skip_item) {
                 break;
             }
+        }
+        $miss = $this->cursor_missed_retry('wp_content', $skipping, $samples);
+        if ($miss !== null) {
+            return $miss;
         }
         if ($samples !== []) {
             $this->store->put_samples('wp_content', $samples, false);
@@ -413,6 +421,10 @@ final class CleanSweep_Census {
             if ($php_count >= self::UPLOAD_PHP_CAP) {
                 break;
             }
+        }
+        $miss = $this->cursor_missed_retry('uploads', $skipping, $samples);
+        if ($miss !== null) {
+            return $miss;
         }
         if ($samples !== []) {
             $this->store->put_samples('uploads', $samples, false);
@@ -558,6 +570,37 @@ final class CleanSweep_Census {
                 'offset' => 0,
                 'resume_after' => $follow_resume,
             ]),
+        ];
+    }
+
+    /**
+     * Resume cursor was not in this listing. Do not mark the bucket complete.
+     *
+     * @return array<string,mixed>|null
+     */
+    private function cursor_missed_retry(string $phase, bool $skipping, array $samples): ?array {
+        if (!$skipping) {
+            return null;
+        }
+        if ($samples !== []) {
+            $this->store->put_samples($phase, $samples, false);
+        }
+        return [
+            'done' => false,
+            'next' => $phase,
+            'offset' => 0,
+            'count' => count($samples),
+            'phase' => $phase,
+            'follow_on_payload' => [
+                'phase' => $phase,
+                'offset' => 0,
+                'resume_after' => '',
+                'resume_slug' => '',
+                'slug_php_seen' => 0,
+                'tree_seen' => 0,
+                'php_count' => 0,
+                'media_checked' => 0,
+            ],
         ];
     }
 
