@@ -44,6 +44,7 @@ final class CleanSweep_FileDiscoveryWorker implements CleanSweep_Worker {
         if (!is_dir($start_path) || $profile->is_excluded($start_path)) {
             return CleanSweep_WorkerResult::completed(['skipped' => 'not_a_dir_or_excluded']);
         }
+        $ctx->mergeState(['phase' => 'files']);
 
         $queue = ($ctx instanceof CleanSweep_WorkerContextImpl) ? $ctx->queue() : null;
         $file_batch_enqueued = !empty($payload['file_batch_enqueued']);

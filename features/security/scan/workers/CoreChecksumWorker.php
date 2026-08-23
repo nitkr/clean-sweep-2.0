@@ -69,6 +69,8 @@ final class CleanSweep_CoreChecksumWorker implements CleanSweep_Worker {
             ]);
         }
 
+        $ctx->mergeState(['phase' => 'integrity']);
+
         $findings = [];
         $checked = 0;
         $this->check_official_root_files($root, $checksums, $findings, $checked, $ctx);
@@ -187,6 +189,7 @@ final class CleanSweep_CoreChecksumWorker implements CleanSweep_Worker {
         $note .= ' (reused prior clean result)';
         $checked = (int) ($snap['checked'] ?? 0);
         $ctx->mergeState([
+            'phase' => 'integrity',
             'options' => array_merge($ctx->state()->options ?? [], [
                 'checksum_note' => $note,
                 'checksum_checked' => $checked,

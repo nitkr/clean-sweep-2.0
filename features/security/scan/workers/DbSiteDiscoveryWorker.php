@@ -35,6 +35,7 @@ final class CleanSweep_DbSiteDiscoveryWorker implements CleanSweep_Worker {
         if (!CleanSweep_DbScanPlanner::table_exists($blogs_table)) {
             return CleanSweep_WorkerResult::completed(['skipped' => 'no_blogs_table']);
         }
+        $ctx->mergeState(['phase' => 'database']);
 
         $last_blog_id = (int)($payload['last_blog_id'] ?? 0);
         $sites_done = (int)($payload['sites_done'] ?? 0);

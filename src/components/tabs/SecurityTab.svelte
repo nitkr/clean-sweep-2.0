@@ -112,7 +112,11 @@
 
   let scanIdleMs = $derived.by(() => {
     if (!$scanning.scanning) return null;
-    const at = $scanning.liveProgress?.last_activity_at || lastProgressAt || Date.now();
+    const act = $scanning.liveProgress?.last_activity_at || 0;
+    const drainSec = Number($scanning.liveProgress?.last_drain_activity_at) || 0;
+    const drainMs = drainSec > 0 ? drainSec * 1000 : 0;
+    const at = Math.max(act, drainMs, lastProgressAt || 0);
+    if (!at) return 0;
     return Math.max(0, nowTick - at);
   });
 
@@ -934,6 +938,8 @@
           checksumChecked={$scanning.checksumChecked || 0}
           checksumVersion={$scanning.checksumVersion}
           packageChecksumNote={$scanning.liveProgress?.package_checksum_note}
+          currentUnit={$scanning.liveProgress?.current_unit || $scanning.workQueueStats?.current_unit}
+          lastDrainActivityAt={$scanning.liveProgress?.last_drain_activity_at || 0}
           on:continue={resumeScan}
           on:cancel={() => scanning.cancelScan()}
         />

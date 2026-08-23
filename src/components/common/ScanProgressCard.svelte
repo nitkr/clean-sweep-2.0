@@ -71,6 +71,10 @@
   export let checksumVersion = null;
   /** @type {string|null} */
   export let packageChecksumNote = null;
+  /** In-flight work unit from status.queue.current_unit */
+  export let currentUnit = null;
+  /** Unix seconds of last drain activity */
+  export let lastDrainActivityAt = 0;
 
   const dispatch = createEventDispatcher();
 
@@ -97,8 +101,11 @@
     !status ||
     (!isPaused && !isTerminal);
   $: isActive = isPaused || isRunning;
-  $: isStuck = idleMs != null && idleMs >= STUCK_MS;
-  $: isSlow = !isStuck && idleMs != null && idleMs >= SLOW_MS;
+  $: queueBusy = (inProgress || 0) > 0;
+  $: drainFresh =
+    lastDrainActivityAt > 0 && idleMs != null && idleMs < STUCK_MS;
+  $: isStuck = !queueBusy && !drainFresh && idleMs != null && idleMs >= STUCK_MS;
+  $: isSlow = !isStuck && !queueBusy && idleMs != null && idleMs >= SLOW_MS;
   $: clamped = Math.min(100, Math.max(0, Math.round(percent || 0)));
   // Queue formula matches "steps left". Phase is only used before the queue
   // is big enough; do not present that as a confident percent.
@@ -112,11 +119,12 @@
   $: barWidth = discovering ? Math.max(4, Math.min(12, clamped || 4)) : clamped;
 
   $: phaseKey = (phase || '').toLowerCase();
+  $: unitType = (currentUnit && currentUnit.type) || '';
 
   $: phaseLabel = (() => {
     if (phaseKey === 'files' || phaseKey === 'file') return 'Scanning files';
     if (phaseKey === 'database' || phaseKey === 'db') return 'Checking database';
-    if (phaseKey === 'integrity') return 'Checking integrity baseline';
+    if (phaseKey === 'integrity') return 'Checking core and package checksums';
     if (phaseKey === 'visit_census' || phaseKey === 'census') return 'Visit census';
     if (phaseKey === 'complete' || phaseKey === 'finalization' || phaseKey === 'finalize') {
       return 'Finishing up';
@@ -165,47 +173,25 @@
     return null;
   })();
 
-  /** Primary status line — activity first, not a flat % story */
-  $: primaryLine = (() => {
-    if (pauseReason === 'gateway_timeout' || pauseReason === 'network_error') {
-      return 'Host timed out answering (504). Scan progress is still on the server. Retrying automatically. You can also press Continue now.';
-    }
-    if (isStuck) {
-      return 'No new activity for a while. You can wait, or continue now.';
-    }
-    if (isPaused) {
-      return restrictedHost
-        ? 'Progress saved on this host. Next step starts automatically. Keep this tab open.'
-        : 'Progress saved. Continuing automatically. Keep this tab open.';
-    }
+  $: checksumish =
+    unitType === 'core_checksum' ||
+    unitType === 'package_checksum' ||
+    phaseKey === 'integrity';
+  $: dbish =
+    unitType === 'db_table_segment' ||
+    unitType === 'db_site_discovery' ||
+    phaseKey === 'database' ||
+    phaseKey === 'db' ||
+    filesSkipped;
+  $: filesish = !checksumish && !dbish;
 
-    // Prefer scope-aware copy over a stale default phase of "files".
-    let lead = phaseLabel;
-    if (filesSkipped && (phaseKey === 'files' || phaseKey === 'file' || !phaseKey)) {
-      lead = 'Checking database';
-    } else if (dbSkipped && (phaseKey === 'database' || phaseKey === 'db')) {
-      lead = 'Scanning files';
-    }
-    const parts = [lead];
-    if (phaseKey === 'database' || phaseKey === 'db' || filesSkipped) {
-      if (dbRowsScanned > 0) parts.push(`${dbRowsScanned.toLocaleString()} rows scanned`);
-    } else if (phaseKey === 'files' || phaseKey === 'file' || dbSkipped) {
-      if (filesScanned > 0) parts.push(`${filesScanned.toLocaleString()} files`);
-    } else if (filesScanned > 0) {
-      parts.push(`${filesScanned.toLocaleString()} files`);
-    }
-    if (dbSkipped) parts.push('DB skipped');
-    if (filesSkipped) parts.push('Files skipped');
-    if (malwareFound > 0) {
-      parts.push(`${malwareFound} signature match${malwareFound === 1 ? '' : 'es'}`);
-    } else if (integrityFound > 0) {
-      parts.push(`${integrityFound} integrity finding${integrityFound === 1 ? '' : 's'}`);
-    } else if (threatsFound > 0) {
-      parts.push(`${threatsFound} finding${threatsFound === 1 ? '' : 's'}`);
-    }
-    if (stepsHint) parts.push(stepsHint);
-    return parts.join(' · ');
-  })();
+  $: filesFlatHint =
+    isActive &&
+    !discovering &&
+    filesish === false &&
+    (pending || 0) > 8 &&
+    (filesScanned || 0) > 0 &&
+    (filesScanned || 0) < 80;
 
   $: lastActivityLabel = (() => {
     if (idleMs == null) return null;
@@ -218,7 +204,7 @@
   $: filesDisplay =
     filesScanned > 0 ? filesScanned.toLocaleString() : '—';
 
-  let detailsOpen = false;
+  let detailsOpen = true;
 
   function onContinue() {
     dispatch('continue');
@@ -266,13 +252,27 @@
   }
 
   $: currentCheck = (() => {
-    if (phaseKey === 'database' || phaseKey === 'db' || filesSkipped) {
-      const t = shortTable(lastDbTable);
+    if (unitType === 'core_checksum') return 'Checking WordPress core files';
+    if (unitType === 'package_checksum') {
+      return packageChecksumNote || 'Checking plugin and theme checksums';
+    }
+    if (unitType === 'file_discovery') {
+      const p = relativePath(currentUnit?.base_dir || lastFilePath);
+      return p ? `Finding files · ${p}` : 'Finding files to scan';
+    }
+    if (unitType === 'root_config') return 'Checking root config files';
+    if (unitType === 'visit_census') return 'Visit census';
+    if (unitType === 'finalization') return 'Finishing up';
+    if (unitType === 'db_site_discovery') return 'Finding site database tables';
+    if (unitType === 'db_table_segment' || phaseKey === 'database' || phaseKey === 'db' || filesSkipped) {
+      const t = shortTable((currentUnit && currentUnit.table) || lastDbTable);
       return t
         ? `Database · ${t}${lastDbId ? ' #' + lastDbId : ''}`
         : 'Checking database';
     }
-    if (phaseKey === 'integrity') return 'Core / package checksums';
+    if (phaseKey === 'integrity') {
+      return packageChecksumNote || 'Checking core and package checksums';
+    }
     if (lastFilePath) {
       const rel = relativePath(lastFilePath);
       const low = rel.toLowerCase();
@@ -283,18 +283,63 @@
       else if (low.includes('mu-plugins/')) kind = 'Must-use plugin';
       return `${kind} · ${rel}`;
     }
-    // Counters move even when last_file_path was wiped — show that so the
-    // panel does not look idle during Deep pause/resume slices.
     if ((phaseKey === 'files' || phaseKey === 'file' || !phaseKey) && filesScanned > 0) {
       return `Scanning files · ${Number(filesScanned).toLocaleString()} scanned`;
     }
     return phaseLabel;
   })();
 
+  /** Primary status line — activity first, not a flat % story */
+  $: primaryLine = (() => {
+    if (pauseReason === 'gateway_timeout' || pauseReason === 'network_error') {
+      return 'Host timed out answering (504). Scan progress is still on the server. Retrying automatically. You can also press Continue now.';
+    }
+    if (isStuck) {
+      return 'No new activity for a while. You can wait, or continue now.';
+    }
+    if (isPaused) {
+      return restrictedHost
+        ? 'Slice saved. Next step starts automatically. Keep this tab open.'
+        : 'Slice saved. Continuing automatically. Keep this tab open.';
+    }
+
+    let lead = currentCheck;
+    if (filesSkipped && (phaseKey === 'files' || phaseKey === 'file' || !phaseKey) && !unitType) {
+      lead = 'Checking database';
+    } else if (dbSkipped && (phaseKey === 'database' || phaseKey === 'db') && !unitType) {
+      lead = 'Scanning files';
+    }
+    const parts = [lead];
+    if (dbish && dbRowsScanned > 0) {
+      parts.push(`${dbRowsScanned.toLocaleString()} rows scanned`);
+    } else if (filesish && filesScanned > 0) {
+      parts.push(`${filesScanned.toLocaleString()} files`);
+    }
+    if (dbSkipped) parts.push('DB skipped');
+    if (filesSkipped) parts.push('Files skipped');
+    if (malwareFound > 0) {
+      parts.push(`${malwareFound} signature match${malwareFound === 1 ? '' : 'es'}`);
+    } else if (integrityFound > 0) {
+      parts.push(`${integrityFound} integrity finding${integrityFound === 1 ? '' : 's'}`);
+    } else if (threatsFound > 0) {
+      parts.push(`${threatsFound} finding${threatsFound === 1 ? '' : 's'}`);
+    }
+    if (stepsHint) parts.push(stepsHint);
+    return parts.join(' · ');
+  })();
+
   function formatPauseReason(reason) {
     if (!reason) return null;
-    if (reason === 'time_budget' || reason === 'time_limit' || reason === 'time_budget_exceeded') {
-      return 'Paused at host time limit (normal on shared hosting)';
+    if (
+      reason === 'time_budget' ||
+      reason === 'time_limit' ||
+      reason === 'time_budget_exceeded' ||
+      reason === 'nothing_claimable' ||
+      reason === 'in_flight_busy' ||
+      reason === 'deliberate_pause' ||
+      reason === 'scan_paused'
+    ) {
+      return 'Saved this slice. Next step starts automatically.';
     }
     if (reason === 'gateway_timeout' || reason === 'network_error') {
       return 'Host gateway timed out (504). Progress is kept. Retrying automatically.';
@@ -327,6 +372,9 @@
           {/if}
         </div>
         <p class="text-sm text-ink mt-1.5 leading-snug">{primaryLine}</p>
+        {#if queueBusy && !isPaused}
+          <p class="text-[11px] text-muted mt-1">A step is running now.</p>
+        {/if}
         {#if lastActivityLabel && !isStuck}
           <p class="text-[11px] text-faint mt-1">{lastActivityLabel}</p>
         {/if}
@@ -342,12 +390,19 @@
     </div>
 
     <!-- Progress bar (supporting) -->
-    <div class="h-1.5 bg-elevated rounded-full overflow-hidden mb-4">
+    <div class="h-1.5 bg-elevated rounded-full overflow-hidden mb-1">
       <div
         class="h-full transition-all duration-500 ease-out"
         style="width: {barWidth}%; background: {barColor};"
       ></div>
     </div>
+    {#if filesFlatHint}
+      <p class="text-[11px] text-faint mb-3 leading-snug">
+        File count is from this slice. Remaining steps include checksums and database work.
+      </p>
+    {:else}
+      <div class="mb-4"></div>
+    {/if}
 
     <!-- Live counters -->
     <div class="grid grid-cols-3 gap-3 mb-4">

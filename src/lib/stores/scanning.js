@@ -97,6 +97,8 @@ function createScanningStore() {
       last_db_table: null,
       last_db_id: null,
       package_checksum_note: null,
+      current_unit: null,
+      last_drain_activity_at: 0,
     },
     /**
      * Mid-scan findings preview (malware-first). Not the completed report.
@@ -746,7 +748,12 @@ function createScanningStore() {
             const integrityN = counters.integrity_violations ?? 0;
             const pendN = q.pending ?? 0;
             const doneN = q.completed ?? 0;
-            const activityKey = [filesN, dbN, thrN, pendN, doneN, status.status || ''].join('|');
+            const unitType = (q.current_unit && q.current_unit.type) || '';
+            const activityKey = [
+              filesN, dbN, thrN, pendN, doneN, status.status || '',
+              unitType, status.package_checksum_note || '', status.checksum_note || '',
+              q.running ?? 0, status.last_drain_activity_at || 0,
+            ].join('|');
             const nowMs = Date.now();
             if (activityKey !== lastCounterActivityKey) {
               lastCounterActivityKey = activityKey;
@@ -771,6 +778,8 @@ function createScanningStore() {
               last_db_table: status.last_db_table ?? null,
               last_db_id: status.last_db_id ?? null,
               package_checksum_note: status.package_checksum_note ?? null,
+              current_unit: q.current_unit ?? null,
+              last_drain_activity_at: status.last_drain_activity_at ?? 0,
             });
             if (status.status !== 'completed') {
               maybeFetchPreview(scanId, counters, status.status);
@@ -1078,7 +1087,12 @@ function createScanningStore() {
         const lastFile = progress.last_file_path ?? s.liveProgress?.last_file_path ?? '';
         const lastTable = progress.last_db_table ?? s.liveProgress?.last_db_table ?? '';
         const lastDbId = progress.last_db_id ?? s.liveProgress?.last_db_id ?? '';
-        const activityKey = [files, skipped, visited, dbRows, threats, items, pending, completed, lastFile, lastTable, lastDbId].join('|');
+        const unitType = (progress.current_unit && progress.current_unit.type)
+          || (s.liveProgress?.current_unit && s.liveProgress.current_unit.type)
+          || '';
+        const pkgNote = progress.package_checksum_note ?? s.liveProgress?.package_checksum_note ?? '';
+        const drainAt = progress.last_drain_activity_at ?? s.liveProgress?.last_drain_activity_at ?? 0;
+        const activityKey = [files, skipped, visited, dbRows, threats, items, pending, completed, lastFile, lastTable, lastDbId, unitType, pkgNote, drainAt].join('|');
         const prevKey = s.liveProgress?.activity_key || '';
         const now = Date.now();
         const activityChanged = activityKey !== prevKey;
@@ -1113,6 +1127,12 @@ function createScanningStore() {
             package_checksum_note: progress.package_checksum_note !== undefined
               ? progress.package_checksum_note
               : (s.liveProgress?.package_checksum_note ?? null),
+            current_unit: progress.current_unit !== undefined
+              ? progress.current_unit
+              : (s.liveProgress?.current_unit ?? null),
+            last_drain_activity_at: progress.last_drain_activity_at !== undefined
+              ? progress.last_drain_activity_at
+              : (s.liveProgress?.last_drain_activity_at ?? 0),
           },
         };
       });
@@ -1139,6 +1159,12 @@ function createScanningStore() {
           peak_files_scanned: 0,
           activity_key: '',
           last_activity_at: 0,
+          last_file_path: null,
+          last_db_table: null,
+          last_db_id: null,
+          package_checksum_note: null,
+          current_unit: null,
+          last_drain_activity_at: 0,
         },
         ...emptyPreviewState(),
       }));
@@ -1285,6 +1311,8 @@ function createScanningStore() {
               last_db_table: null,
               last_db_id: null,
               package_checksum_note: null,
+              current_unit: null,
+              last_drain_activity_at: 0,
             },
         // Phase 2.1 - reset most state for new scan, but preserve continuation state
         // when forceResume is true - the backend response will provide authoritative values
@@ -1745,6 +1773,8 @@ function createScanningStore() {
           last_db_table: status.last_db_table ?? s.liveProgress?.last_db_table ?? null,
           last_db_id: status.last_db_id ?? s.liveProgress?.last_db_id ?? null,
           package_checksum_note: status.package_checksum_note ?? s.liveProgress?.package_checksum_note ?? null,
+          current_unit: status.queue?.current_unit ?? s.liveProgress?.current_unit ?? null,
+          last_drain_activity_at: status.last_drain_activity_at ?? s.liveProgress?.last_drain_activity_at ?? 0,
         },
       }));
       persistPointer({

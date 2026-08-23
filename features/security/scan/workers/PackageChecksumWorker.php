@@ -43,6 +43,7 @@ final class CleanSweep_PackageChecksumWorker implements CleanSweep_Worker {
                 (int) (self::REUSE_TTL / 3600)
             );
             $ctx->mergeState([
+                'phase' => 'integrity',
                 'options' => array_merge($ctx->state()->options ?? [], [
                     'package_checksum_note' => $note,
                     'package_checksum_reused' => true,
@@ -61,6 +62,16 @@ final class CleanSweep_PackageChecksumWorker implements CleanSweep_Worker {
         $latest = $start === 0 ? [] : CleanSweep_PackageChecksums::load_latest();
         $findings = 0;
         $checked_pkgs = 0;
+        $ctx->mergeState([
+            'phase' => 'integrity',
+            'options' => array_merge($ctx->state()->options ?? [], [
+                'package_checksum_note' => sprintf(
+                    'Package checksums: checking %d/%d packages',
+                    min($start + 1, count($all)),
+                    count($all)
+                ),
+            ]),
+        ]);
 
         foreach ($slice as $pkg) {
             if ($ctx->shouldStop()) {
