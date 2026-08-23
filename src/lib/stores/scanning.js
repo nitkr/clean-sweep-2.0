@@ -1211,9 +1211,14 @@ function createScanningStore() {
     /**
      * Start malware scan using profile-based scanning (new architecture)
      * @param forceResume - If true, signals backend to use existing checkpoint for resuming
+     * @param opts.freshScan - Clear this profile's file-hash cache and rescan every file
      */
-    async startScan(forceResume = false) {
-      console.log('🔍 [SCANNING] startScan() called, forceResume:', forceResume);
+    async startScan(forceResume = false, opts = {}) {
+      if (forceResume && typeof forceResume === 'object' && forceResume.type) {
+        forceResume = false;
+      }
+      const freshScan = !!(opts && opts.freshScan) && !forceResume;
+      console.log('🔍 [SCANNING] startScan() called, forceResume:', forceResume, 'freshScan:', freshScan);
       let state;
       subscribe(s => state = s)();
 
@@ -1248,7 +1253,9 @@ function createScanningStore() {
         progressHighWater: isResuming ? (s.progressHighWater || 0) : 0,
         progressSource: isResuming ? (s.progressSource || '') : '',
         progressStatus: 'running',
-        progressMessage: isResuming ? 'Resuming scan...' : 'Preparing scan (first files)...',
+        progressMessage: isResuming
+          ? 'Resuming scan...'
+          : (freshScan ? 'Full file rescan (hash cache cleared)…' : 'Preparing scan (first files)...'),
         startTime: Date.now(),
         expandedThreats: [],
         // Reset live counters so the new scan starts at 0. The next poll
@@ -1316,11 +1323,15 @@ function createScanningStore() {
             customConfig.folder_path = state.scanFolder;
           }
         }
+        if (!isResuming && freshScan) {
+          customConfig.fresh_scan = true;
+        }
 
         console.log('🔍 [SCANNING] Starting profile scan', {
           profileId,
           deepScope: customConfig.scan_scope || null,
           forceResume: isResuming,
+          freshScan,
           existingScanId: state.scanId,
         });
 

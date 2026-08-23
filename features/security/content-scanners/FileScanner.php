@@ -327,7 +327,8 @@ class CleanSweep_FileScanner {
                     }
                     if (class_exists('CleanSweep_PackageChecksums', false) || is_readable(dirname(__DIR__) . '/scan/PackageChecksums.php')) {
                         require_once dirname(__DIR__) . '/scan/PackageChecksums.php';
-                        if (CleanSweep_PackageChecksums::should_skip_signature_scan($path)) {
+                        $fresh = $this->context && $this->context->state() && $this->context->state()->isFreshScan();
+                        if (!$fresh && CleanSweep_PackageChecksums::should_skip_signature_scan($path)) {
                             continue;
                         }
                     }

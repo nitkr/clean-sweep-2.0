@@ -74,6 +74,10 @@ final class CleanSweep_ScanState {
     /** @var array */
     public array $options = [];
 
+    public function isFreshScan(): bool {
+        return !empty($this->options['fresh_scan']);
+    }
+
     // --- Integrity baseline ---
     public bool $has_integrity_baseline = false;
     /** @var array|null Integrity baseline metadata */

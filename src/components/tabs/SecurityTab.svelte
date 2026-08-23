@@ -11,6 +11,7 @@
   import ScanProgressCard from '../common/ScanProgressCard.svelte';
   import VulnResultsList from '../common/VulnResultsList.svelte';
   import MalwareResultsList from '../common/MalwareResultsList.svelte';
+  import ConfirmDialog from '../common/ConfirmDialog.svelte';
   import { Button } from 'bits-ui';
 
   /** @type {'hub' | 'malware' | 'vulnerabilities'} */
@@ -21,6 +22,7 @@
   /** Deep-only scope: full | files | database | paths */
   let deepScope = $state('full');
   let scanFolder = $state('');
+  let confirmFreshScan = $state(false);
   let lastProgressAt = $state(Date.now());
   let nowTick = $state(Date.now());
   /** Remember last malware finish time for hub card status */
@@ -375,7 +377,7 @@
     scanning.setScanFolder(scanFolder);
   }
 
-  function startScan(forceResume = false) {
+  function startScan(forceResume = false, opts = {}) {
     if (forceResume && typeof forceResume === 'object' && forceResume.type) {
       forceResume = false;
     }
@@ -397,7 +399,12 @@
       scanning.setScanFolder('');
     }
     lastProgressAt = Date.now();
-    scanning.startScan(forceResume);
+    scanning.startScan(forceResume, opts);
+  }
+
+  function startFreshScan() {
+    confirmFreshScan = false;
+    startScan(false, { freshScan: true });
   }
 
   function startVulnScan() {
@@ -874,6 +881,15 @@
               {/if}
             </Button.Root>
             {#if !$scanning.scanning}
+              {#if !(selectedProfile === 'deep' && deepScope === 'database')}
+                <button
+                  type="button"
+                  onclick={() => { confirmFreshScan = true; }}
+                  class="text-xs text-muted hover:text-ink underline-offset-2 hover:underline"
+                >
+                  Scan all files again
+                </button>
+              {/if}
               <button
                 type="button"
                 onclick={() => openView('vulnerabilities')}
@@ -1258,3 +1274,16 @@
     {/if}
   </div>
 </div>
+
+{#if confirmFreshScan}
+  <ConfirmDialog
+    open={true}
+    title="Scan all files again?"
+    message={"This ignores the saved file-hash cache and re-checks every file in this scan’s scope. It takes longer than a normal Start. Previous reports are kept."}
+    confirmLabel="Scan all files again"
+    cancelLabel="Cancel"
+    variant="primary"
+    onConfirm={startFreshScan}
+    onCancel={() => { confirmFreshScan = false; }}
+  />
+{/if}

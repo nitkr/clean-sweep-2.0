@@ -75,7 +75,7 @@ final class CleanSweep_FileDiscoveryWorker implements CleanSweep_Worker {
                 if ($item->isLink() && !CleanSweep_SitePaths::accept_scan_target($path, $seen_reals)) {
                     continue;
                 }
-                if (CleanSweep_PackageChecksums::should_skip_signature_scan($path)) {
+                if (!$state->isFreshScan() && CleanSweep_PackageChecksums::should_skip_signature_scan($path)) {
                     continue;
                 }
                 if (!$profile->is_excluded($path) && $profile->should_scan_file($path)) {

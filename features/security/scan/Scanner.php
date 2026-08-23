@@ -179,11 +179,24 @@ final class CleanSweep_Scanner {
             'differential' => $this->profile->get_enable_differential_scan(),
             'cpu_preset' => $this->profile->get_cpu_governor_preset(),
         ]);
+        $fresh_scan = !empty($config['fresh_scan']);
+        if ($fresh_scan && $want_files) {
+            require_once dirname(__DIR__) . '/DifferentialScanner.php';
+            $diff = new CleanSweep_DifferentialScanner(null, false);
+            $diff->set_profile_id($this->profile->get_profile_id());
+            $cleared = $diff->clear_hashes();
+            clean_sweep_log_message(
+                "CleanSweep_Scanner: fresh scan cleared file-hash cache for {$profile_id}" .
+                ($cleared ? '' : ' (already empty)'),
+                'info'
+            );
+        }
+
         $this->checkpoint->save($state);
 
         // Seed hash-skipped file hits from prior completed/cancelled/failed
         // scans so live preview is not empty while this run walks new files.
-        if ($want_files && $this->profile->get_enable_differential_scan()) {
+        if ($want_files && $this->profile->get_enable_differential_scan() && !$fresh_scan) {
             require_once __DIR__ . '/FileThreatCarry.php';
             $seed = CleanSweep_FileThreatCarry::apply($state, false);
             if (!empty($seed['carried'])) {
@@ -208,6 +221,7 @@ final class CleanSweep_Scanner {
         clean_sweep_log_message(
             "CleanSweep_Scanner: started scan {$scan_id} (profile={$profile_id}, scope={$scope}" .
             ($coerced ? ', coerced_from_folder=1' : '') .
+            ($fresh_scan ? ', fresh_scan=1' : '') .
             ', seeds=' . count($config['resolved_seeds'] ?? []) .
             ', want_db=' . ($want_db ? 'yes' : 'no') .
             ', restricted=' . ($this->host->isSharedHosting() ? 'yes' : 'no') .
@@ -376,6 +390,7 @@ final class CleanSweep_Scanner {
             'environment_advisory' => $options['environment_advisory'] ?? null,
             'restricted_host' => !empty($options['restricted_host']),
             'scan_scope' => $options['scan_scope'] ?? 'full',
+            'fresh_scan' => !empty($options['fresh_scan']),
             'folder_path' => $options['folder_path'] ?? null,
             'folder_paths' => $options['folder_paths'] ?? null,
             'folder_path_display' => $options['folder_path_display'] ?? null,
@@ -1119,6 +1134,11 @@ final class CleanSweep_Scanner {
         } else {
             $config['include_db'] = false;
         }
+        if (array_key_exists('fresh_scan', $config)) {
+            $config['fresh_scan'] = self::toBool($config['fresh_scan']);
+        } else {
+            $config['fresh_scan'] = false;
+        }
 
         if (isset($config['folder_paths']) && is_string($config['folder_paths'])) {
             $decoded = json_decode($config['folder_paths'], true);
@@ -1197,7 +1217,10 @@ final class CleanSweep_Scanner {
             $this->queue->enqueue(CleanSweep_ScanWorkUnit::create(
                 $scan_id,
                 CleanSweep_ScanWorkUnit::TYPE_PACKAGE_CHECKSUM,
-                ['start' => 0],
+                [
+                    'start' => 0,
+                    'force' => !empty($config['fresh_scan']),
+                ],
                 120
             ));
         }

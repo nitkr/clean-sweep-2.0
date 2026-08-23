@@ -31,6 +31,9 @@ final class CleanSweep_FileThreatCarry {
         if (array_key_exists('want_files', $opts) && empty($opts['want_files'])) {
             return $empty;
         }
+        if (!empty($opts['fresh_scan'])) {
+            return $empty;
+        }
         if ($require_skips && (int) $state->files_skipped_unchanged <= 0) {
             return $empty;
         }
