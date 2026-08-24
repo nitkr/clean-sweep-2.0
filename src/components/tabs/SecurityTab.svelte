@@ -11,6 +11,7 @@
   import ScanProgressCard from '../common/ScanProgressCard.svelte';
   import VulnResultsList from '../common/VulnResultsList.svelte';
   import MalwareResultsList from '../common/MalwareResultsList.svelte';
+  import ConfirmDialog from '../common/ConfirmDialog.svelte';
   import { Button } from 'bits-ui';
 
   /** @type {'hub' | 'malware' | 'vulnerabilities'} */
@@ -21,6 +22,7 @@
   /** Deep-only scope: full | files | database | paths */
   let deepScope = $state('full');
   let scanFolder = $state('');
+  let confirmFreshScan = $state(false);
   let lastProgressAt = $state(Date.now());
   let nowTick = $state(Date.now());
   /** Remember last malware finish time for hub card status */
@@ -37,7 +39,7 @@
     { id: 'full', label: 'Full scan', desc: 'Files + database (default Deep)' },
     { id: 'files', label: 'Files only', desc: 'Skip database' },
     { id: 'database', label: 'Database only', desc: 'Skip filesystem walk' },
-    { id: 'paths', label: 'Specific paths', desc: 'Files under chosen path(s); DB off' },
+    { id: 'paths', label: 'Specific paths', desc: 'Any path under the WordPress site; DB off' },
   ];
 
   /**
@@ -110,7 +112,11 @@
 
   let scanIdleMs = $derived.by(() => {
     if (!$scanning.scanning) return null;
-    const at = $scanning.liveProgress?.last_activity_at || lastProgressAt || Date.now();
+    const act = $scanning.liveProgress?.last_activity_at || 0;
+    const drainSec = Number($scanning.liveProgress?.last_drain_activity_at) || 0;
+    const drainMs = drainSec > 0 ? drainSec * 1000 : 0;
+    const at = Math.max(act, drainMs, lastProgressAt || 0);
+    if (!at) return 0;
     return Math.max(0, nowTick - at);
   });
 
@@ -155,6 +161,23 @@
       0;
     return Math.max(live, peak, final || 0);
   });
+  let filesSkippedUnchanged = $derived(
+    Number($scanning.results?.summary?.files_skipped_unchanged)
+      || Number($scanning.liveProgress?.files_skipped_unchanged)
+      || Number($scanning.results?.file_carry?.files_skipped_unchanged)
+      || 0
+  );
+  let filesCarried = $derived(
+    Number($scanning.results?.summary?.carried_forward)
+      || Number($scanning.results?.file_carry?.carried)
+      || ($scanning.results?.threats || []).filter((t) => t?.carried_forward).length
+      || 0
+  );
+  let filesCarriedFrom = $derived(
+    $scanning.results?.summary?.carried_from_profile
+      || $scanning.results?.file_carry?.from_profile
+      || null
+  );
   let filesPhaseComplete = $derived.by(() => {
     const phase = ($scanning.liveProgress?.phase || '').toLowerCase();
     return (
@@ -173,6 +196,27 @@
     $scanning.liveProgress?.threats_found,
     $scanning.results?.summary?.total_threats
   ));
+  let liveMalwareCount = $derived(Number($scanning.liveProgress?.malware_threats) || 0);
+  let liveIntegrityCount = $derived(
+    Number($scanning.liveProgress?.integrity_violations) ||
+      Number($scanning.integrityViolations) ||
+      0
+  );
+  let previewMalwareList = $derived($scanning.previewThreats || []);
+  let previewIntegrityList = $derived($scanning.previewIntegrityThreats || []);
+  let previewAll = $derived(previewIntegrityList.concat(previewMalwareList));
+  /** List is source of truth once any cards exist; live counter only before the first page. */
+  let signatureDisplayCount = $derived(
+    previewMalwareList.length > 0 ? previewMalwareList.length : liveMalwareCount
+  );
+  let showPreviewPanel = $derived(
+    !!$scanning.scanning ||
+      (!!$scanning.previewPartial &&
+        !$scanning.results &&
+        (previewAll.length > 0 ||
+          !!$scanning.previewReportFailed ||
+          !!$scanning.previewStoppedReason))
+  );
   let malwareThreatCount = $derived(
     $scanning.results?.summary?.malware_threats
       ?? ($scanning.results?.malware_threats?.length)
@@ -187,13 +231,16 @@
       ?? 0
   );
   let integrityThreatCount = $derived(
-    Math.max(
-      Number($scanning.checksumFindings) || 0,
-      Number($scanning.integrityViolations) || 0,
-      Number($scanning.results?.summary?.integrity_violations) || 0,
-      Number($scanning.results?.integrity_violations_list?.length) || 0,
-      ($scanning.results?.threats || []).filter((t) => t?.checksum || t?.source === 'integrity').length
-    )
+    $scanning.results
+      ? Math.max(
+          Number($scanning.results?.summary?.integrity_violations) || 0,
+          Number($scanning.results?.integrity_violations_list?.length) || 0,
+          ($scanning.results?.threats || []).filter((t) => t?.checksum || t?.source === 'integrity').length
+        )
+      : Math.max(
+          Number($scanning.integrityViolations) || 0,
+          liveIntegrityCount
+        )
   );
 
   function scrollToResults(id) {
@@ -222,11 +269,17 @@
             : 'Scanning';
       const db = $scanning.liveProgress?.db_rows_scanned || 0;
       const files = totalFilesScanned || 0;
-      const detail =
-        db > 0 ? `${db.toLocaleString()} rows` : files > 0 ? `${files.toLocaleString()} files` : '';
+      const found = signatureDisplayCount;
+      const detail = found > 0
+        ? `${found} found so far`
+        : db > 0
+          ? `${db.toLocaleString()} rows`
+          : files > 0
+            ? `${files.toLocaleString()} files`
+            : '';
       return {
         label: detail ? `${st} · ${detail}` : st,
-        color: 'emerald',
+        color: found > 0 ? 'red' : 'emerald',
         live: true,
       };
     }
@@ -328,13 +381,13 @@
     scanning.setScanFolder(scanFolder);
   }
 
-  function startScan(forceResume = false) {
+  function startScan(forceResume = false, opts = {}) {
     if (forceResume && typeof forceResume === 'object' && forceResume.type) {
       forceResume = false;
     }
     if (!forceResume && selectedProfile === 'deep' && deepScope === 'paths' && !String(scanFolder || '').trim()) {
       errors.add({
-        message: 'Enter a path under the WordPress site (e.g. wp-content/plugins/).',
+        message: 'Enter a path under the WordPress site (e.g. wp-admin/, wp-includes/, wp-content/plugins/).',
         code: 'INVALID_FOLDER_PATH',
       });
       return;
@@ -350,7 +403,12 @@
       scanning.setScanFolder('');
     }
     lastProgressAt = Date.now();
-    scanning.startScan(forceResume);
+    scanning.startScan(forceResume, opts);
+  }
+
+  function startFreshScan() {
+    confirmFreshScan = false;
+    startScan(false, { freshScan: true });
   }
 
   function startVulnScan() {
@@ -636,10 +694,32 @@
         <div class="p-3 bg-panel border border-line rounded-xl">
           <div class="text-[10px] text-muted mb-0.5">Files</div>
           <div class="text-lg font-bold text-ink">{totalFilesScanned > 0 ? totalFilesScanned.toLocaleString() : '—'}</div>
+          {#if filesSkippedUnchanged > 0}
+            <div class="text-[10px] text-faint mt-0.5">{filesSkippedUnchanged.toLocaleString()} unchanged</div>
+          {/if}
         </div>
         <div class="p-3 bg-panel border border-line rounded-xl">
-          <div class="text-[10px] text-muted mb-0.5">Threats</div>
-          <div class="text-lg font-bold {totalThreats > 0 ? 'text-red-700 dark:text-red-400' : 'text-ink'}">{totalThreats || '—'}</div>
+          <div class="text-[10px] text-muted mb-0.5">
+            {$scanning.scanning && signatureDisplayCount === 0 && liveIntegrityCount > 0
+              ? 'Integrity'
+              : 'Signatures'}
+          </div>
+          <div class="text-lg font-bold {(signatureDisplayCount || malwareThreatCount || liveIntegrityCount) > 0 ? 'text-red-700 dark:text-red-400' : 'text-ink'}">
+            {$scanning.scanning
+              ? (signatureDisplayCount || liveIntegrityCount || '—')
+              : (malwareThreatCount || '—')}
+          </div>
+          {#if $scanning.scanning && (signatureDisplayCount > 0 || liveIntegrityCount > 0)}
+            <div class="text-[10px] text-faint mt-0.5">
+              {#if signatureDisplayCount > 0 && liveIntegrityCount > 0}
+                {signatureDisplayCount} loaded · {liveIntegrityCount} integrity
+              {:else if liveIntegrityCount > 0}
+                {liveIntegrityCount} verification finding{liveIntegrityCount === 1 ? '' : 's'}
+              {:else}
+                so far
+              {/if}
+            </div>
+          {/if}
         </div>
         <div class="p-3 bg-panel border border-line rounded-xl col-span-2 sm:col-span-1">
           <div class="text-[10px] text-muted mb-0.5">Status</div>
@@ -657,6 +737,7 @@
         </div>
       </div>
 
+      {#if !$scanning.scanning}
       <!-- Profile + run -->
       <div class="bg-panel border border-line rounded-xl overflow-hidden mb-6">
         <div class="px-5 py-4 border-b border-line">
@@ -761,17 +842,18 @@
               </div>
               {#if deepScope === 'paths'}
                 <div>
-                  <label class="block text-xs text-muted mb-2">Path under the WordPress site</label>
+                  <label class="block text-xs text-muted mb-2" for="deep-scan-path">Path under the WordPress site</label>
                   <input
+                    id="deep-scan-path"
                     type="text"
                     value={scanFolder}
                     oninput={handleScanFolderChange}
-                    placeholder="e.g., wp-content/plugins/my-plugin/"
+                    placeholder="e.g. wp-admin/, wp-includes/, wp-content/plugins/my-plugin/"
                     disabled={$scanning.scanning}
                     class="w-full px-3 py-2 bg-elevated border border-line rounded-md text-sm text-ink placeholder-zinc-600 focus:outline-none focus:border-primary/50 disabled:opacity-50"
                   />
                   <p class="text-[10px] text-faint mt-1.5">
-                    Files only under this path. Database is skipped unless you use the API <code class="text-ink/80">include_db</code> flag.
+                    Any folder or file under the site root (not only wp-content). Relative to the WordPress install, or an absolute path. Database is skipped unless you use the API <code class="text-ink/80">include_db</code> flag.
                   </p>
                 </div>
               {/if}
@@ -803,6 +885,15 @@
               {/if}
             </Button.Root>
             {#if !$scanning.scanning}
+              {#if !(selectedProfile === 'deep' && deepScope === 'database')}
+                <button
+                  type="button"
+                  onclick={() => { confirmFreshScan = true; }}
+                  class="text-xs text-muted hover:text-ink underline-offset-2 hover:underline"
+                >
+                  Scan all files again
+                </button>
+              {/if}
               <button
                 type="button"
                 onclick={() => openView('vulnerabilities')}
@@ -814,6 +905,7 @@
           </div>
         </div>
       </div>
+      {/if}
 
       {#if $scanning.scanning}
         <ScanProgressCard
@@ -827,6 +919,8 @@
           filesComplete={filesPhaseComplete}
           dbRowsScanned={totalRecordsScanned}
           threatsFound={totalThreats}
+          malwareFound={signatureDisplayCount}
+          integrityFound={liveIntegrityCount}
           dbSkipped={($scanning.profileId === 'deep' || selectedProfile === 'deep') && (($scanning.deepScope || deepScope) === 'files' || ($scanning.deepScope || deepScope) === 'paths')}
           filesSkipped={($scanning.profileId === 'deep' || selectedProfile === 'deep') && ($scanning.deepScope || deepScope) === 'database'}
           pending={$scanning.workQueueStats?.pending ?? $scanning.pendingWorkCount ?? 0}
@@ -844,9 +938,95 @@
           checksumChecked={$scanning.checksumChecked || 0}
           checksumVersion={$scanning.checksumVersion}
           packageChecksumNote={$scanning.liveProgress?.package_checksum_note}
+          currentUnit={$scanning.liveProgress?.current_unit || $scanning.workQueueStats?.current_unit}
+          lastDrainActivityAt={$scanning.liveProgress?.last_drain_activity_at || 0}
           on:continue={resumeScan}
           on:cancel={() => scanning.cancelScan()}
         />
+      {/if}
+
+      {#if showPreviewPanel}
+        {@const previewChip = $scanning.scanning
+          ? { text: 'Preview · scan still running', class: 'bg-sky-500/10 text-sky-800 dark:text-sky-300 border-sky-500/30' }
+          : $scanning.previewReportFailed
+            ? { text: 'Preview · full report failed', class: 'bg-amber-500/10 text-amber-900 dark:text-amber-200 border-amber-500/30' }
+            : $scanning.previewStoppedReason === 'cancelled'
+              ? { text: 'Preview · scan cancelled', class: 'bg-zinc-500/10 text-muted border-line' }
+              : $scanning.previewStoppedReason === 'failed' || $scanning.previewStoppedReason === 'lost'
+                ? { text: 'Preview · scan did not finish', class: 'bg-amber-500/10 text-amber-900 dark:text-amber-200 border-amber-500/30' }
+                : { text: 'Preview · incomplete', class: 'bg-sky-500/10 text-sky-800 dark:text-sky-300 border-sky-500/30' }}
+        <div class="space-y-3 mb-6">
+          <div class="flex items-start justify-between gap-3 flex-wrap">
+            <div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <h2 class="text-sm font-semibold text-ink">Findings so far</h2>
+                <span class="text-[10px] px-2 py-0.5 rounded-full border font-medium {previewChip.class}">
+                  {previewChip.text}
+                </span>
+              </div>
+              <p class="text-[11px] text-muted mt-1 leading-relaxed">
+                {#if $scanning.previewReportFailed}
+                  The scan finished but the full report could not be loaded. You can still inspect the findings below.
+                {:else if signatureDisplayCount > 0}
+                  {signatureDisplayCount} signature match{signatureDisplayCount === 1 ? '' : 'es'}
+                  {#if $scanning.previewCapped}
+                    (first {previewMalwareList.length}; more when the scan finishes)
+                  {/if}
+                  {#if liveIntegrityCount > 0}
+                    · {liveIntegrityCount} integrity
+                    {#if previewIntegrityList.length && previewIntegrityList.length < liveIntegrityCount}
+                      (showing {previewIntegrityList.length})
+                    {/if}
+                  {/if}
+                {:else if liveIntegrityCount > 0}
+                  {liveIntegrityCount} verification finding{liveIntegrityCount === 1 ? '' : 's'} so far.
+                  {#if previewIntegrityList.length}
+                    Showing {previewIntegrityList.length} to inspect now.
+                  {:else}
+                    A sample appears here as soon as it is written.
+                  {/if}
+                {:else if $scanning.scanning && filesSkippedUnchanged > 0}
+                  Unchanged files are not re-scanned. Previous file matches are applied when this scan finishes.
+                {:else if $scanning.scanning}
+                  No signature matches yet. This is not a clean bill of health — the scan is still running.
+                {:else}
+                  No signature matches were collected before the scan stopped.
+                {/if}
+              </p>
+            </div>
+          </div>
+
+          {#if $scanning.previewError && !previewAll.length}
+            <div class="p-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-xs text-amber-900 dark:text-amber-200">
+              {$scanning.previewError}
+            </div>
+          {/if}
+
+          {#if ($scanning.previewLoading || (signatureDisplayCount > 0 && !previewAll.length && $scanning.scanning && !$scanning.previewError)) && !previewAll.length}
+            <div class="p-3 rounded-xl border border-line bg-panel text-xs text-muted">
+              Loading findings…
+            </div>
+          {:else if previewAll.length}
+            {#if $scanning.previewCapped}
+              <p class="text-[11px] text-faint">
+                Showing the first {previewMalwareList.length} signature matches. The rest appear when the scan finishes.
+              </p>
+            {/if}
+            {#if previewIntegrityList.length && liveIntegrityCount > previewIntegrityList.length}
+              <p class="text-[11px] text-faint">
+                Integrity sample: {previewIntegrityList.length} of {liveIntegrityCount}. Full verification list when the scan finishes.
+              </p>
+            {/if}
+            <MalwareResultsList
+              threats={previewAll}
+              selectedThreatId={$scanning.selectedThreat?.id || null}
+              onSelect={handleThreatClick}
+              preview={true}
+              hasIntegrityBaseline={false}
+              likelySource={null}
+            />
+          {/if}
+        </div>
       {/if}
 
       {#if $scanning.results && !$scanning.scanning}
@@ -855,6 +1035,9 @@
             <button type="button" onclick={() => scrollToResults('results-files')} class="bg-panel border border-line rounded-xl p-4 text-center hover:border-primary/40 transition-colors">
               <div class="text-2xl font-bold text-primary">{totalFilesScanned.toLocaleString()}</div>
               <div class="text-xs text-muted">Files</div>
+              {#if filesSkippedUnchanged > 0}
+                <div class="text-[10px] text-faint mt-1">{filesSkippedUnchanged.toLocaleString()} unchanged</div>
+              {/if}
             </button>
             <button type="button" onclick={() => scrollToResults('results-database')} class="bg-panel border border-line rounded-xl p-4 text-center hover:border-amber-500/40 transition-colors">
               <div class="text-2xl font-bold text-amber-700 dark:text-amber-400">{totalRecordsScanned.toLocaleString()}</div>
@@ -882,16 +1065,34 @@
             {:else if $scanning.resultsScope === 'database'}
               · <span class="text-faint">Files skipped</span>
             {/if}
-            · {totalFilesScanned.toLocaleString()} files
+            · {totalFilesScanned.toLocaleString()} files scanned
+            {#if filesSkippedUnchanged > 0}
+              · <span class="text-faint">{filesSkippedUnchanged.toLocaleString()} unchanged (not re-scanned)</span>
+            {/if}
             · {totalRecordsScanned.toLocaleString()} DB rows
             · {scanDurationLabel}
             · <span class={malwareThreatCount > 0 ? 'text-red-700 dark:text-red-300' : 'text-emerald-700 dark:text-emerald-300'}>
               {malwareThreatCount} signature match{malwareThreatCount === 1 ? '' : 'es'}
             </span>
+            {#if filesCarried > 0}
+              · <span class="text-ink">{filesCarried} carried from last {filesCarriedFrom === 'deep' ? 'Deep' : filesCarriedFrom === 'standard' ? 'Standard' : filesCarriedFrom === 'quick' ? 'Quick' : 'scan'} (unchanged)</span>
+            {/if}
             {#if integrityThreatCount > 0}
               · <span class="text-violet-800 dark:text-violet-300">{integrityThreatCount} integrity</span>
             {/if}
           </div>
+          {#if filesCarried > 0 || filesSkippedUnchanged > 0}
+            <div class="p-3 rounded-lg border border-sky-500/25 bg-sky-500/5 text-xs text-muted leading-relaxed">
+              Unchanged files were not signature-scanned again (same hash as the last
+              {filesCarriedFrom === 'deep' ? ' Deep' : filesCarriedFrom === 'standard' ? ' Standard' : ''}
+              scan).
+              {#if filesCarried > 0}
+                {filesCarried} file match{filesCarried === 1 ? '' : 'es'} from that scan {filesCarried === 1 ? 'is' : 'are'} still listed.
+              {:else}
+                No file signature hits were on those unchanged paths.
+              {/if}
+            </div>
+          {/if}
 
           <div class="p-3 rounded-lg border border-orange-500/20 bg-orange-500/5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
             <p class="text-xs text-muted">
@@ -935,7 +1136,9 @@
             checksumFindings={$scanning.checksumFindings || 0}
             checksumVersion={$scanning.checksumVersion}
             hasIntegrityBaseline={!!$scanning.hasIntegrityBaseline}
-            likelySource={$scanning.likelySource || $integrity.visitStatus?.likely_source}
+            likelySource={($scanning.likelySource?.reinfection || $scanning.likelySource?.core_changed)
+              ? $scanning.likelySource
+              : null}
           />
         </div>
       {/if}
@@ -1079,3 +1282,16 @@
     {/if}
   </div>
 </div>
+
+{#if confirmFreshScan}
+  <ConfirmDialog
+    open={true}
+    title="Scan all files again?"
+    message={"This ignores the saved file-hash cache and re-checks every file in this scan’s scope. It takes longer than a normal Start. Previous reports are kept."}
+    confirmLabel="Scan all files again"
+    cancelLabel="Cancel"
+    variant="primary"
+    onConfirm={startFreshScan}
+    onCancel={() => { confirmFreshScan = false; }}
+  />
+{/if}

@@ -587,12 +587,12 @@
             type="button"
             onclick={closeEditor}
             class="text-xs text-muted hover:text-ink flex items-center gap-1"
-            title={isThreatView ? 'Back to scan results' : 'Close file'}
+            title={isThreatView ? ($scanning.scanning ? 'Back to scan' : 'Back to scan results') : 'Close file'}
           >
             <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 18L18 6M6 6l12 12"/>
             </svg>
-            {isThreatView ? 'Back to results' : 'Close'}
+            {isThreatView ? ($scanning.scanning ? 'Back to scan' : 'Back to results') : 'Close'}
           </button>
           {#if editorMode === 'file' && !isThreatView}
             <button
@@ -609,6 +609,30 @@
           {/if}
         </div>
       </div>
+
+      {#if isThreatView && ($scanning.scanning || $scanning.previewPartial)}
+        <div class="px-4 py-1.5 border-b border-line bg-emerald-500/10 text-[11px] flex items-center justify-between gap-3 flex-wrap">
+          <p class="text-emerald-900 dark:text-emerald-200 min-w-0 truncate">
+            {#if $scanning.scanning}
+              Scan still running
+              {#if ($scanning.previewThreats?.length || $scanning.liveProgress?.malware_threats)}
+                · {($scanning.previewThreats?.length || $scanning.liveProgress?.malware_threats)} signature match{($scanning.previewThreats?.length || $scanning.liveProgress?.malware_threats) === 1 ? '' : 'es'} so far
+              {/if}
+            {:else}
+              Preview findings. Scan is no longer running.
+            {/if}
+          </p>
+          <div class="flex items-center gap-2 flex-shrink-0">
+            <button
+              type="button"
+              onclick={closeEditor}
+              class="text-[11px] font-medium text-emerald-900 dark:text-emerald-100 hover:underline"
+            >
+              Back to scan
+            </button>
+          </div>
+        </div>
+      {/if}
 
       {#if editorError}
         <div class="px-4 py-2 bg-red-500/10 border-b border-red-500/30 text-xs text-red-700 dark:text-red-300">

@@ -769,12 +769,12 @@ class CleanSweep_FileBasedScanWorkQueue implements CleanSweep_ScanWorkQueueInter
         }
 
         $in_flight_path = $scan_dir . self::IN_FLIGHT_DIR;
+        $in_flight_files = [];
         if (is_dir($in_flight_path)) {
-            $in_flight_files = glob($in_flight_path . '/wu_*.json');
-            if (is_array($in_flight_files)) {
-                $stats['running'] = count($in_flight_files);
-            }
+            $in_flight_files = glob($in_flight_path . '/wu_*.json') ?: [];
+            $stats['running'] = count($in_flight_files);
         }
+        $stats['current_unit'] = $this->peek_current_unit($in_flight_files);
 
         $meta = $this->load_meta_raw($scan_id);
         $counters = is_array($meta['counters'] ?? null) ? $meta['counters'] : [];
@@ -819,6 +819,44 @@ class CleanSweep_FileBasedScanWorkQueue implements CleanSweep_ScanWorkQueueInter
         $stats['in_progress'] = $stats['running'] + $stats['claimed'];
 
         return $stats;
+    }
+
+    /**
+     * Cheap UI peek: type + a few payload fields from one in-flight unit.
+     * One JSON read per status poll; glob already listed in_flight/.
+     *
+     * @param array $in_flight_files Absolute paths from glob()
+     * @return array{type:string,table:?string,base_dir:?string,start:?int,phase:?string}|null
+     */
+    private function peek_current_unit(array $in_flight_files): ?array {
+        if ($in_flight_files === []) {
+            return null;
+        }
+        $raw = @file_get_contents($in_flight_files[0]);
+        if (!is_string($raw) || $raw === '') {
+            return null;
+        }
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) {
+            return null;
+        }
+        $type = (string) ($decoded['type'] ?? '');
+        if ($type === '') {
+            return null;
+        }
+        $payload = is_array($decoded['payload'] ?? null) ? $decoded['payload'] : [];
+        $base = $payload['base_dir'] ?? $payload['start_path'] ?? null;
+        if (is_string($base) && strlen($base) > 240) {
+            $base = substr($base, -240);
+        }
+        $unit_phase = isset($payload['phase']) ? (string) $payload['phase'] : '';
+        return [
+            'type' => $type,
+            'table' => isset($payload['table']) ? (string) $payload['table'] : null,
+            'base_dir' => is_string($base) && $base !== '' ? $base : null,
+            'start' => isset($payload['start']) ? (int) $payload['start'] : null,
+            'phase' => $unit_phase !== '' ? $unit_phase : null,
+        ];
     }
 
     /**

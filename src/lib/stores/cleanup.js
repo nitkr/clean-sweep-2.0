@@ -66,7 +66,7 @@ function createCleanupStore() {
             ...s,
             cleaningUp: false,
             error: needSnap
-              ? 'Download a snapshot first (button above), or confirm “delete without snapshot”.'
+              ? 'Download a snapshot of this visit first (button above), or confirm “delete without snapshot”. Comparing an older snapshot is not enough.'
               : msg,
             cleanupMessage: 'Failed'
           }));

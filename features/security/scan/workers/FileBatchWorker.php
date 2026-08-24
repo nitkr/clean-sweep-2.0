@@ -140,13 +140,29 @@ final class CleanSweep_FileBatchWorker implements CleanSweep_Worker {
         );
 
         $start_time = time();
-        $batcher->start_batch();
-        // Scope the stream to this work unit's directory. Without base_dir,
-        // every batch re-walked the whole WP_CONTENT tree (CleanSweep_Scanner v2 bug).
-        // max_files = count so large directories can continue via moreWork.
-        $result = $file_scanner->scan_streaming($base_dir, $count > 0 ? $count : 0);
-        $file_scanner->clear_discovered_subdirs(); // expansion driven by FILE_DISCOVERY units
-        $batcher->end_batch($result['total_files_scanned']);
+        $explicit = $payload['explicit_files'] ?? [];
+        if (is_array($explicit) && $explicit !== []) {
+            $batcher->start_batch();
+            $sig = $file_scanner->scan_explicit_paths($explicit);
+            $scanned = (int) ($sig['scanned'] ?? 0);
+            $result = [
+                'total_files_scanned' => $scanned,
+                'files_visited' => $scanned,
+                'files_skipped_unchanged' => 0,
+                'scanned_paths' => $explicit,
+                'file_threats_found' => count($sig['threats'] ?? []),
+            ];
+            $file_scanner->clear_discovered_subdirs();
+            $batcher->end_batch($scanned);
+        } else {
+            $batcher->start_batch();
+            // Scope the stream to this work unit's directory. Without base_dir,
+            // every batch re-walked the whole WP_CONTENT tree (CleanSweep_Scanner v2 bug).
+            // max_files = count so large directories can continue via moreWork.
+            $result = $file_scanner->scan_streaming($base_dir, $count > 0 ? $count : 0);
+            $file_scanner->clear_discovered_subdirs(); // expansion driven by FILE_DISCOVERY units
+            $batcher->end_batch($result['total_files_scanned']);
+        }
 
         // Flush any threats still buffered in the collector to the CleanSweep_ThreatStore
         $collector->flush();
@@ -158,6 +174,18 @@ final class CleanSweep_FileBatchWorker implements CleanSweep_Worker {
 
         // Persist cumulative counters (sole owner).
         $ctx->incrementCounter('files_scanned', (int)$result['total_files_scanned']);
+        $visited = (int)($result['files_visited'] ?? $result['total_files_scanned'] ?? 0);
+        $skipped = (int)($result['files_skipped_unchanged'] ?? 0);
+        if ($visited > 0) {
+            $ctx->incrementCounter('files_visited', $visited);
+        }
+        if ($skipped > 0) {
+            $ctx->incrementCounter('files_skipped_unchanged', $skipped);
+        }
+        if (!empty($result['scanned_paths']) && is_array($result['scanned_paths'])) {
+            require_once dirname(__DIR__) . '/ScannedPathStore.php';
+            (new CleanSweep_ScannedPathStore($state->scan_id))->appendMany($result['scanned_paths']);
+        }
         if (!empty($result['file_threats_found'])) {
             $ctx->incrementCounter('threats_found', (int)$result['file_threats_found']);
         }
@@ -174,6 +202,14 @@ final class CleanSweep_FileBatchWorker implements CleanSweep_Worker {
         $items = (int)$result['total_files_scanned'];
         $visited = (int)($result['files_visited'] ?? $items);
         $threats = (int)($result['file_threats_found'] ?? 0);
+
+        if (!empty($payload['explicit_files'])) {
+            return CleanSweep_WorkerResult::completed([
+                'items_processed' => $items,
+                'threats' => $threats,
+                'duration_seconds' => time() - $start_time,
+            ]);
+        }
 
         // If the scanner wants more time/batches, return moreWork and let
         // the orchestrator enqueue a follow-on unit. We do NOT touch the

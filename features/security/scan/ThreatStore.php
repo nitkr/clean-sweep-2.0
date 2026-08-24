@@ -51,7 +51,11 @@ final class CleanSweep_ThreatStore {
         if ($json === false) return false;
 
         $written = fwrite($handle, $json . "\n");
-        return $written !== false && $written > 0;
+        if ($written !== false && $written > 0) {
+            @fflush($handle);
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -71,6 +75,9 @@ final class CleanSweep_ThreatStore {
             if (fwrite($handle, $json . "\n") !== false) {
                 $count++;
             }
+        }
+        if ($count > 0) {
+            @fflush($handle);
         }
         return $count;
     }
@@ -118,6 +125,82 @@ final class CleanSweep_ThreatStore {
         }
         fclose($fp);
         return $threats;
+    }
+
+    /**
+     * Read a filtered page starting at a raw JSONL line index.
+     * Lines before $after_line are skipped with fgets only (no json_decode).
+     * Stops after $limit matching threats or $max_scan decoded lines, or EOF.
+     *
+     * @param int $after_line 0-based line index to start at (inclusive)
+     * @param int $limit Max matching threats to return
+     * @param callable $include function(array $threat): bool
+     * @param int $max_scan Max lines to decode in this call
+     * @return array{threats:array, next_line:int, eof:bool, scanned_lines:int}
+     */
+    public function pageFromLine(int $after_line, int $limit, callable $include, int $max_scan = 4000): array {
+        $empty = [
+            'threats' => [],
+            'next_line' => max(0, $after_line),
+            'eof' => true,
+            'scanned_lines' => 0,
+        ];
+        if ($limit < 1 || !file_exists($this->threats_file)) {
+            return $empty;
+        }
+
+        $fp = @fopen($this->threats_file, 'r');
+        if ($fp === false) {
+            return $empty;
+        }
+
+        $line_index = 0;
+        $after_line = max(0, $after_line);
+        while ($line_index < $after_line && ($skip = fgets($fp)) !== false) {
+            $line_index++;
+        }
+
+        $threats = [];
+        $decoded = 0;
+        $eof = true;
+        while (($raw = fgets($fp)) !== false) {
+            $line_index++;
+            $trim = trim($raw);
+            if ($trim === '') {
+                continue;
+            }
+            $threat = json_decode($trim, true);
+            $decoded++;
+            if (!is_array($threat)) {
+                if ($decoded >= $max_scan && count($threats) < $limit) {
+                    $eof = false;
+                    break;
+                }
+                continue;
+            }
+            if ($include($threat)) {
+                $threats[] = $threat;
+                if (count($threats) >= $limit) {
+                    $eof = false;
+                    break;
+                }
+            }
+            if ($decoded >= $max_scan && count($threats) < $limit) {
+                $eof = false;
+                break;
+            }
+        }
+        if ($eof && !feof($fp)) {
+            $eof = false;
+        }
+        fclose($fp);
+
+        return [
+            'threats' => $threats,
+            'next_line' => $line_index,
+            'eof' => $eof,
+            'scanned_lines' => $decoded,
+        ];
     }
 
     /**

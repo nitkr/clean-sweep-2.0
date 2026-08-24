@@ -69,11 +69,13 @@ final class CleanSweep_CoreChecksumWorker implements CleanSweep_Worker {
             ]);
         }
 
+        $ctx->mergeState(['phase' => 'integrity']);
+
         $findings = [];
         $checked = 0;
         $this->check_official_root_files($root, $checksums, $findings, $checked, $ctx);
         foreach (['wp-admin', 'wp-includes'] as $dir) {
-            if ($ctx->shouldStop()) {
+            if ($ctx->isCancelled()) {
                 break;
             }
             $abs = $root . $dir;
@@ -94,7 +96,7 @@ final class CleanSweep_CoreChecksumWorker implements CleanSweep_Worker {
         // Phase 3: content-scan mismatched / unexpected core files (not all of core).
         $content_hits = 0;
         $content_scanned = 0;
-        if (!$ctx->shouldStop() && count($findings) > 0) {
+        if (!$ctx->isCancelled() && count($findings) > 0) {
             $content = $this->content_scan_mismatches($findings, $ctx);
             $content_hits = (int) ($content['threats'] ?? 0);
             $content_scanned = (int) ($content['scanned'] ?? 0);
@@ -187,6 +189,7 @@ final class CleanSweep_CoreChecksumWorker implements CleanSweep_Worker {
         $note .= ' (reused prior clean result)';
         $checked = (int) ($snap['checked'] ?? 0);
         $ctx->mergeState([
+            'phase' => 'integrity',
             'options' => array_merge($ctx->state()->options ?? [], [
                 'checksum_note' => $note,
                 'checksum_checked' => $checked,
@@ -328,7 +331,7 @@ final class CleanSweep_CoreChecksumWorker implements CleanSweep_Worker {
         $root = rtrim(str_replace('\\', '/', $root), '/') . '/';
         $n = 0;
         foreach ($checksums as $rel => $hash) {
-            if ($n++ % 80 === 0 && $ctx->shouldStop()) {
+            if ($n++ % 80 === 0 && $ctx->isCancelled()) {
                 return;
             }
             $rel = str_replace('\\', '/', (string) $rel);
@@ -385,7 +388,7 @@ final class CleanSweep_CoreChecksumWorker implements CleanSweep_Worker {
 
         $n = 0;
         foreach ($iterator as $item) {
-            if ($n++ % 80 === 0 && $ctx->shouldStop()) {
+            if ($n++ % 80 === 0 && $ctx->isCancelled()) {
                 return;
             }
             if ($item->isLink() || !$item->isFile()) {

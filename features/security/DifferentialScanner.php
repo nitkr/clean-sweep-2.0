@@ -239,6 +239,28 @@ class CleanSweep_DifferentialScanner {
     }
 
     /**
+     * True when $path is in the manifest with this exact hash (unchanged).
+     */
+    public function hash_matches_manifest(string $path, string $hash): bool {
+        if ($hash === '' || !$this->enabled) {
+            return false;
+        }
+        $this->ensure_hashes_loaded();
+        $keys = [$path, str_replace('\\', '/', $path)];
+        $real = @realpath($path);
+        if (is_string($real) && $real !== '') {
+            $keys[] = $real;
+            $keys[] = str_replace('\\', '/', $real);
+        }
+        foreach (array_unique($keys) as $k) {
+            if (isset($this->previous_hashes[$k]) && $this->previous_hashes[$k] === $hash) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Calculate hash for a file.
      *
      * @param string $path File path

@@ -41,8 +41,14 @@ final class CleanSweep_Correlator {
      * @param array<int,array> $core_violations from CleanSweep_ScopeSealer::compare_sealed
      * @param array<int,array> $threats optional scan threats
      * @param array<int,string|array> $payload_paths files that changed (victims, not writers)
+     * @param bool $allow_other_scan_threats When false, do not load another scan's JSONL
      */
-    public function run(array $core_violations = [], array $threats = [], array $payload_paths = []): array {
+    public function run(
+        array $core_violations = [],
+        array $threats = [],
+        array $payload_paths = [],
+        bool $allow_other_scan_threats = true
+    ): array {
         $payload_keys = $this->payload_keys($core_violations, $payload_paths);
         $has_payload = $payload_keys !== [];
         $unexpected = $this->store->unexpected();
@@ -66,7 +72,7 @@ final class CleanSweep_Correlator {
 
         $payload_meta = $this->payload_meta($payload_keys, $unexpected);
 
-        if ($threats === []) {
+        if ($threats === [] && $allow_other_scan_threats) {
             $threats = $this->latest_scan_threats();
         }
 
@@ -212,9 +218,11 @@ final class CleanSweep_Correlator {
             }
         }
 
+        $reinfection = $core_changed || $has_payload;
         $out = [
             'summary' => $summary,
             'core_changed' => $core_changed,
+            'reinfection' => $reinfection,
             'writer_is_payload' => (bool) $writer_is_payload,
             'confidence' => $confidence,
             'core_files' => array_values(array_filter(array_map(static function ($v) {
@@ -224,7 +232,8 @@ final class CleanSweep_Correlator {
             'entry' => $entry,
             'candidates' => $writer_list,
         ];
-        $this->store->set_likely_source($out);
+        // First malware pass with no sealed/hash drift is not attribution.
+        $this->store->set_likely_source($reinfection ? $out : null);
         return $out;
     }
 

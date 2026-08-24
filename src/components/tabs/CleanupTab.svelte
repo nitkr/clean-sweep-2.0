@@ -17,16 +17,19 @@
   let skipSnapshotAck = $state(false);
 
   let visit = $derived($integrity.visitStatus || $integrity.baselineInfo || {});
+  // Same gate as cleanup.php: export of this visit, or an explicit skip.
+  // Import/compare is last visit's file — it does not pin this visit.
   let snapshotReady = $derived(
-    !!(visit.snapshot_downloaded || visit.snapshot_skipped || visit.snapshot_imported)
+    !!(visit.snapshot_downloaded || visit.snapshot_skipped)
   );
+  let snapshotCompared = $derived(!!visit.snapshot_imported && !snapshotReady);
   let snapshotLabel = $derived(
     visit.snapshot_downloaded
       ? 'Snapshot downloaded'
-      : visit.snapshot_imported
-        ? 'Snapshot imported'
-        : visit.snapshot_skipped
-          ? 'Snapshot skipped'
+      : visit.snapshot_skipped
+        ? 'Snapshot skipped'
+        : visit.snapshot_imported
+          ? 'Compared last snapshot — this visit not exported'
           : 'No snapshot yet'
   );
 
@@ -97,7 +100,7 @@
         </div>
         <div>
           <h1 class="text-xl font-bold text-ink">Remove Clean Sweep</h1>
-          <p class="text-sm text-muted">Delete Clean Sweep from the server when recovery is finished, including the live-watch must-use agent, visit data, options, and scan cron leftovers. Download a snapshot first if you want to compare on a later visit.</p>
+          <p class="text-sm text-muted">Delete Clean Sweep from the server when recovery is finished, including the live-watch must-use agent, visit data, options, and scan cron leftovers. Download a snapshot of this visit first if you want to compare next time. Comparing an older snapshot is not the same as exporting this one.</p>
         </div>
       </div>
     </div>
@@ -117,6 +120,7 @@
       >
         Download snapshot
       </Button.Root>
+      {#if !snapshotReady}
       <button
         type="button"
         onclick={() => integrity.skipSnapshot()}
@@ -124,6 +128,7 @@
       >
         Skip. I will not compare later
       </button>
+      {/if}
       {#if $integrity.lastSecret}
         <span class="text-[11px] text-amber-700 dark:text-amber-400">Save the secret shown on the Security tab.</span>
       {/if}
@@ -259,7 +264,11 @@
       {#if !snapshotReady}
         <div class="p-3 bg-amber-500/10 border border-amber-500/25 rounded-lg mb-4 space-y-2">
           <p class="text-sm text-amber-900 dark:text-amber-200">
-            No visit snapshot yet. Download one above if you want to compare this visit later, or confirm you will not compare.
+            {#if snapshotCompared}
+              You compared a previous snapshot. That does not export this visit. Download one above to compare next time, or confirm you will not.
+            {:else}
+              No snapshot of this visit yet. Download one above if you want to compare next time, or confirm you will not.
+            {/if}
           </p>
           <label class="flex items-start gap-2 text-sm text-ink cursor-pointer">
             <input type="checkbox" bind:checked={skipSnapshotAck} class="mt-0.5" />

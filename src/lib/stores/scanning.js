@@ -21,6 +21,13 @@ import {
   COMPLETED_TTL_SECONDS,
 } from '../scanSession.js';
 
+/** This-scan attribution only. Visit leftovers without reinfection must not show. */
+function thisScanLikelySource(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  if (raw.reinfection || raw.core_changed) return raw;
+  return null;
+}
+
 function createScanningStore() {
   const { subscribe, set, update } = writable({
     scanning: false,
@@ -79,8 +86,12 @@ function createScanningStore() {
     // (or 0) until the new scan finishes.
     liveProgress: {
       files_scanned: 0,
+      files_visited: 0,
+      files_skipped_unchanged: 0,
       db_rows_scanned: 0,
       threats_found: 0,
+      malware_threats: 0,
+      integrity_violations: 0,
       items_processed: 0,
       phase: 'files',
       last_updated: 0,
@@ -93,7 +104,28 @@ function createScanningStore() {
       last_db_table: null,
       last_db_id: null,
       package_checksum_note: null,
+      current_unit: null,
+      last_drain_activity_at: 0,
     },
+    /**
+     * Mid-scan findings preview (malware-first). Not the completed report.
+     * Populated while scanning so the user can inspect hits without waiting.
+     */
+    previewThreats: [],
+    previewIntegrityThreats: [],
+    previewPartial: false,
+    previewLoading: false,
+    previewError: null,
+    previewTotal: 0,
+    previewMalwareTotal: 0,
+    previewIntegrityTotal: 0,
+    previewCapped: false,
+    previewAfterLine: 0,
+    previewEof: false,
+    previewCaughtUpAt: 0,
+    previewIntegrityAttempted: false,
+    previewReportFailed: false,
+    previewStoppedReason: null,
     // Last displayed %; queue-based progress is allowed to drop when discovery grows
     progressHighWater: 0,
     /** 'queue' | 'phase' | '' — server says which progress formula it used */
@@ -134,6 +166,15 @@ function createScanningStore() {
   /** Last time counters/queue changed (for stale-running auto-resume) */
   let lastCounterActivityAt = 0;
   let lastCounterActivityKey = '';
+  /** Mid-scan preview fetch (invalidated on complete / new scan) */
+  const PREVIEW_PAGE_SIZE = 50;
+  const PREVIEW_CAP = 100;
+  const PREVIEW_INTEGRITY_CAP = 15;
+  const PREVIEW_FETCH_MIN_MS = 2500;
+  const PREVIEW_MAX_PAGES = 8;
+  let previewFetchGen = 0;
+  let previewFetchInFlight = false;
+  let lastPreviewFetchAt = 0;
 
   function getStateSnapshot() {
     let cur = null;
@@ -171,6 +212,272 @@ function createScanningStore() {
       t.pattern === 'package_divergent' ||
       t.pattern === 'package_extras_rollup'
     );
+  }
+
+  function emptyPreviewState() {
+    return {
+      previewThreats: [],
+      previewIntegrityThreats: [],
+      previewPartial: false,
+      previewLoading: false,
+      previewError: null,
+      previewTotal: 0,
+      previewMalwareTotal: 0,
+      previewIntegrityTotal: 0,
+      previewCapped: false,
+      previewAfterLine: 0,
+      previewEof: false,
+      previewCaughtUpAt: 0,
+      previewIntegrityAttempted: false,
+      previewReportFailed: false,
+      previewStoppedReason: null,
+    };
+  }
+
+  function malwareCountFromCounters(counters = {}) {
+    if (typeof counters.malware_threats === 'number') {
+      return Math.max(0, counters.malware_threats);
+    }
+    const total = Number(counters.threats_found) || 0;
+    const integrity = Number(counters.integrity_violations) || 0;
+    return Math.max(0, total - integrity);
+  }
+
+  function stableFallbackId(t) {
+    const key = [
+      t.file || t.path || '',
+      t.pattern || t.signature_id || '',
+      t.line_number ?? '',
+      t.table || '',
+      t.row_id ?? '',
+      t.column || '',
+      t.source || '',
+    ].join('|');
+    let h = 2166136261;
+    for (let i = 0; i < key.length; i++) {
+      h ^= key.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return 't_' + (h >>> 0).toString(16);
+  }
+
+  function normalizeThreatList(allThreats) {
+    if (!Array.isArray(allThreats)) return [];
+    const seenIds = new Set();
+    return allThreats.filter((t) => {
+      if (!t) return false;
+      if (!t.id || typeof t.id !== 'string' || t.id.length < 8) {
+        t.id = stableFallbackId(t);
+      }
+      if (!t.risk_level && t.threat_level) t.risk_level = t.threat_level;
+      if (seenIds.has(t.id)) return false;
+      seenIds.add(t.id);
+      return true;
+    });
+  }
+
+  function countMalwarePreview(list) {
+    if (!Array.isArray(list) || list.length === 0) return 0;
+    return list.filter((t) => !isIntegrityThreat(t)).length;
+  }
+
+  function paintPreviewInfections(s) {
+    const all = []
+      .concat(s.previewThreats || [])
+      .concat(s.previewIntegrityThreats || []);
+    files.updateInfectedFiles(all);
+  }
+
+  function invalidatePreviewFetch() {
+    previewFetchGen++;
+    previewFetchInFlight = false;
+  }
+
+  /**
+   * Incremental malware-first preview via JSONL line cursor (not unique-row offset).
+   */
+  async function loadPreviewThreats(scanId) {
+    if (!scanId || previewFetchInFlight) return;
+    const gen = ++previewFetchGen;
+    previewFetchInFlight = true;
+    lastPreviewFetchAt = Date.now();
+    update((s) => ({
+      ...s,
+      previewLoading: true,
+      previewError: null,
+      previewPartial: true,
+    }));
+
+    try {
+      let pages = 0;
+      while (pages < PREVIEW_MAX_PAGES) {
+        pages++;
+        const snap = getStateSnapshot();
+        if (!snap?.scanning || snap.scanId !== scanId) break;
+        const have = countMalwarePreview(snap.previewThreats);
+        if (have >= PREVIEW_CAP) {
+          update((s) => ({
+            ...s,
+            previewCapped: true,
+            previewLoading: false,
+            previewMalwareTotal: Math.max(have, s.previewMalwareTotal || 0),
+          }));
+          break;
+        }
+
+        const after = Number(snap.previewAfterLine) || 0;
+        const limit = Math.min(PREVIEW_PAGE_SIZE, PREVIEW_CAP - have);
+        const resp = await adapters.malware.getThreats(scanId, 0, limit, {
+          source: 'malware',
+          after_line: after,
+        });
+        if (gen !== previewFetchGen) return;
+        if (!resp?.success || !resp.data) {
+          update((s) => ({
+            ...s,
+            previewLoading: false,
+            previewError: 'Could not load findings yet.',
+          }));
+          break;
+        }
+
+        const batch = normalizeThreatList(resp.data.threats || []);
+        const nextLine =
+          typeof resp.data.next_line === 'number' ? resp.data.next_line : after;
+        const eof = !!resp.data.eof;
+        const cursorMoved = nextLine > after;
+
+        let added = 0;
+        let nextList = [];
+        update((s) => {
+          if (!s.scanning || s.scanId !== scanId) {
+            return { ...s, previewLoading: false };
+          }
+          const existing = s.previewThreats || [];
+          const seen = new Set(existing.map((t) => t.id));
+          const fresh = batch.filter((t) => t.id && !seen.has(t.id));
+          added = fresh.length;
+          nextList = existing.concat(fresh).slice(0, PREVIEW_CAP);
+          const malwareHave = countMalwarePreview(nextList);
+          const liveMalware = s.liveProgress?.malware_threats || 0;
+          return {
+            ...s,
+            previewThreats: nextList,
+            previewPartial: true,
+            previewLoading: false,
+            previewError: null,
+            previewAfterLine: nextLine,
+            previewEof: eof,
+            previewTotal: malwareHave,
+            previewMalwareTotal: Math.max(malwareHave, liveMalware, s.previewMalwareTotal || 0),
+            previewCapped: malwareHave >= PREVIEW_CAP && (liveMalware > PREVIEW_CAP || !eof),
+            previewCaughtUpAt: eof
+              ? Math.max(liveMalware, malwareHave, s.previewCaughtUpAt || 0)
+              : s.previewCaughtUpAt,
+          };
+        });
+
+        const afterSnap = getStateSnapshot();
+        if (afterSnap) paintPreviewInfections(afterSnap);
+
+        if (!afterSnap?.scanning || afterSnap.scanId !== scanId) break;
+        if (countMalwarePreview(afterSnap.previewThreats) >= PREVIEW_CAP) break;
+        if (eof && added === 0) break;
+        if (!cursorMoved && added === 0) break;
+        if (eof) break;
+      }
+
+      const snapAfter = getStateSnapshot();
+      const needIntegrity =
+        snapAfter?.scanning &&
+        snapAfter.scanId === scanId &&
+        !snapAfter.previewIntegrityAttempted &&
+        (Number(snapAfter.liveProgress?.integrity_violations) || 0) > 0 &&
+        !(snapAfter.previewIntegrityThreats?.length);
+
+      if (needIntegrity && gen === previewFetchGen) {
+        const ireq = await adapters.malware.getThreats(scanId, 0, PREVIEW_INTEGRITY_CAP, {
+          source: 'integrity',
+          after_line: 0,
+        });
+        if (gen !== previewFetchGen) return;
+        const ibatch = normalizeThreatList(ireq?.success ? (ireq.data?.threats || []) : []);
+        update((s) => {
+          if (!s.scanning || s.scanId !== scanId) {
+            return { ...s, previewIntegrityAttempted: true };
+          }
+          const liveInt = Number(s.liveProgress?.integrity_violations) || ibatch.length;
+          return {
+            ...s,
+            previewIntegrityThreats: ibatch.slice(0, PREVIEW_INTEGRITY_CAP),
+            previewIntegrityTotal: Math.max(liveInt, ibatch.length),
+            previewIntegrityAttempted: true,
+            previewPartial: true,
+          };
+        });
+        const painted = getStateSnapshot();
+        if (painted) paintPreviewInfections(painted);
+      }
+    } catch (err) {
+      if (gen !== previewFetchGen) return;
+      console.warn('[SCANNING] Preview threats failed:', err);
+      update((s) => ({
+        ...s,
+        previewLoading: false,
+        previewError: err?.message || 'Could not load findings yet.',
+      }));
+    } finally {
+      if (gen === previewFetchGen) {
+        previewFetchInFlight = false;
+        update((s) => (s.previewLoading ? { ...s, previewLoading: false } : s));
+      }
+    }
+  }
+
+  function maybeFetchPreview(scanId, counters, statusName) {
+    if (!scanId) return;
+    if (
+      statusName === 'completed' ||
+      statusName === 'cancelled' ||
+      statusName === 'failed'
+    ) {
+      return;
+    }
+    const snap = getStateSnapshot();
+    if (!snap?.scanning || snap.scanId !== scanId) return;
+
+    const malwareHave = countMalwarePreview(snap.previewThreats);
+    const malwareN = malwareCountFromCounters(counters);
+    const integrityN = Number(counters.integrity_violations) || 0;
+    const integrityHave = snap.previewIntegrityThreats?.length || 0;
+
+    if (malwareHave >= PREVIEW_CAP) {
+      const shouldCap = malwareN > PREVIEW_CAP || snap.previewCapped;
+      if (shouldCap && !snap.previewCapped) {
+        update((s) => ({
+          ...s,
+          previewCapped: true,
+          previewMalwareTotal: Math.max(malwareN, s.previewMalwareTotal || 0, malwareHave),
+        }));
+      }
+    }
+
+    const caughtUp =
+      !!snap.previewEof && malwareN <= (Number(snap.previewCaughtUpAt) || malwareHave);
+    const needMalware =
+      malwareHave < PREVIEW_CAP &&
+      !caughtUp &&
+      (malwareN > malwareHave || (malwareHave > 0 && snap.previewEof === false));
+    const needIntegrity =
+      integrityN > 0 && integrityHave === 0 && !snap.previewIntegrityAttempted;
+
+    if (!needMalware && !needIntegrity) return;
+    if (previewFetchInFlight) return;
+    const now = Date.now();
+    if ((malwareHave > 0 || integrityHave > 0) && now - lastPreviewFetchAt < PREVIEW_FETCH_MIN_MS) {
+      return;
+    }
+    loadPreviewThreats(scanId);
   }
 
   /**
@@ -218,26 +525,12 @@ function createScanningStore() {
     return { threats: all, meta };
   }
 
-  function applyThreatResults(scanId, allThreats, counters = {}, finishedAtOverride = null, startedAtOverride = null) {
+  function applyThreatResults(scanId, allThreats, counters = {}, finishedAtOverride = null, startedAtOverride = null, extras = {}) {
     const malwareThreats = allThreats.filter((t) => !isIntegrityThreat(t));
     const integrityThreats = allThreats.filter((t) => isIntegrityThreat(t));
     const finishedAt = finishedAtOverride || Math.floor(Date.now() / 1000);
-    // Normalize IDs like setResults
-    let threats = [];
-    if (Array.isArray(allThreats)) {
-      const seenIds = new Set();
-      let fallbackCounter = 0;
-      threats = allThreats.filter((t) => {
-        if (!t) return false;
-        if (!t.id || typeof t.id !== 'string' || t.id.length < 8) {
-          t.id = 'threat_' + fallbackCounter++ + '_' + Date.now();
-        }
-        if (!t.risk_level && t.threat_level) t.risk_level = t.threat_level;
-        if (seenIds.has(t.id)) return false;
-        seenIds.add(t.id);
-        return true;
-      });
-    }
+    const threats = normalizeThreatList(allThreats);
+    const carriedN = threats.filter((t) => t.carried_forward).length;
     const malwareCount =
       typeof counters.malware_threats === 'number'
         ? counters.malware_threats
@@ -246,17 +539,25 @@ function createScanningStore() {
       integrityThreats.length,
       Number(counters.integrity_violations) || 0
     );
+    const fileCarry = extras.file_carry && typeof extras.file_carry === 'object'
+      ? extras.file_carry
+      : null;
     const results = {
       threats,
       malware_threats: malwareThreats,
       integrity_violations_list: integrityThreats,
+      file_carry: fileCarry,
       summary: {
         total_threats: threats.length,
         malware_threats: malwareCount,
         integrity_violations: integrityCount,
         files_scanned: counters.files_scanned ?? 0,
+        files_visited: counters.files_visited ?? 0,
+        files_skipped_unchanged: counters.files_skipped_unchanged ?? 0,
         db_rows_scanned: counters.db_rows_scanned ?? 0,
         threats_found: counters.threats_found ?? threats.length,
+        carried_forward: fileCarry?.carried ?? carriedN,
+        carried_from_profile: fileCarry?.from_profile ?? null,
       },
     };
     if (threats.length > 0) {
@@ -298,6 +599,10 @@ function createScanningStore() {
         resultsScope: profileId === 'deep' ? scope : null,
         startTime: startSec ? startSec * 1000 : s.startTime,
         scanDuration: duration,
+        likelySource: Object.prototype.hasOwnProperty.call(extras, 'likely_source')
+          ? thisScanLikelySource(extras.likely_source)
+          : s.likelySource,
+        ...emptyPreviewState(),
       };
     });
     persistPointer({
@@ -322,6 +627,7 @@ function createScanningStore() {
     autoResumeIntervalMs = AUTO_RESUME_INTERVAL_MS_MIN;
     lastCounterActivityAt = Date.now();
     lastCounterActivityKey = '';
+    lastPreviewFetchAt = 0;
 
     const cancel = adapters.malware.pollStatus(scanId, (status) => {
       handleStatusPoll(scanId, status);
@@ -420,12 +726,16 @@ function createScanningStore() {
                 }
                 pollCancel = null;
                 notFoundStreak = 0;
+                invalidatePreviewFetch();
                 update(s => ({
                   ...s,
                   scanning: false,
                   progressStatus: 'failed',
                   isContinuation: false,
                   progressMessage: 'Lost connection to scan state. Progress may still be on the server. Try refresh or Start again.',
+                  previewLoading: false,
+                  previewPartial: !!(s.previewThreats?.length || s.previewIntegrityThreats?.length),
+                  previewStoppedReason: 'lost',
                 }));
                 clearScanPointer();
                 return;
@@ -444,9 +754,16 @@ function createScanningStore() {
             const filesN = counters.files_scanned ?? 0;
             const dbN = counters.db_rows_scanned ?? 0;
             const thrN = counters.threats_found ?? 0;
+            const malwareN = malwareCountFromCounters(counters);
+            const integrityN = counters.integrity_violations ?? 0;
             const pendN = q.pending ?? 0;
             const doneN = q.completed ?? 0;
-            const activityKey = [filesN, dbN, thrN, pendN, doneN, status.status || ''].join('|');
+            const unitType = (q.current_unit && q.current_unit.type) || '';
+            const activityKey = [
+              filesN, dbN, thrN, pendN, doneN, status.status || '',
+              unitType, status.package_checksum_note || '', status.checksum_note || '',
+              q.running ?? 0, status.last_drain_activity_at || 0,
+            ].join('|');
             const nowMs = Date.now();
             if (activityKey !== lastCounterActivityKey) {
               lastCounterActivityKey = activityKey;
@@ -457,8 +774,12 @@ function createScanningStore() {
 
             scanning.setLiveProgress({
               files_scanned: filesN,
+              files_visited: counters.files_visited ?? 0,
+              files_skipped_unchanged: counters.files_skipped_unchanged ?? 0,
               db_rows_scanned: dbN,
               threats_found: thrN,
+              malware_threats: malwareN,
+              integrity_violations: integrityN,
               items_processed: q.items_processed ?? filesN,
               phase: status.phase || 'files',
               pending: pendN,
@@ -467,7 +788,12 @@ function createScanningStore() {
               last_db_table: status.last_db_table ?? null,
               last_db_id: status.last_db_id ?? null,
               package_checksum_note: status.package_checksum_note ?? null,
+              current_unit: q.current_unit ?? null,
+              last_drain_activity_at: status.last_drain_activity_at ?? 0,
             });
+            if (status.status !== 'completed') {
+              maybeFetchPreview(scanId, counters, status.status);
+            }
             if (status.scan_scope || status.folder_path_display) {
               update(s => ({
                 ...s,
@@ -515,7 +841,7 @@ function createScanningStore() {
                   : (status.pause_reason === 'stale_running' ? 'stale_running' : s.pauseReason),
                 hasResumeData: hasPending,
                 hasIntegrityBaseline: status.has_integrity_baseline ?? s.hasIntegrityBaseline,
-                likelySource: status.likely_source ?? s.likelySource,
+                likelySource: thisScanLikelySource(status.likely_source),
                 integrityNote: status.integrity_note ?? s.integrityNote,
                 integrityViolations: status.integrity_violations
                   ?? counters.integrity_violations
@@ -616,6 +942,7 @@ function createScanningStore() {
             // On completion, fetch threats and finish
             if (status.status === 'completed') {
               console.log('[SCANNING] Scan completed; loading threats');
+              invalidatePreviewFetch();
               // Stop polling first (pollCancel must be a function, not a Promise)
               if (typeof pollCancel === 'function') {
                 pollCancel();
@@ -638,7 +965,11 @@ function createScanningStore() {
                     allThreats,
                     mergedCounters,
                     finishedAt,
-                    status.started_at || null
+                    status.started_at || null,
+                    {
+                      file_carry: status.file_carry || null,
+                      likely_source: status.likely_source,
+                    }
                   );
                   update((s) => ({
                     ...s,
@@ -653,7 +984,11 @@ function createScanningStore() {
                     scanning: false,
                     progressStatus: 'completed',
                     isContinuation: false,
-                    progressMessage: 'Scan finished but loading results failed. Try refresh.',
+                    previewLoading: false,
+                    previewPartial: true,
+                    previewReportFailed: true,
+                    previewStoppedReason: 'report_failed',
+                    progressMessage: 'Scan finished but loading the full report failed. Findings collected so far are still below.',
                   }));
                   persistPointer({
                     scan_id: scanId,
@@ -663,6 +998,7 @@ function createScanningStore() {
                 });
               return; // do not process further this tick
             } else if (status.status === 'cancelled' || status.status === 'failed') {
+              invalidatePreviewFetch();
               if (typeof pollCancel === 'function') {
                 pollCancel();
               }
@@ -672,6 +1008,9 @@ function createScanningStore() {
                 scanning: false,
                 progressStatus: status.status,
                 isContinuation: false,
+                previewLoading: false,
+                previewPartial: !!(s.previewThreats?.length || s.previewIntegrityThreats?.length),
+                previewStoppedReason: status.status === 'cancelled' ? 'cancelled' : 'failed',
               }));
               clearScanPointer();
             }
@@ -747,8 +1086,13 @@ function createScanningStore() {
     setLiveProgress: (progress) => {
       update(s => {
         const files = progress.files_scanned ?? 0;
+        const skipped = progress.files_skipped_unchanged ?? s.liveProgress?.files_skipped_unchanged ?? 0;
+        const visited = progress.files_visited ?? s.liveProgress?.files_visited ?? 0;
         const dbRows = progress.db_rows_scanned ?? 0;
         const threats = progress.threats_found ?? 0;
+        const malware = progress.malware_threats ?? s.liveProgress?.malware_threats ?? 0;
+        const integrity =
+          progress.integrity_violations ?? s.liveProgress?.integrity_violations ?? 0;
         const items = progress.items_processed ?? progress.work_queue?.items_processed ?? 0;
         const pending = progress.pending ?? s.pendingWorkCount ?? 0;
         const completed = progress.completed ?? s.workQueueStats?.completed ?? 0;
@@ -756,7 +1100,12 @@ function createScanningStore() {
         const lastFile = progress.last_file_path ?? s.liveProgress?.last_file_path ?? '';
         const lastTable = progress.last_db_table ?? s.liveProgress?.last_db_table ?? '';
         const lastDbId = progress.last_db_id ?? s.liveProgress?.last_db_id ?? '';
-        const activityKey = [files, dbRows, threats, items, pending, completed, lastFile, lastTable, lastDbId].join('|');
+        const unitType = (progress.current_unit && progress.current_unit.type)
+          || (s.liveProgress?.current_unit && s.liveProgress.current_unit.type)
+          || '';
+        const pkgNote = progress.package_checksum_note ?? s.liveProgress?.package_checksum_note ?? '';
+        const drainAt = progress.last_drain_activity_at ?? s.liveProgress?.last_drain_activity_at ?? 0;
+        const activityKey = [files, skipped, visited, dbRows, threats, items, pending, completed, lastFile, lastTable, lastDbId, unitType, pkgNote, drainAt].join('|');
         const prevKey = s.liveProgress?.activity_key || '';
         const now = Date.now();
         const activityChanged = activityKey !== prevKey;
@@ -765,8 +1114,12 @@ function createScanningStore() {
           ...s,
           liveProgress: {
             files_scanned: files,
+            files_visited: visited,
+            files_skipped_unchanged: skipped,
             db_rows_scanned: dbRows,
             threats_found: threats,
+            malware_threats: malware,
+            integrity_violations: integrity,
             items_processed: items,
             phase: progress.phase ?? s.liveProgress.phase,
             last_updated: now,
@@ -787,6 +1140,12 @@ function createScanningStore() {
             package_checksum_note: progress.package_checksum_note !== undefined
               ? progress.package_checksum_note
               : (s.liveProgress?.package_checksum_note ?? null),
+            current_unit: progress.current_unit !== undefined
+              ? progress.current_unit
+              : (s.liveProgress?.current_unit ?? null),
+            last_drain_activity_at: progress.last_drain_activity_at !== undefined
+              ? progress.last_drain_activity_at
+              : (s.liveProgress?.last_drain_activity_at ?? 0),
           },
         };
       });
@@ -801,15 +1160,26 @@ function createScanningStore() {
         progressHighWater: 0,
         liveProgress: {
           files_scanned: 0,
+          files_visited: 0,
+          files_skipped_unchanged: 0,
           db_rows_scanned: 0,
           threats_found: 0,
+          malware_threats: 0,
+          integrity_violations: 0,
           items_processed: 0,
           phase: 'files',
           last_updated: 0,
           peak_files_scanned: 0,
           activity_key: '',
           last_activity_at: 0,
+          last_file_path: null,
+          last_db_table: null,
+          last_db_id: null,
+          package_checksum_note: null,
+          current_unit: null,
+          last_drain_activity_at: 0,
         },
+        ...emptyPreviewState(),
       }));
     },
 
@@ -880,9 +1250,14 @@ function createScanningStore() {
     /**
      * Start malware scan using profile-based scanning (new architecture)
      * @param forceResume - If true, signals backend to use existing checkpoint for resuming
+     * @param opts.freshScan - Clear this profile's file-hash cache and rescan every file
      */
-    async startScan(forceResume = false) {
-      console.log('🔍 [SCANNING] startScan() called, forceResume:', forceResume);
+    async startScan(forceResume = false, opts = {}) {
+      if (forceResume && typeof forceResume === 'object' && forceResume.type) {
+        forceResume = false;
+      }
+      const freshScan = !!(opts && opts.freshScan) && !forceResume;
+      console.log('🔍 [SCANNING] startScan() called, forceResume:', forceResume, 'freshScan:', freshScan);
       let state;
       subscribe(s => state = s)();
 
@@ -897,22 +1272,30 @@ function createScanningStore() {
       // The backend will detect existing checkpoint and resume automatically
       const isResuming = forceResume || state.isContinuation;
 
+      if (!isResuming) {
+        invalidatePreviewFetch();
+      }
+
       update(s => ({
         ...s,
         scanning: true,
         error: null,
-        results: null,
+        // Keep last completed report until start ACK succeeds (failed start restores it).
+        ...(isResuming ? { previewPartial: true, previewStoppedReason: null } : emptyPreviewState()),
         resultsScanLabel: isResuming ? s.resultsScanLabel : null,
         resultsScope: isResuming ? s.resultsScope : null,
         checksumNote: isResuming ? s.checksumNote : null,
         checksumChecked: isResuming ? s.checksumChecked : 0,
         checksumFindings: isResuming ? s.checksumFindings : 0,
         checksumVersion: isResuming ? s.checksumVersion : null,
+        likelySource: isResuming ? s.likelySource : null,
         progressPercent: 0,
         progressHighWater: isResuming ? (s.progressHighWater || 0) : 0,
         progressSource: isResuming ? (s.progressSource || '') : '',
         progressStatus: 'running',
-        progressMessage: isResuming ? 'Resuming scan...' : 'Preparing scan (first files)...',
+        progressMessage: isResuming
+          ? 'Resuming scan...'
+          : (freshScan ? 'Full file rescan (hash cache cleared)…' : 'Preparing scan (first files)...'),
         startTime: Date.now(),
         expandedThreats: [],
         // Reset live counters so the new scan starts at 0. The next poll
@@ -926,8 +1309,12 @@ function createScanningStore() {
             }
           : {
               files_scanned: 0,
+              files_visited: 0,
+              files_skipped_unchanged: 0,
               db_rows_scanned: 0,
               threats_found: 0,
+              malware_threats: 0,
+              integrity_violations: 0,
               items_processed: 0,
               phase: 'files',
               last_updated: 0,
@@ -938,6 +1325,8 @@ function createScanningStore() {
               last_db_table: null,
               last_db_id: null,
               package_checksum_note: null,
+              current_unit: null,
+              last_drain_activity_at: 0,
             },
         // Phase 2.1 - reset most state for new scan, but preserve continuation state
         // when forceResume is true - the backend response will provide authoritative values
@@ -976,11 +1365,15 @@ function createScanningStore() {
             customConfig.folder_path = state.scanFolder;
           }
         }
+        if (!isResuming && freshScan) {
+          customConfig.fresh_scan = true;
+        }
 
         console.log('🔍 [SCANNING] Starting profile scan', {
           profileId,
           deepScope: customConfig.scan_scope || null,
           forceResume: isResuming,
+          freshScan,
           existingScanId: state.scanId,
         });
 
@@ -1044,10 +1437,26 @@ function createScanningStore() {
           });
           update(s => ({
             ...s,
+            results: isResuming ? s.results : null,
             resultsRestoredBanner: null,
-            resultsFinishedAt: null,
+            resultsFinishedAt: isResuming ? s.resultsFinishedAt : null,
+            previewStoppedReason: null,
+            previewReportFailed: false,
+            ...(isResuming ? {} : emptyPreviewState()),
+            previewPartial: true,
           }));
+          if (!isResuming) {
+            files.updateInfectedFiles([]);
+          }
           attachStatusPoll(scanId);
+          if (isResuming) {
+            const snap = getStateSnapshot();
+            maybeFetchPreview(scanId, {
+              threats_found: snap?.liveProgress?.threats_found || 0,
+              malware_threats: snap?.liveProgress?.malware_threats || 0,
+              integrity_violations: snap?.liveProgress?.integrity_violations || 0,
+            }, 'running');
+          }
         } else {
           const errMsg = response.error || 'Scan failed to start';
           const errCode = response.code || 'SCAN_START_ERROR';
@@ -1055,7 +1464,7 @@ function createScanningStore() {
             ...s,
             scanning: false,
             error: response.code ? `${errMsg} (${response.code})` : errMsg,
-            progressStatus: 'error',
+            progressStatus: s.results ? 'completed' : 'error',
             isContinuation: false,
           }));
           app.setError(errMsg);
@@ -1067,7 +1476,7 @@ function createScanningStore() {
           ...s,
           scanning: false,
           error: e.message,
-          progressStatus: 'error',
+          progressStatus: s.results ? 'completed' : 'error',
           isContinuation: false,
         }));
         errors.add({ message: e.message, code: 'SCAN_ERROR' });
@@ -1096,6 +1505,8 @@ function createScanningStore() {
         pollCancel = null;
       }
 
+      invalidatePreviewFetch();
+
       if (scanId) {
         adapters.malware.cancel(scanId).catch(err => {
           console.error('[SCANNING] cancel API failed:', err);
@@ -1108,6 +1519,9 @@ function createScanningStore() {
         scanning: false,
         progressStatus: 'cancelled',
         isContinuation: false,
+        previewLoading: false,
+        previewPartial: !!(s.previewThreats?.length || s.previewIntegrityThreats?.length),
+        previewStoppedReason: 'cancelled',
         continuationCount: 0,
         pauseReason: null,
         hasResumeData: false,
@@ -1194,6 +1608,7 @@ function createScanningStore() {
         pollCancel();
         pollCancel = null;
       }
+      invalidatePreviewFetch();
       set({
         scanning: false,
         progressPercent: 0,
@@ -1232,6 +1647,7 @@ function createScanningStore() {
         hasPendingWork: false,
         workQueueStats: null,
         scanId: null,
+        ...emptyPreviewState(),
       });
       app.resetProgress();
     },
@@ -1241,6 +1657,7 @@ function createScanningStore() {
      */
     dismissResults: () => {
       clearScanPointer();
+      invalidatePreviewFetch();
       update(s => ({
         ...s,
         results: null,
@@ -1252,6 +1669,7 @@ function createScanningStore() {
         progressMessage: 'Ready',
         progressPercent: 0,
         scanId: null,
+        ...emptyPreviewState(),
       }));
       app.resetProgress();
     },
@@ -1343,12 +1761,15 @@ function createScanningStore() {
         checksumChecked: status.checksum_checked ?? s.checksumChecked,
         checksumFindings: status.checksum_findings ?? s.checksumFindings,
         checksumVersion: status.checksum_version ?? s.checksumVersion,
+        likelySource: thisScanLikelySource(status.likely_source),
         deepScope: status.scan_scope || s.deepScope || 'full',
         folderPathDisplay: status.folder_path_display ?? s.folderPathDisplay,
         hasResumeData: !!(status.queue?.has_pending),
         pendingWorkCount: status.queue?.pending ?? 0,
         workQueueStats: status.queue ?? null,
         results: null,
+        ...emptyPreviewState(),
+        previewPartial: true,
         resultsRestoredBanner: 'Scan reattached after page reload. Keep this tab open.',
         resultsFinishedAt: null,
         rehydrateAttempted: true,
@@ -1358,6 +1779,8 @@ function createScanningStore() {
           files_scanned: counters.files_scanned ?? 0,
           db_rows_scanned: counters.db_rows_scanned ?? 0,
           threats_found: counters.threats_found ?? 0,
+          malware_threats: malwareCountFromCounters(counters),
+          integrity_violations: counters.integrity_violations ?? 0,
           peak_files_scanned: counters.files_scanned ?? 0,
           phase: status.phase || 'files',
           last_activity_at: Date.now(),
@@ -1365,6 +1788,8 @@ function createScanningStore() {
           last_db_table: status.last_db_table ?? s.liveProgress?.last_db_table ?? null,
           last_db_id: status.last_db_id ?? s.liveProgress?.last_db_id ?? null,
           package_checksum_note: status.package_checksum_note ?? s.liveProgress?.package_checksum_note ?? null,
+          current_unit: status.queue?.current_unit ?? s.liveProgress?.current_unit ?? null,
+          last_drain_activity_at: status.last_drain_activity_at ?? s.liveProgress?.last_drain_activity_at ?? 0,
         },
       }));
       persistPointer({
@@ -1374,6 +1799,7 @@ function createScanningStore() {
         last_status: st,
       });
       attachStatusPoll(scanId);
+      maybeFetchPreview(scanId, counters, st);
       // Kick resume if already paused
       if (st === 'paused' && status.queue?.has_pending) {
         adapters.malware.resume(scanId).catch(() => {});
@@ -1405,7 +1831,17 @@ function createScanningStore() {
         deepScope: status.scan_scope || s.deepScope || 'full',
         folderPathDisplay: status.folder_path_display ?? s.folderPathDisplay,
       }));
-      applyThreatResults(scanId, allThreats, mergedCounters, finishedAt, status.started_at || null);
+      applyThreatResults(
+        scanId,
+        allThreats,
+        mergedCounters,
+        finishedAt,
+        status.started_at || null,
+        {
+          file_carry: status.file_carry || null,
+          likely_source: status.likely_source,
+        }
+      );
       update(s => ({
         ...s,
         resultsFinishedAt: finishedAt,
@@ -1420,6 +1856,8 @@ function createScanningStore() {
           files_scanned: counters.files_scanned ?? 0,
           db_rows_scanned: counters.db_rows_scanned ?? 0,
           threats_found: counters.threats_found ?? allThreats.length,
+          malware_threats: malwareCountFromCounters(mergedCounters),
+          integrity_violations: mergedCounters.integrity_violations ?? 0,
           peak_files_scanned: counters.files_scanned ?? 0,
           phase: 'complete',
         },

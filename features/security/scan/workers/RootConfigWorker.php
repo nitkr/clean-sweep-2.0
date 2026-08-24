@@ -58,6 +58,11 @@ final class CleanSweep_RootConfigWorker implements CleanSweep_Worker {
         $scanned = (int) ($sig['scanned'] ?? count($paths));
 
         $ctx->incrementCounter('files_scanned', $scanned);
+        if ($scanned > 0) {
+            $ctx->incrementCounter('files_visited', $scanned);
+            require_once dirname(__DIR__) . '/ScannedPathStore.php';
+            (new CleanSweep_ScannedPathStore($ctx->state()->scan_id))->appendMany($paths);
+        }
         if ($total > 0) {
             $ctx->incrementCounter('threats_found', $total);
         }

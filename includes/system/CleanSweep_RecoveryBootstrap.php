@@ -305,31 +305,30 @@ class CleanSweep_RecoveryBootstrap {
      * Clears all possible caches to ensure filesystem checks work correctly
      */
     private function handleClearCaches() {
-        clean_sweep_log_message("🧹 Clearing all caches for fresh filesystem validation", 'info');
+        clean_sweep_log_message('Clearing caches for fresh filesystem validation', 'info');
 
-        // Clear PHP filesystem cache
         clearstatcache();
 
-        // Clear OPcache if available
         if (function_exists('opcache_reset')) {
             opcache_reset();
         }
 
-        // Clear APCu cache if available (modern PHP 7+)
         if (function_exists('apcu_clear_cache')) {
             apcu_clear_cache();
         }
 
-        // Clear any custom caches
         if (isset($GLOBALS['wp_object_cache']) && is_object($GLOBALS['wp_object_cache'])) {
             $GLOBALS['wp_object_cache']->flush();
         }
 
-        // Clear server-specific caches
-        $this->handleServerSpecificCaches();
+        $host_purge = $this->handleServerSpecificCaches();
+        if ($host_purge) {
+            clean_sweep_log_message('Local caches cleared' . (isset($_SERVER['WPMUDEV_HOSTED']) ? '; WPMUDEV PURGE / ok' : ''), 'info');
+        } else {
+            clean_sweep_log_message('Local caches cleared; WPMUDEV PURGE / did not confirm success', 'warning');
+        }
 
-        clean_sweep_log_message("🎉 All caches cleared successfully", 'info');
-        $this->sendJsonResponse(true, 'All caches cleared successfully');
+        $this->sendJsonResponse(true, 'Cache clear finished', ['host_purge' => $host_purge]);
     }
 
     /**
@@ -347,81 +346,63 @@ class CleanSweep_RecoveryBootstrap {
     }
 
     /**
-     * Clear server-specific caches based on hosting environment
-     * Add server-specific cache clearing functions here as needed
-     */
-    private function handleServerSpecificCaches() {
-        // WPMUDEV Hosting detection and cache clearing
-        if (isset($_SERVER['WPMUDEV_HOSTED'])) {
-            if (function_exists('curl_init')) {
-                try {
-                    // Build domain and resolver
-                    $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https://' : 'http://';
-                    $domain   = $protocol . rtrim($_SERVER['HTTP_HOST'], '/');
-                    $resolver = str_replace(array('http://', 'https://'), '', $domain) . ':443:127.0.0.1';
-
-                    // Purge site root instead of current script to clear homepage and main pages
-                    $path = '/'; // Site root - this will clear homepage and main cached pages
-                    $url  = $domain . $path;
-
-                    $ch = curl_init();
-                    curl_setopt_array($ch, array(
-                        CURLOPT_URL                  => $url,
-                        CURLOPT_RETURNTRANSFER       => true,
-                        CURLOPT_CUSTOMREQUEST        => 'PURGE',
-                        CURLOPT_DNS_USE_GLOBAL_CACHE => false,
-                        CURLOPT_RESOLVE              => array($resolver),
-                        CURLOPT_TIMEOUT              => 10,
-                    ));
-
-                    $response = curl_exec($ch);
-                    $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-                    $curl_error = curl_error($ch);
-                    curl_close($ch);
-
-                    if (empty($curl_error) && (strpos(strtoupper($response), 'OK') !== false || $http_code === 200 || $http_code === 204)) {
-                        clean_sweep_log_message("✅ WPMUDEV cache purge successful", 'info');
-                        // Test cache effectiveness by making a follow-up request
-                        $this->testCacheEffectiveness($url);
-                    }
-
-                } catch (Exception $e) {
-                    // Silently fail - cache purging is not critical
-                }
-            }
-        }
-    }
-
-    /**
-     * Test cache effectiveness by making a follow-up request
-     * This helps verify if the PURGE request actually cleared the cache
+     * Host static-cache workaround (WPMU DEV Host).
+     * Official WP/Host purge APIs target the WordPress site; recovery is a
+     * different URL. Tested working method: HTTP PURGE of "/" via 127.0.0.1.
+     * Best-effort — never blocks recovery.
      *
-     * @param string $url The URL that was purged
+     * @return bool True when no Host purge is needed, or PURGE / confirmed
      */
-    private function testCacheEffectiveness($url) {
-        try {
-            // Add a cache-busting parameter to ensure we get a fresh response
-            $test_url = $url . (strpos($url, '?') !== false ? '&' : '?') . 'cache_test=' . time() . rand(1000, 9999);
-
-            $ch = curl_init();
-            curl_setopt_array($ch, array(
-                CURLOPT_URL            => $test_url,
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_TIMEOUT        => 5,
-                CURLOPT_NOBODY         => false, // We want the body to check for dynamic content
-            ));
-
-            $response = curl_exec($ch);
-            $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            curl_close($ch);
-
-            if ($http_code === 200 && strpos($response, 'cache_test=') !== false) {
-                // Cache appears to be working correctly
-                return;
-            }
-        } catch (Exception $e) {
-            // Silently fail - cache testing is not critical
+    private function handleServerSpecificCaches(): bool {
+        if (!isset($_SERVER['WPMUDEV_HOSTED'])) {
+            return true;
         }
+        if (!function_exists('curl_init')) {
+            clean_sweep_log_message('WPMUDEV PURGE / skipped: curl missing', 'warning');
+            return false;
+        }
+
+        $host = rtrim((string) ($_SERVER['HTTP_HOST'] ?? ''), '/');
+        if ($host === '') {
+            clean_sweep_log_message('WPMUDEV PURGE / skipped: empty HTTP_HOST', 'warning');
+            return false;
+        }
+
+        $https = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
+        $protocol = $https ? 'https://' : 'http://';
+        // Host cache listens on 443 locally; original tested resolver.
+        $resolver = $host . ':443:127.0.0.1';
+        $url = $protocol . $host . '/';
+
+        $ch = curl_init();
+        if ($ch === false) {
+            return false;
+        }
+        $opts = [
+            CURLOPT_URL => $url,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_CUSTOMREQUEST => 'PURGE',
+            CURLOPT_DNS_USE_GLOBAL_CACHE => false,
+            CURLOPT_RESOLVE => [$resolver],
+            CURLOPT_TIMEOUT => 10,
+        ];
+        curl_setopt_array($ch, $opts);
+        $response = curl_exec($ch);
+        $http_code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curl_error = (string) curl_error($ch);
+        curl_close($ch);
+
+        $body_ok = is_string($response) && stripos($response, 'OK') !== false;
+        $ok = ($curl_error === '' && ($body_ok || $http_code === 200 || $http_code === 204));
+        if ($ok) {
+            clean_sweep_log_message("WPMUDEV cache PURGE / ok (HTTP {$http_code})", 'info');
+            return true;
+        }
+        clean_sweep_log_message(
+            "WPMUDEV cache PURGE / failed HTTP {$http_code}" . ($curl_error !== '' ? " {$curl_error}" : ''),
+            'warning'
+        );
+        return false;
     }
 
     /**

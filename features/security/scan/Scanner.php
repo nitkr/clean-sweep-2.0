@@ -179,13 +179,49 @@ final class CleanSweep_Scanner {
             'differential' => $this->profile->get_enable_differential_scan(),
             'cpu_preset' => $this->profile->get_cpu_governor_preset(),
         ]);
+        $fresh_scan = !empty($config['fresh_scan']);
+        if ($fresh_scan && $want_files) {
+            require_once dirname(__DIR__) . '/DifferentialScanner.php';
+            $diff = new CleanSweep_DifferentialScanner(null, false);
+            $diff->set_profile_id($this->profile->get_profile_id());
+            $cleared = $diff->clear_hashes();
+            clean_sweep_log_message(
+                "CleanSweep_Scanner: fresh scan cleared file-hash cache for {$profile_id}" .
+                ($cleared ? '' : ' (already empty)'),
+                'info'
+            );
+        }
+
         $this->checkpoint->save($state);
+
+        // Seed hash-skipped file hits from prior completed/cancelled/failed
+        // scans so live preview is not empty while this run walks new files.
+        if ($want_files && $this->profile->get_enable_differential_scan() && !$fresh_scan) {
+            require_once __DIR__ . '/FileThreatCarry.php';
+            $seed = CleanSweep_FileThreatCarry::apply($state, false);
+            if (!empty($seed['carried'])) {
+                $state->threats_found = (int) $state->threats_found + (int) $seed['carried'];
+                $state->options['file_carry'] = [
+                    'carried' => (int) $seed['carried'],
+                    'from_scan_id' => $seed['from_scan_id'] ?? null,
+                    'from_profile' => $seed['from_profile'] ?? null,
+                    'seeded_at_start' => true,
+                ];
+                $this->checkpoint->save($state);
+                clean_sweep_log_message(
+                    "CleanSweep_Scanner: seeded {$seed['carried']} prior file hit(s) into {$scan_id}" .
+                    (!empty($seed['from_scan_id']) ? " (from {$seed['from_scan_id']})" : ''),
+                    'info'
+                );
+            }
+        }
 
         $scope = (string)($config['scan_scope'] ?? 'full');
         $coerced = !empty($config['scope_coerced_from_folder']);
         clean_sweep_log_message(
             "CleanSweep_Scanner: started scan {$scan_id} (profile={$profile_id}, scope={$scope}" .
             ($coerced ? ', coerced_from_folder=1' : '') .
+            ($fresh_scan ? ', fresh_scan=1' : '') .
             ', seeds=' . count($config['resolved_seeds'] ?? []) .
             ', want_db=' . ($want_db ? 'yes' : 'no') .
             ', restricted=' . ($this->host->isSharedHosting() ? 'yes' : 'no') .
@@ -229,8 +265,8 @@ final class CleanSweep_Scanner {
 
     /**
      * Status for the UI poller. Reads checkpoint + queue stats.
-     * May once persist CleanSweep_VisitStore likely_source into checkpoint options
-     * so subsequent polls skip that disk read across FPM workers.
+     * likely_source is this scan's finalize result only — never copied from
+     * VisitStore (that is leftover from another visit / snapshot compare).
      */
     public function status(string $scan_id): array {
         $ckpt = new CleanSweep_Checkpoint($scan_id);
@@ -289,35 +325,8 @@ final class CleanSweep_Scanner {
 
         $options = is_array($state->options) ? $state->options : [];
         $likely = $options['likely_source'] ?? null;
-        // Prefer checkpoint options (persisted once). Fall back to CleanSweep_VisitStore
-        // with a short in-process TTL, then write through to options so other
-        // FPM workers stop re-reading the visit JSON on every poll.
-        static $likely_cache = [];
-        $cache_key = $scan_id;
-        $now = time();
-        if (is_array($likely)) {
-            $likely_cache[$cache_key] = ['at' => $now, 'value' => $likely];
-        } elseif (
-            isset($likely_cache[$cache_key])
-            && is_array($likely_cache[$cache_key]['value'] ?? null)
-            && ($now - (int)$likely_cache[$cache_key]['at']) < 30
-        ) {
-            $likely = $likely_cache[$cache_key]['value'];
-        } else {
-            $visit_boot = CLEAN_SWEEP_ROOT . 'includes/system/visit/bootstrap.php';
-            if (is_readable($visit_boot)) {
-                require_once $visit_boot;
-                if (class_exists('CleanSweep_VisitStore')) {
-                    $likely = (new CleanSweep_VisitStore())->likely_source();
-                    if (is_array($likely)) {
-                        $likely_cache[$cache_key] = ['at' => $now, 'value' => $likely];
-                        $opts = is_array($state->options) ? $state->options : [];
-                        $opts['likely_source'] = $likely;
-                        $ckpt->merge(['options' => $opts]);
-                        $state->options = $opts;
-                    }
-                }
-            }
+        if (!is_array($likely) || (empty($likely['reinfection']) && empty($likely['core_changed']))) {
+            $likely = null;
         }
 
         return [
@@ -330,12 +339,15 @@ final class CleanSweep_Scanner {
             'pause_reason' => $state->pause_reason,
             'counters' => [
                 'files_scanned' => $state->files_scanned,
+                'files_visited' => $state->files_visited,
+                'files_skipped_unchanged' => $state->files_skipped_unchanged,
                 'db_rows_scanned' => $state->db_rows_scanned,
                 'threats_found' => $state->threats_found,
                 'integrity_violations' => $state->integrity_violations,
                 // malware ≈ total threats minus integrity (integrity may be double-counted if both counters used)
                 'malware_threats' => max(0, (int)$state->threats_found - (int)$state->integrity_violations),
             ],
+            'file_carry' => is_array($options['file_carry'] ?? null) ? $options['file_carry'] : null,
             // Phase 2: separate integrity metadata from malware counters
             'has_integrity_baseline' => $has_baseline,
             'integrity_note' => $integrity_note,
@@ -351,6 +363,7 @@ final class CleanSweep_Scanner {
             'environment_advisory' => $options['environment_advisory'] ?? null,
             'restricted_host' => !empty($options['restricted_host']),
             'scan_scope' => $options['scan_scope'] ?? 'full',
+            'fresh_scan' => !empty($options['fresh_scan']),
             'folder_path' => $options['folder_path'] ?? null,
             'folder_paths' => $options['folder_paths'] ?? null,
             'folder_path_display' => $options['folder_path_display'] ?? null,
@@ -588,6 +601,9 @@ final class CleanSweep_Scanner {
                 $started_at
             );
             $ctx->setDrainResources($shared_differential, $shared_signatures, $shared_prefilter);
+            if (method_exists($ctx, 'setSliceDeadline')) {
+                $ctx->setSliceDeadline($drain_start, $time_budget);
+            }
 
             // Run the worker
             $result = $this->runWorker($worker, $unit, $ctx);
@@ -1094,6 +1110,11 @@ final class CleanSweep_Scanner {
         } else {
             $config['include_db'] = false;
         }
+        if (array_key_exists('fresh_scan', $config)) {
+            $config['fresh_scan'] = self::toBool($config['fresh_scan']);
+        } else {
+            $config['fresh_scan'] = false;
+        }
 
         if (isset($config['folder_paths']) && is_string($config['folder_paths'])) {
             $decoded = json_decode($config['folder_paths'], true);
@@ -1172,7 +1193,10 @@ final class CleanSweep_Scanner {
             $this->queue->enqueue(CleanSweep_ScanWorkUnit::create(
                 $scan_id,
                 CleanSweep_ScanWorkUnit::TYPE_PACKAGE_CHECKSUM,
-                ['start' => 0],
+                [
+                    'start' => 0,
+                    'force' => !empty($config['fresh_scan']),
+                ],
                 120
             ));
         }
@@ -1181,6 +1205,18 @@ final class CleanSweep_Scanner {
         // Seed only expands immediate children; each tree sets its own budget.
         $seed_depth = 1;
         foreach ($seeds as $root) {
+            if (is_file($root)) {
+                $this->queue->enqueue(CleanSweep_ScanWorkUnit::create(
+                    $scan_id,
+                    CleanSweep_ScanWorkUnit::TYPE_FILE_BATCH,
+                    [
+                        'base_dir' => dirname($root),
+                        'explicit_files' => [$root],
+                    ],
+                    70
+                ));
+                continue;
+            }
             if (!is_dir($root)) {
                 continue;
             }
@@ -1401,19 +1437,16 @@ final class CleanSweep_Scanner {
         $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
 
-        // Accepted only when the peer responded (HTTP code > 0) or curl reports
-        // clean success. A bare timeout with code=0 often means connect failed —
-        // treat that as hard failure so WP-Cron fallback can take over.
+        // Fire-and-forget: HTTP code, clean curl, or a short timeout all mean
+        // the request was attempted. Treating CURLE_OPERATION_TIMEDOUT (often
+        // HTTP 0 after 250ms) as a hard fail stacked WP-Cron on top of the
+        // tab poller and produced a drain-busy storm.
         $timeout = defined('CURLE_OPERATION_TIMEDOUT') ? (int) CURLE_OPERATION_TIMEDOUT : 28;
-        if ($code > 0 || $errno === 0) {
+        if ($code > 0 || $errno === 0 || $errno === $timeout) {
             clean_sweep_log_message(
                 "CleanSweep_Scanner: loopback kick fired for {$scan_id} (HTTP {$code}, errno={$errno})",
                 'debug'
             );
-            return true;
-        }
-        // Timeout after headers/body started arriving still counts as accepted.
-        if ($errno === $timeout && $code > 0) {
             return true;
         }
 

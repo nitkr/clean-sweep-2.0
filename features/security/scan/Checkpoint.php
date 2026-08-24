@@ -171,4 +171,82 @@ final class CleanSweep_Checkpoint {
         }
         return CleanSweep_ScanState::fromArray($raw);
     }
+
+    /**
+     * Most recent completed scan that shares this profile's file-hash universe
+     * (Quick is separate; Standard/Deep/custom share).
+     */
+    public static function findPreviousCompleted(
+        string $current_scan_id,
+        string $profile_id,
+        int $completed_ttl_seconds = 172800
+    ): ?CleanSweep_ScanState {
+        foreach (self::findPreviousForCarry($current_scan_id, $profile_id, $completed_ttl_seconds) as $state) {
+            if (($state->status ?? '') === 'completed') {
+                return $state;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Prior scans whose file-signature JSONL may be reused when this run
+     * hash-skips unchanged files. Includes cancelled/failed: hashes are saved
+     * per batch and cancel does not roll them back.
+     *
+     * @return list<CleanSweep_ScanState> Newest first
+     */
+    public static function findPreviousForCarry(
+        string $current_scan_id,
+        string $profile_id,
+        int $ttl_seconds = 172800,
+        ?string $dir = null
+    ): array {
+        $dir = $dir ?? (defined('CLEAN_SWEEP_PROGRESS_DIR') ? CLEAN_SWEEP_PROGRESS_DIR : __DIR__ . '/../../../logs/');
+        $files = glob(rtrim($dir, '/') . '/checkpoint_*.json');
+        if (!is_array($files) || $files === []) {
+            return [];
+        }
+        $want_quick = ($profile_id === 'quick');
+        $now = time();
+        $found = [];
+        foreach ($files as $file) {
+            $raw = json_decode((string) @file_get_contents($file), true);
+            if (!is_array($raw)) {
+                continue;
+            }
+            $status = (string) ($raw['status'] ?? '');
+            if (!in_array($status, ['completed', 'cancelled', 'failed'], true)) {
+                continue;
+            }
+            $id = (string) ($raw['scan_id'] ?? '');
+            if ($id === '' || $id === $current_scan_id) {
+                continue;
+            }
+            $prev_profile = (string) ($raw['profile_id'] ?? '');
+            $is_quick = ($prev_profile === 'quick');
+            if ($want_quick !== $is_quick) {
+                continue;
+            }
+            $finished = (int) ($raw['finished_at'] ?? 0);
+            $updated = (int) ($raw['last_updated'] ?? 0);
+            $score = max($finished, $updated);
+            if ($score <= 0) {
+                $score = (int) (@filemtime($file) ?: 0);
+            }
+            $age_base = $finished > 0 ? $finished : $score;
+            if (($now - $age_base) > $ttl_seconds) {
+                continue;
+            }
+            $found[] = ['score' => $score, 'raw' => $raw];
+        }
+        usort($found, static function ($a, $b) {
+            return $b['score'] <=> $a['score'];
+        });
+        $out = [];
+        foreach ($found as $row) {
+            $out[] = CleanSweep_ScanState::fromArray($row['raw']);
+        }
+        return $out;
+    }
 }

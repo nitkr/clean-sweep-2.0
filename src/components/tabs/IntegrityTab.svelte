@@ -903,7 +903,10 @@
           {#if driftRows.length > 0 || tamper.length > 0 || persistAdmins.length || persistCron.length || source}
             <div class="border-t border-line pt-4 space-y-3">
               <div class="flex items-center gap-2 flex-wrap">
-                <h3 class="text-xs font-semibold uppercase tracking-wide text-muted">Likely source</h3>
+                <h3 class="text-xs font-semibold uppercase tracking-wide text-muted">
+                  Likely source
+                  <span class="ml-1.5 align-middle text-[10px] px-1.5 py-0.5 rounded-full border font-semibold uppercase tracking-wide bg-amber-500/20 text-amber-800 dark:text-amber-200 border-amber-500/40">Beta</span>
+                </h3>
                 {#if source?.confidence && source.confidence !== 'none'}
                   <span
                     class="text-[10px] px-2 py-0.5 rounded-full border font-medium

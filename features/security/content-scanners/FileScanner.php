@@ -174,6 +174,9 @@ class CleanSweep_FileScanner {
      * This is the correct architectural defense against fatal "Maximum execution time exceeded" errors.
      */
     private function should_pause_for_time_limit(): bool {
+        if ($this->context && $this->context->sliceExpired()) {
+            return true;
+        }
         // Check soft phase budget first (already set by profile)
         if ($this->phase_time_limit > 0 && $this->phase_start_time > 0) {
             $elapsed = microtime(true) - $this->phase_start_time;
@@ -327,7 +330,8 @@ class CleanSweep_FileScanner {
                     }
                     if (class_exists('CleanSweep_PackageChecksums', false) || is_readable(dirname(__DIR__) . '/scan/PackageChecksums.php')) {
                         require_once dirname(__DIR__) . '/scan/PackageChecksums.php';
-                        if (CleanSweep_PackageChecksums::should_skip_signature_scan($path)) {
+                        $fresh = $this->context && $this->context->state() && $this->context->state()->isFreshScan();
+                        if (!$fresh && CleanSweep_PackageChecksums::should_skip_signature_scan($path)) {
                             continue;
                         }
                     }
@@ -394,6 +398,8 @@ class CleanSweep_FileScanner {
             'wp_content' => [],
             'total_files_scanned' => 0,
             'files_visited' => 0,
+            'files_skipped_unchanged' => 0,
+            'scanned_paths' => [],
             'file_threats_found' => 0,
         ];
 
@@ -443,6 +449,7 @@ class CleanSweep_FileScanner {
                 }
                 $results['total_files_scanned']++;
                 $this->counters['files_scanned']++;
+                $results['scanned_paths'][] = $wp_config;
                 if ($this->differential && $this->differential->is_enabled()) {
                     $this->file_hashes[$wp_config] = CleanSweep_DifferentialScanner::hash_file($wp_config);
                 }
@@ -503,6 +510,9 @@ class CleanSweep_FileScanner {
 
                 $results['total_files_scanned']++;
                 $this->counters['files_scanned']++;
+                $results['scanned_paths'][] = $file_path;
+            } else {
+                $results['files_skipped_unchanged']++;
             }
 
             // Count every visited file (including differential skips) toward
@@ -568,7 +578,8 @@ class CleanSweep_FileScanner {
             }
 
             if ($this->context && $this->context->shouldStop()) {
-                clean_sweep_log_message("File scan cancelled at file {$file_count}", 'info');
+                $why = $this->context->isCancelled() ? 'cancelled' : 'time budget';
+                clean_sweep_log_message("File scan paused ({$why}) at file {$file_count}", 'info');
                 break;
             }
 

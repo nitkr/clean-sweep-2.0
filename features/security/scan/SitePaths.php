@@ -320,7 +320,7 @@ final class CleanSweep_SitePaths {
     }
 
     /**
-     * Resolve a user-supplied scan path to an absolute directory under the live site.
+     * Resolve a user-supplied scan path to an absolute file or directory under the live site.
      * Accepts absolute paths or paths relative to site root / content dir.
      * Rejects empty input, NUL, `..` segments, and paths that escape WP roots.
      *
@@ -365,11 +365,11 @@ final class CleanSweep_SitePaths {
         }
 
         foreach ($candidates as $cand) {
-            if (!is_dir($cand)) {
+            if (!is_dir($cand) && !is_file($cand)) {
                 continue;
             }
             $real = @realpath($cand);
-            if ($real === false || !is_dir($real)) {
+            if ($real === false || (!is_dir($real) && !is_file($real))) {
                 continue;
             }
             $real_n = rtrim(str_replace('\\', '/', $real), '/');

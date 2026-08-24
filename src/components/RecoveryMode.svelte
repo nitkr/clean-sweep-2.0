@@ -14,6 +14,7 @@
   let planHint = $state('');
   let fileInput = $state(/** @type {HTMLInputElement | null} */ (null));
   let pollInterval = null;
+  let finishing = false;
 
   const ISSUE_COPY = {
     missing_fresh_directory: 'Secure recovery environment is missing',
@@ -102,9 +103,7 @@
           statusMessage = 'Complete!';
           progress = 100;
           planHint = 'Recovery environment ready';
-          setTimeout(() => {
-            window.location.reload();
-          }, 900);
+          finishRecovery();
         } else if (data.status === 'error') {
           stopPolling();
           status = 'error';
@@ -127,6 +126,44 @@
         console.error('Polling error:', error);
       }
     }, 1000);
+  }
+
+  /**
+   * Original working sequence: purge Host static cache (PURGE /),
+   * then reload with recovery_token so FastCGI cannot serve the setup page.
+   */
+  async function finishRecovery() {
+    if (finishing) return;
+    finishing = true;
+    statusMessage = 'Clearing server caches…';
+    planHint = 'Purging host cache so this page reloads fresh';
+
+    const postAction = async (action) => {
+      const formData = new FormData();
+      formData.append('action', action);
+      await fetch(API_CONFIG.endpoints.bootstrap, {
+        method: 'POST',
+        body: formData,
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      });
+    };
+
+    try {
+      await postAction('clear_all_caches');
+    } catch {
+      // Best-effort. Setup can still continue.
+    }
+
+    statusMessage = 'Verifying environment…';
+    try {
+      await postAction('check_canary');
+    } catch {
+      // Reload anyway.
+    }
+
+    const url = new URL(window.location.href);
+    url.searchParams.set('recovery_token', String(Date.now()));
+    window.location.href = url.pathname + '?' + url.searchParams.toString();
   }
 
   async function startRecovery() {

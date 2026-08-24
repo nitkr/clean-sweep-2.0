@@ -31,6 +31,10 @@
   export let dbRowsScanned = 0;
   /** @type {number} */
   export let threatsFound = 0;
+  /** @type {number} Signature matches (excludes integrity) */
+  export let malwareFound = 0;
+  /** @type {number} */
+  export let integrityFound = 0;
   /** @type {number} */
   export let pending = 0;
   /** @type {number} */
@@ -67,6 +71,10 @@
   export let checksumVersion = null;
   /** @type {string|null} */
   export let packageChecksumNote = null;
+  /** In-flight work unit from status.queue.current_unit */
+  export let currentUnit = null;
+  /** Unix seconds of last drain activity */
+  export let lastDrainActivityAt = 0;
 
   const dispatch = createEventDispatcher();
 
@@ -93,8 +101,11 @@
     !status ||
     (!isPaused && !isTerminal);
   $: isActive = isPaused || isRunning;
-  $: isStuck = idleMs != null && idleMs >= STUCK_MS;
-  $: isSlow = !isStuck && idleMs != null && idleMs >= SLOW_MS;
+  $: queueBusy = (inProgress || 0) > 0;
+  $: drainFresh =
+    lastDrainActivityAt > 0 && idleMs != null && idleMs < STUCK_MS;
+  $: isStuck = !queueBusy && !drainFresh && idleMs != null && idleMs >= STUCK_MS;
+  $: isSlow = !isStuck && !queueBusy && idleMs != null && idleMs >= SLOW_MS;
   $: clamped = Math.min(100, Math.max(0, Math.round(percent || 0)));
   // Queue formula matches "steps left". Phase is only used before the queue
   // is big enough; do not present that as a confident percent.
@@ -108,11 +119,12 @@
   $: barWidth = discovering ? Math.max(4, Math.min(12, clamped || 4)) : clamped;
 
   $: phaseKey = (phase || '').toLowerCase();
+  $: unitType = (currentUnit && currentUnit.type) || '';
 
   $: phaseLabel = (() => {
     if (phaseKey === 'files' || phaseKey === 'file') return 'Scanning files';
     if (phaseKey === 'database' || phaseKey === 'db') return 'Checking database';
-    if (phaseKey === 'integrity') return 'Checking integrity baseline';
+    if (phaseKey === 'integrity') return 'Checking core and package checksums';
     if (phaseKey === 'visit_census' || phaseKey === 'census') return 'Visit census';
     if (phaseKey === 'complete' || phaseKey === 'finalization' || phaseKey === 'finalize') {
       return 'Finishing up';
@@ -161,43 +173,37 @@
     return null;
   })();
 
-  /** Primary status line — activity first, not a flat % story */
-  $: primaryLine = (() => {
-    if (pauseReason === 'gateway_timeout' || pauseReason === 'network_error') {
-      return 'Host timed out answering (504). Scan progress is still on the server. Retrying automatically. You can also press Continue now.';
-    }
-    if (isStuck) {
-      return 'No new activity for a while. You can wait, or continue now.';
-    }
-    if (isPaused) {
-      return restrictedHost
-        ? 'Progress saved on this host. Next step starts automatically. Keep this tab open.'
-        : 'Progress saved. Continuing automatically. Keep this tab open.';
-    }
+  $: checksumish =
+    unitType === 'core_checksum' ||
+    unitType === 'package_checksum' ||
+    (!unitType && phaseKey === 'integrity');
+  $: dbish =
+    unitType === 'db_table_segment' ||
+    unitType === 'db_site_discovery' ||
+    (!unitType && (phaseKey === 'database' || phaseKey === 'db' || filesSkipped));
+  $: censusish =
+    unitType === 'visit_census' ||
+    (!unitType && (phaseKey === 'visit_census' || phaseKey === 'census'));
+  // File counts belong to file-batch work. Census / discovery / checksums
+  // must not inherit a leftover files_scanned into the headline.
+  $: filesish =
+    !checksumish &&
+    !dbish &&
+    !censusish &&
+    unitType !== 'file_discovery' &&
+    unitType !== 'root_config' &&
+    unitType !== 'finalization' &&
+    unitType !== 'analysis' &&
+    unitType !== 'integrity_check';
 
-    // Prefer scope-aware copy over a stale default phase of "files".
-    let lead = phaseLabel;
-    if (filesSkipped && (phaseKey === 'files' || phaseKey === 'file' || !phaseKey)) {
-      lead = 'Checking database';
-    } else if (dbSkipped && (phaseKey === 'database' || phaseKey === 'db')) {
-      lead = 'Scanning files';
-    }
-    const parts = [lead];
-    if (phaseKey === 'database' || phaseKey === 'db' || filesSkipped) {
-      if (dbRowsScanned > 0) parts.push(`${dbRowsScanned.toLocaleString()} rows scanned`);
-    } else if (phaseKey === 'files' || phaseKey === 'file' || dbSkipped) {
-      if (filesScanned > 0) parts.push(`${filesScanned.toLocaleString()} files`);
-    } else if (filesScanned > 0) {
-      parts.push(`${filesScanned.toLocaleString()} files`);
-    }
-    if (dbSkipped) parts.push('DB skipped');
-    if (filesSkipped) parts.push('Files skipped');
-    if (threatsFound > 0) {
-      parts.push(`${threatsFound} threat${threatsFound === 1 ? '' : 's'}`);
-    }
-    if (stepsHint) parts.push(stepsHint);
-    return parts.join(' · ');
-  })();
+  $: filesFlatHint =
+    isActive &&
+    !discovering &&
+    !censusish &&
+    filesish === false &&
+    (pending || 0) > 8 &&
+    (filesScanned || 0) > 0 &&
+    (filesScanned || 0) < 80;
 
   $: lastActivityLabel = (() => {
     if (idleMs == null) return null;
@@ -209,6 +215,15 @@
   $: filesLabel = filesComplete && filesScanned > 0 ? 'Files (done)' : 'Files';
   $: filesDisplay =
     filesScanned > 0 ? filesScanned.toLocaleString() : '—';
+  $: technicalMessage = (() => {
+    const m = String(message || '').trim();
+    if (!m) return '';
+    const low = m.toLowerCase();
+    if (low === phaseKey || low === unitType || low === 'visit_census' || low === 'census') {
+      return '';
+    }
+    return m;
+  })();
 
   let detailsOpen = false;
 
@@ -258,13 +273,40 @@
   }
 
   $: currentCheck = (() => {
-    if (phaseKey === 'database' || phaseKey === 'db' || filesSkipped) {
-      const t = shortTable(lastDbTable);
+    if (unitType === 'core_checksum') return 'Checking WordPress core files';
+    if (unitType === 'package_checksum') {
+      return packageChecksumNote || 'Checking plugin and theme checksums';
+    }
+    if (unitType === 'file_discovery') {
+      const p = relativePath(currentUnit?.base_dir || lastFilePath);
+      return p ? `Finding files · ${p}` : 'Finding files to scan';
+    }
+    if (unitType === 'root_config') return 'Checking root config files';
+    if (unitType === 'visit_census' || (!unitType && censusish)) {
+      const raw = String((currentUnit && currentUnit.phase) || '').toLowerCase();
+      const censusPhase = {
+        site_owned: 'site-owned files',
+        extra_php: 'extra PHP',
+        wp_content: 'wp-content',
+        uploads: 'uploads',
+        options: 'options',
+      }[raw] || (raw ? raw.replace(/_/g, ' ') : '');
+      return censusPhase ? `Visit census · ${censusPhase}` : 'Visit census';
+    }
+    if (unitType === 'finalization') return 'Finishing up';
+    if (unitType === 'db_site_discovery') return 'Finding site database tables';
+    if (
+      unitType === 'db_table_segment' ||
+      (!unitType && (phaseKey === 'database' || phaseKey === 'db' || filesSkipped))
+    ) {
+      const t = shortTable((currentUnit && currentUnit.table) || lastDbTable);
       return t
         ? `Database · ${t}${lastDbId ? ' #' + lastDbId : ''}`
         : 'Checking database';
     }
-    if (phaseKey === 'integrity') return 'Core / package checksums';
+    if (!unitType && phaseKey === 'integrity') {
+      return packageChecksumNote || 'Checking core and package checksums';
+    }
     if (lastFilePath) {
       const rel = relativePath(lastFilePath);
       const low = rel.toLowerCase();
@@ -275,18 +317,63 @@
       else if (low.includes('mu-plugins/')) kind = 'Must-use plugin';
       return `${kind} · ${rel}`;
     }
-    // Counters move even when last_file_path was wiped — show that so the
-    // panel does not look idle during Deep pause/resume slices.
     if ((phaseKey === 'files' || phaseKey === 'file' || !phaseKey) && filesScanned > 0) {
       return `Scanning files · ${Number(filesScanned).toLocaleString()} scanned`;
     }
     return phaseLabel;
   })();
 
+  /** Primary status line — activity first, not a flat % story */
+  $: primaryLine = (() => {
+    if (pauseReason === 'gateway_timeout' || pauseReason === 'network_error') {
+      return 'Host timed out answering (504). Scan progress is still on the server. Retrying automatically. You can also press Continue now.';
+    }
+    if (isStuck) {
+      return 'No new activity for a while. You can wait, or continue now.';
+    }
+    if (isPaused) {
+      return restrictedHost
+        ? 'Slice saved. Next step starts automatically. Keep this tab open.'
+        : 'Slice saved. Continuing automatically. Keep this tab open.';
+    }
+
+    let lead = currentCheck;
+    if (filesSkipped && (phaseKey === 'files' || phaseKey === 'file' || !phaseKey) && !unitType) {
+      lead = 'Checking database';
+    } else if (dbSkipped && (phaseKey === 'database' || phaseKey === 'db') && !unitType) {
+      lead = 'Scanning files';
+    }
+    const parts = [lead];
+    if (dbish && dbRowsScanned > 0) {
+      parts.push(`${dbRowsScanned.toLocaleString()} rows scanned`);
+    } else if (filesish && filesScanned > 0) {
+      parts.push(`${filesScanned.toLocaleString()} files`);
+    }
+    if (dbSkipped) parts.push('DB skipped');
+    if (filesSkipped) parts.push('Files skipped');
+    if (malwareFound > 0) {
+      parts.push(`${malwareFound} signature match${malwareFound === 1 ? '' : 'es'}`);
+    } else if (integrityFound > 0) {
+      parts.push(`${integrityFound} integrity finding${integrityFound === 1 ? '' : 's'}`);
+    } else if (threatsFound > 0) {
+      parts.push(`${threatsFound} finding${threatsFound === 1 ? '' : 's'}`);
+    }
+    if (stepsHint) parts.push(stepsHint);
+    return parts.join(' · ');
+  })();
+
   function formatPauseReason(reason) {
     if (!reason) return null;
-    if (reason === 'time_budget' || reason === 'time_limit' || reason === 'time_budget_exceeded') {
-      return 'Paused at host time limit (normal on shared hosting)';
+    if (
+      reason === 'time_budget' ||
+      reason === 'time_limit' ||
+      reason === 'time_budget_exceeded' ||
+      reason === 'nothing_claimable' ||
+      reason === 'in_flight_busy' ||
+      reason === 'deliberate_pause' ||
+      reason === 'scan_paused'
+    ) {
+      return 'Saved this slice. Next step starts automatically.';
     }
     if (reason === 'gateway_timeout' || reason === 'network_error') {
       return 'Host gateway timed out (504). Progress is kept. Retrying automatically.';
@@ -319,6 +406,9 @@
           {/if}
         </div>
         <p class="text-sm text-ink mt-1.5 leading-snug">{primaryLine}</p>
+        {#if queueBusy && !isPaused}
+          <p class="text-[11px] text-muted mt-1">A step is running now.</p>
+        {/if}
         {#if lastActivityLabel && !isStuck}
           <p class="text-[11px] text-faint mt-1">{lastActivityLabel}</p>
         {/if}
@@ -334,12 +424,23 @@
     </div>
 
     <!-- Progress bar (supporting) -->
-    <div class="h-1.5 bg-elevated rounded-full overflow-hidden mb-4">
+    <div class="h-1.5 bg-elevated rounded-full overflow-hidden mb-1">
       <div
         class="h-full transition-all duration-500 ease-out"
         style="width: {barWidth}%; background: {barColor};"
       ></div>
     </div>
+    {#if censusish}
+      <p class="text-[11px] text-faint mb-3 leading-snug">
+        Cataloging the site — not a malware scan.{#if filesScanned > 0} The file count is from earlier steps.{/if}
+      </p>
+    {:else if filesFlatHint}
+      <p class="text-[11px] text-faint mb-3 leading-snug">
+        File count is from this slice. Remaining steps include checksums and database work.
+      </p>
+    {:else}
+      <div class="mb-4"></div>
+    {/if}
 
     <!-- Live counters -->
     <div class="grid grid-cols-3 gap-3 mb-4">
@@ -355,13 +456,23 @@
       </div>
       <div class="rounded-lg bg-app border border-line px-3 py-2 text-center">
         <div
-          class="text-sm font-semibold tabular-nums {threatsFound > 0
+          class="text-sm font-semibold tabular-nums {malwareFound > 0 || threatsFound > 0
             ? 'text-red-700 dark:text-red-400'
             : 'text-ink'}"
         >
-          {threatsFound > 0 ? threatsFound.toLocaleString() : '—'}
+          {(malwareFound > 0 ? malwareFound : threatsFound) > 0
+            ? (malwareFound > 0 ? malwareFound : threatsFound).toLocaleString()
+            : '—'}
         </div>
-        <div class="text-[10px] text-muted mt-0.5">Threats</div>
+        <div class="text-[10px] text-muted mt-0.5">
+          {#if malwareFound > 0 && integrityFound > 0}
+            Signatures · {integrityFound} integrity
+          {:else if integrityFound > 0 && malwareFound === 0}
+            Integrity
+          {:else}
+            Signatures
+          {/if}
+        </div>
       </div>
     </div>
 
@@ -431,7 +542,7 @@
               <dd class="text-ink min-w-0 truncate" title={currentCheck}>{currentCheck}</dd>
             </div>
             <div class="flex gap-2 min-w-0">
-              <dt class="text-faint shrink-0 w-24">Last file</dt>
+              <dt class="text-faint shrink-0 w-24">Last scanned</dt>
               <dd class="font-mono text-ink min-w-0 truncate" title={lastFilePath || ''}>
                 {#if lastFilePath}
                   {relativePath(lastFilePath)}
@@ -470,8 +581,8 @@
           <p class="mt-2 text-[10px] text-faint">
             Queue-driven scan · progress is an estimate · auto-continue while this tab is open
           </p>
-          {#if message}
-            <p class="mt-1 text-[10px] text-faint font-mono truncate" title={message}>{message}</p>
+          {#if technicalMessage}
+            <p class="mt-1 text-[10px] text-faint font-mono truncate" title={technicalMessage}>{technicalMessage}</p>
           {/if}
         {/if}
       </div>

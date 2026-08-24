@@ -21,9 +21,29 @@ final class CleanSweep_CensusWorker implements CleanSweep_Worker {
 
         $phase = (string) ($payload['phase'] ?? 'site_owned');
         $offset = (int) ($payload['offset'] ?? 0);
+        $ctx->mergeState(['phase' => 'visit_census']);
         $census = new CleanSweep_Census();
-        $result = $census->run_phase($phase, $offset);
-        $ctx->progress(1, 4, 'Visit census: ' . $phase);
+        $result = $census->run_phase($phase, $offset, $payload, $ctx);
+        $ctx->progress(1, 4, 'Visit census: ' . ($result['phase'] ?? $phase));
+
+        if (!empty($result['cancelled'])) {
+            return CleanSweep_WorkerResult::completed([
+                'cancelled' => true,
+                'phase' => $phase,
+                'count' => $result['count'] ?? 0,
+                'duration_seconds' => time() - $started,
+            ]);
+        }
+
+        $follow = $result['follow_on_payload'] ?? null;
+        if (is_array($follow) && $follow !== []) {
+            return CleanSweep_WorkerResult::moreWork([
+                'phase' => $follow['phase'] ?? $phase,
+                'count' => $result['count'] ?? 0,
+                'duration_seconds' => time() - $started,
+                'follow_on_payload' => $follow,
+            ]);
+        }
 
         if (empty($result['done']) && !empty($result['next'])) {
             return CleanSweep_WorkerResult::moreWork([

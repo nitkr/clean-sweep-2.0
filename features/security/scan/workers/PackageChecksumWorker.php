@@ -43,6 +43,7 @@ final class CleanSweep_PackageChecksumWorker implements CleanSweep_Worker {
                 (int) (self::REUSE_TTL / 3600)
             );
             $ctx->mergeState([
+                'phase' => 'integrity',
                 'options' => array_merge($ctx->state()->options ?? [], [
                     'package_checksum_note' => $note,
                     'package_checksum_reused' => true,
@@ -61,6 +62,16 @@ final class CleanSweep_PackageChecksumWorker implements CleanSweep_Worker {
         $latest = $start === 0 ? [] : CleanSweep_PackageChecksums::load_latest();
         $findings = 0;
         $checked_pkgs = 0;
+        $ctx->mergeState([
+            'phase' => 'integrity',
+            'options' => array_merge($ctx->state()->options ?? [], [
+                'package_checksum_note' => sprintf(
+                    'Package checksums: checking %d/%d packages',
+                    min($start + 1, count($all)),
+                    count($all)
+                ),
+            ]),
+        ]);
 
         foreach ($slice as $pkg) {
             if ($ctx->shouldStop()) {
@@ -91,14 +102,16 @@ final class CleanSweep_PackageChecksumWorker implements CleanSweep_Worker {
             $checked_pkgs++;
         }
 
-        CleanSweep_PackageChecksums::save_latest($latest);
+        if ($checked_pkgs > 0) {
+            CleanSweep_PackageChecksums::save_latest($latest);
+        }
 
         if ($findings > 0) {
             $ctx->incrementCounter('threats_found', $findings);
             $ctx->incrementCounter('integrity_violations', $findings);
         }
 
-        $next = $start + $per;
+        $next = $start + $checked_pkgs;
         $note = sprintf(
             'Package checksums: %d/%d packages (all installed)',
             min($next, count($all)),
@@ -112,16 +125,19 @@ final class CleanSweep_PackageChecksumWorker implements CleanSweep_Worker {
 
         clean_sweep_log_message("CleanSweep_PackageChecksumWorker: {$note}, {$findings} finding(s)", 'info');
 
-        if ($next < count($all) && !$ctx->shouldStop()) {
+        if ($next < count($all) && !$ctx->isCancelled()) {
             return CleanSweep_WorkerResult::moreWork([
                 'checked_packages' => $checked_pkgs,
                 'findings' => $findings,
-                'follow_on_payload' => ['start' => $next],
+                'follow_on_payload' => [
+                    'start' => $next,
+                    'force' => !empty($payload['force']),
+                ],
                 'duration_seconds' => time() - $started,
             ]);
         }
 
-        if (!$ctx->shouldStop()) {
+        if (!$ctx->isCancelled()) {
             $this->enqueue_package_trees($ctx, $profile);
         }
 
