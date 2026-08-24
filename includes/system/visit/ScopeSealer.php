@@ -312,16 +312,22 @@ final class CleanSweep_ScopeSealer {
     /**
      * Compare sealed or snapshot-pinned trees to disk.
      *
+     * Missing or unpinned scopes are not a baseline. An empty files map
+     * must not mean "snapshot of nothing" (first scan false reinfection).
+     *
      * @return array<int,array>
      */
     public function compare_sealed(): array {
         $data = $this->state->load();
         $root = $this->site_root();
         $violations = [];
-        $core = $data['scopes']['core'] ?? null;
-        $owned = $data['scopes']['site_owned']['files'] ?? [];
+        $core = is_array($data['scopes']['core'] ?? null) ? $data['scopes']['core'] : null;
+        $owned_scope = is_array($data['scopes']['site_owned'] ?? null) ? $data['scopes']['site_owned'] : null;
+        $owned = $this->scope_files($owned_scope);
+        $mu_scope = is_array($data['scopes']['mu_plugins'] ?? null) ? $data['scopes']['mu_plugins'] : null;
+        $mu = $this->scope_files($mu_scope);
         $core_known = [];
-        if (is_array($core) && $this->in_baseline($core) && !empty($core['files'])) {
+        if (is_array($core) && $this->in_baseline($core) && !empty($core['files']) && is_array($core['files'])) {
             foreach ($core['files'] as $rel => $sample) {
                 if (!is_array($sample)) {
                     continue;
@@ -333,11 +339,9 @@ final class CleanSweep_ScopeSealer {
                 }
             }
         }
-        if (is_array($owned)) {
-            foreach ($owned as $rel => $sample) {
-                if (!isset($core_known[(string) $rel])) {
-                    $core_known[(string) $rel] = is_array($sample) ? $sample : [];
-                }
+        foreach ($owned as $rel => $sample) {
+            if (!isset($core_known[(string) $rel])) {
+                $core_known[(string) $rel] = is_array($sample) ? $sample : [];
             }
         }
         if (is_array($core) && $this->in_baseline($core)) {
@@ -345,31 +349,26 @@ final class CleanSweep_ScopeSealer {
                 $violations[] = $v;
             }
         }
-        if (is_array($owned)) {
-            foreach ($owned as $rel => $sample) {
-                if (!is_array($sample)) {
-                    continue;
-                }
-                $v = $this->diff_one($root . $rel, $rel, $sample, 'site_owned', true);
-                if ($v) {
-                    $violations[] = $v;
-                }
+        foreach ($owned as $rel => $sample) {
+            if (!is_array($sample)) {
+                continue;
+            }
+            $v = $this->diff_one($root . $rel, $rel, $sample, 'site_owned', true);
+            if ($v) {
+                $violations[] = $v;
             }
         }
-        $mu = $data['scopes']['mu_plugins']['files'] ?? [];
-        if (is_array($mu)) {
-            foreach ($mu as $rel => $sample) {
-                if (!is_array($sample)) {
-                    continue;
-                }
-                $v = $this->diff_one($root . $rel, $rel, $sample, 'mu_plugins', true);
-                if ($v) {
-                    $violations[] = $v;
-                }
+        foreach ($mu as $rel => $sample) {
+            if (!is_array($sample)) {
+                continue;
+            }
+            $v = $this->diff_one($root . $rel, $rel, $sample, 'mu_plugins', true);
+            if ($v) {
+                $violations[] = $v;
             }
         }
         $mu_dir = $root . 'wp-content/mu-plugins';
-        if (is_dir($mu_dir) && is_array($mu)) {
+        if (is_dir($mu_dir) && $this->in_baseline($mu_scope ?? [])) {
             foreach ($this->list_pin_files($mu_dir, 200) as $abs) {
                 $rel = $this->relative($root, $abs);
                 if (isset($mu[$rel]) || $this->is_watch_agent($rel)) {
@@ -430,7 +429,7 @@ final class CleanSweep_ScopeSealer {
                 $violations[] = $v;
             }
         }
-        if (is_array($owned)) {
+        if ($this->in_baseline($owned_scope ?? [])) {
             foreach ($this->list_wp_content_root_exec($root) as $abs) {
                 $rel = $this->relative($root, $abs);
                 if ($rel === '' || isset($owned[$rel])) {
@@ -445,8 +444,8 @@ final class CleanSweep_ScopeSealer {
                 ];
             }
         }
-        $up = $data['scopes']['uploads_exec'] ?? null;
-        $up_files = is_array($up['files'] ?? null) ? $up['files'] : [];
+        $up = is_array($data['scopes']['uploads_exec'] ?? null) ? $data['scopes']['uploads_exec'] : null;
+        $up_files = $this->scope_files($up);
         if (is_array($up) && $this->in_baseline($up) && $up_files !== []) {
             foreach ($up_files as $rel => $sample) {
                 if (!is_array($sample)) {
@@ -458,7 +457,7 @@ final class CleanSweep_ScopeSealer {
                 }
             }
         }
-        if (is_array($up) && (!empty($up['pinned']) || !empty($up['sealed']) || $up_files !== [])) {
+        if (is_array($up) && $this->in_baseline($up)) {
             foreach ($this->list_uploads_exec($root) as $abs) {
                 $rel = $this->relative($root, $abs);
                 if ($rel === '' || isset($up_files[$rel])) {
@@ -496,6 +495,18 @@ final class CleanSweep_ScopeSealer {
 
     private function in_baseline(array $scope): bool {
         return !empty($scope['sealed']) || !empty($scope['pinned']);
+    }
+
+    /**
+     * @param array|null $scope
+     * @return array<string,array>
+     */
+    private function scope_files(?array $scope): array {
+        if (!is_array($scope)) {
+            return [];
+        }
+        $files = $scope['files'] ?? null;
+        return is_array($files) ? $files : [];
     }
 
     /**

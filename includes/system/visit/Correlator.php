@@ -232,10 +232,8 @@ final class CleanSweep_Correlator {
             'entry' => $entry,
             'candidates' => $writer_list,
         ];
-        // First malware pass with no sealed/hash drift is not attribution — skip storing.
-        if ($reinfection) {
-            $this->store->set_likely_source($out);
-        }
+        // First malware pass with no sealed/hash drift is not attribution.
+        $this->store->set_likely_source($reinfection ? $out : null);
         return $out;
     }
 
