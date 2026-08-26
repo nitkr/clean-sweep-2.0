@@ -162,6 +162,13 @@ class CleanSweep_SignaturePreFilter {
             return array_values(array_unique($this->target_index_map[$extension]));
         }
 
+        // Inline <script> in HTML uses the JS rule set (not a separate html target).
+        if (is_array($this->target_index_map) && in_array($extension, ['html', 'htm'], true)
+            && isset($this->target_index_map['js'])
+        ) {
+            return array_values(array_unique($this->target_index_map['js']));
+        }
+
         // Alias: PHP shells / includes share php-targeted rules
         if (is_array($this->target_index_map) && in_array($extension, ['phtml', 'php3', 'php4', 'php5', 'php7', 'php8', 'phar', 'inc'], true)
             && isset($this->target_index_map['php'])
@@ -211,6 +218,8 @@ class CleanSweep_SignaturePreFilter {
             'phar'  => $php_cats,
             'inc'   => $php_cats,
             'js'   => ['js_malicious', 'js_web', 'general'],
+            'html' => ['js_malicious', 'js_web', 'general'],
+            'htm'  => ['js_malicious', 'js_web', 'general'],
             'json' => ['general'],
             'conf' => ['general'],
             'cfg'  => ['general'],
@@ -258,8 +267,14 @@ class CleanSweep_SignaturePreFilter {
         if (strpos($p, 'base64') !== false || strpos($p, 'gzinflate') !== false || strpos($p, 'str_rot13') !== false) {
             return 'obfuscation';
         }
-        if (strpos($p, 'cookie') !== false || strpos($p, 'document.') !== false) {
+        if (strpos($p, 'document.') !== false || strpos($p, 'fromcharcode') !== false || strpos($p, 'innerhtml') !== false) {
             return 'js_web';
+        }
+        if (strpos($p, '$_cookie') !== false || strpos($p, '$_get') !== false
+            || strpos($p, '$_post') !== false || strpos($p, '$_request') !== false
+            || strpos($p, 'shell_exec') !== false || strpos($p, 'proc_open') !== false
+            || strpos($p, 'popen') !== false || strpos($p, 'symlink') !== false) {
+            return 'php_dangerous';
         }
         return 'general';
     }

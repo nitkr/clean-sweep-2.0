@@ -118,12 +118,12 @@ final class CleanSweep_RootConfigWorker implements CleanSweep_Worker {
             return $threats;
         }
 
-        if (preg_match('/(?:AddHandler|SetHandler|AddType)\s+[^\r\n]*(?:application\/x-httpd-php|php)[^\r\n]*\.(?:jpg|jpeg|png|gif|txt|ico|pdf|webp)/i', $content, $m)) {
+        if (preg_match('/(?:AddHandler|SetHandler|AddType)\s+[^\r\n]*(?:application\/x-httpd-php|php)[^\r\n]*\.(?:jpg|jpeg|png|gif|txt|ico|pdf|webp|js|css|html|htm|json|svg)/i', $content, $m)) {
             $threats[] = $this->finding(
                 $path,
                 'php_handler_on_asset',
                 $m[0],
-                'Apache is treating image/text extensions as PHP. Classic backdoor hide.',
+                'Apache is treating image/text/js/html extensions as PHP. Classic backdoor hide.',
                 'critical',
                 95
             );

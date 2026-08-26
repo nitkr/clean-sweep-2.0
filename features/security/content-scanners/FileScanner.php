@@ -668,6 +668,14 @@ class CleanSweep_FileScanner {
             $file_signatures = $this->signature_filter->get_compiled_for_filetype('php');
         }
 
+        // PHP hidden as .js / .php.js, or a <?php opener in a non-PHP file.
+        if ($this->signature_filter && $this->should_apply_php_signatures($file_path, $base, $extension)) {
+            $file_signatures = $this->merge_compiled_signatures(
+                is_array($file_signatures) ? $file_signatures : [],
+                $this->signature_filter->get_compiled_for_filetype('php')
+            );
+        }
+
         if (empty($file_signatures)) {
             return $threats;
         }
@@ -684,6 +692,64 @@ class CleanSweep_FileScanner {
         }
 
         return $threats;
+    }
+
+    /**
+     * PHP-family rules for disguises (shell.php.js) or a <?php opener in JS/HTML.
+     */
+    private function should_apply_php_signatures($file_path, $base, $extension) {
+        if (method_exists($this->profile, 'looks_like_php_disguise')
+            && $this->profile->looks_like_php_disguise($base)) {
+            return true;
+        }
+        if (!in_array($extension, ['js', 'html', 'htm'], true)) {
+            return false;
+        }
+        return $this->file_starts_like_php($file_path);
+    }
+
+    /**
+     * Peek the first 4KB for a PHP opener. Do not sniff on PHP tokens like eval(.
+     */
+    private function file_starts_like_php($file_path) {
+        $handle = @fopen($file_path, 'rb');
+        if (!$handle) {
+            return false;
+        }
+        $head = fread($handle, 4096);
+        fclose($handle);
+        if (!is_string($head) || $head === '') {
+            return false;
+        }
+        if (strncmp($head, "\xEF\xBB\xBF", 3) === 0) {
+            $head = substr($head, 3);
+        }
+        return (bool) preg_match('/<\?(?:php|=)\b/i', $head);
+    }
+
+    /**
+     * Union compiled signature lists by pack index.
+     *
+     * @param array $base
+     * @param array $extra
+     * @return array
+     */
+    private function merge_compiled_signatures(array $base, array $extra) {
+        $seen = [];
+        $out = [];
+        foreach (array_merge($base, $extra) as $item) {
+            if (!is_array($item) || !isset($item['index'])) {
+                $out[] = $item;
+                continue;
+            }
+            $i = (int) $item['index'];
+            if (isset($seen[$i])) {
+                continue;
+            }
+            $seen[$i] = true;
+            $out[] = $item;
+        }
+        return $out;
     }
 
     /**

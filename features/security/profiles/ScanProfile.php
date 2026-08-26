@@ -160,15 +160,15 @@ class CleanSweep_ScanProfile {
     private static function standard_file_types() {
         return [
             'php', 'phtml', 'php3', 'php4', 'php5', 'php7', 'php8', 'phar',
-            'js', 'json',
+            'js', 'json', 'html', 'htm',
             'conf', 'cfg', 'ini', 'config',
         ];
     }
 
     /**
      * Create QUICK profile — light scope for low-resource / shared hosts.
-     * Depth 2 (same as original default): plugins/themes/mu-plugins plus
-     * shallow uploads (uploads/ and uploads/YYYY/, not month folders).
+     * Plugin/theme tree depth 5 (assets/js); shallow uploads (uploads/ and
+     * uploads/YYYY/, not month folders).
      *
      * @return self
      */
@@ -390,7 +390,8 @@ class CleanSweep_ScanProfile {
                 return 12;
             }
             if ($this->profile_id === self::QUICK) {
-                return 2;
+                // 4 reaches plugins/<slug>/assets/js (wp-content=0 … js=4).
+                return 5;
             }
             return 8;
         }
@@ -1036,6 +1037,11 @@ class CleanSweep_ScanProfile {
                     return !$this->is_php_family_file($normalized);
                 }
                 return false;
+            }
+            // Bundled plugin/theme *.min.js stays skipped (packer FPs). Uploads
+            // min.js is a common malware drop and is still scanned.
+            if ($pattern === '*.min.js' && $this->path_has_segment($normalized, 'uploads')) {
+                continue;
             }
             if ($this->matches_pattern($normalized, $pattern)) {
                 return true;
