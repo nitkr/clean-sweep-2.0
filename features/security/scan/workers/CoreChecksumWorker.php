@@ -8,6 +8,7 @@
  * Flags:
  *  - official wp-admin / wp-includes / root core file whose MD5 does not match
  *  - extra .php sitting under wp-admin or wp-includes
+ *  - extra .js / .html under wp-admin or wp-includes (medium; content-scanned)
  *
  * Root extras (custom scripts) are not auto-flagged. Missing official
  * files are not flagged (incomplete installs). wp-config.php and
@@ -430,12 +431,26 @@ final class CleanSweep_CoreChecksumWorker implements CleanSweep_Worker {
                     'critical',
                     95
                 );
+            } elseif ($this->is_unexpected_web_asset($ext)) {
+                $checked++;
+                $findings[] = $this->finding(
+                    $full,
+                    $rel,
+                    'unexpected_core_js',
+                    'JS/HTML file under wp-admin / wp-includes is not in the official WordPress package.',
+                    'medium',
+                    55
+                );
             }
         }
     }
 
     private function is_unexpected_executable(string $ext): bool {
         return in_array($ext, ['php', 'phtml', 'php3', 'php4', 'php5', 'php7', 'php8', 'phar'], true);
+    }
+
+    private function is_unexpected_web_asset(string $ext): bool {
+        return in_array($ext, ['js', 'html', 'htm'], true);
     }
 
     private function finding(string $abs, string $rel, string $code, string $description, string $level, int $score): array {

@@ -4,6 +4,16 @@
  */
 final class CleanSweep_Census {
 
+    private static function ensure_scan_profile_loaded() {
+        if (class_exists('CleanSweep_ScanProfile', false)) {
+            return;
+        }
+        $sp = dirname(__DIR__, 3) . '/features/security/profiles/ScanProfile.php';
+        if (is_readable($sp)) {
+            require_once $sp;
+        }
+    }
+
     private const PHP_EXTS = ['php', 'phtml', 'php3', 'php4', 'php5', 'php7', 'php8', 'phar'];
 
     private const EXTRA_PHP_PER_TREE = 8000;
@@ -93,7 +103,9 @@ final class CleanSweep_Census {
         if ($this->ctx_cancelled($ctx)) {
             return ['cancelled' => true, 'done' => true, 'next' => null, 'count' => count($samples)];
         }
-        return ['done' => true, 'next' => 'extra_php', 'count' => count($samples)];
+        // Quick: do not catalog plugins/uploads (backup dumps stall the scan).
+        $next = $this->is_quick_profile($ctx) ? 'options' : 'extra_php';
+        return ['done' => true, 'next' => $next, 'count' => count($samples)];
     }
 
     /**
@@ -260,15 +272,24 @@ final class CleanSweep_Census {
             'plugins' => true, 'themes' => true, 'uploads' => true,
             'mu-plugins' => true, 'node_modules' => true, '.git' => true, 'clean-sweep' => true,
         ];
+        $profile = $this->scan_profile($ctx);
         $skip_files = [
             'db.php' => true, 'object-cache.php' => true,
             'advanced-cache.php' => true, 'sunrise.php' => true,
         ];
         try {
             $inner = new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS);
-            $filtered = new RecursiveCallbackFilterIterator($inner, static function ($current) use ($skip_dirs) {
+            $filtered = new RecursiveCallbackFilterIterator($inner, static function ($current) use ($skip_dirs, $profile) {
                 if ($current->isDir()) {
-                    return !isset($skip_dirs[strtolower($current->getFilename())]);
+                    $name = strtolower($current->getFilename());
+                    if (isset($skip_dirs[$name])) {
+                        return false;
+                    }
+                    if ($profile && method_exists($profile, 'is_backup_vault_directory')
+                        && $profile->is_backup_vault_directory($current->getPathname())
+                    ) {
+                        return false;
+                    }
                 }
                 return true;
             });
@@ -356,10 +377,45 @@ final class CleanSweep_Census {
         $samples = [];
         $budget = 40;
         $media_cap = $all_media ? self::UPLOAD_ALL_MEDIA_CAP : self::UPLOAD_IMAGE_CAP;
+        $profile = $this->scan_profile($ctx);
         try {
-            $iter = new RecursiveIteratorIterator(
-                new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS)
-            );
+            $inner = new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS);
+            $filtered = new RecursiveCallbackFilterIterator($inner, static function ($current) use ($profile) {
+                if (!$current->isDir()) {
+                    return true;
+                }
+                self::ensure_scan_profile_loaded();
+                if (!$profile && class_exists('CleanSweep_ScanProfile', false)) {
+                    // Integrity snapshot path: skip vaults even without a scan ctx.
+                    $name = $current->getFilename();
+                    if (CleanSweep_ScanProfile::is_backup_vault_name($name)) {
+                        $parent = strtolower(basename(dirname($current->getPathname())));
+                        return $parent === 'plugins' || $parent === 'themes';
+                    }
+                    return true;
+                }
+                if (!$profile) {
+                    return true;
+                }
+                $path = $current->getPathname();
+                if (method_exists($profile, 'is_backup_vault_directory')
+                    && $profile->is_backup_vault_directory($path)
+                ) {
+                    return false;
+                }
+                if (method_exists($profile, 'is_exploded_site_copy')
+                    && $profile->is_exploded_site_copy($path)
+                ) {
+                    return false;
+                }
+                if (method_exists($profile, 'is_backup_nested_skip')
+                    && $profile->is_backup_nested_skip($path)
+                ) {
+                    return false;
+                }
+                return true;
+            });
+            $iter = new RecursiveIteratorIterator($filtered);
         } catch (Throwable $e) {
             return ['done' => true, 'next' => 'options', 'count' => 0];
         }
@@ -512,6 +568,22 @@ final class CleanSweep_Census {
             }
         }
         return $hits;
+    }
+
+    private function scan_profile($ctx) {
+        if (!is_object($ctx) || !method_exists($ctx, 'profile')) {
+            return null;
+        }
+        $p = $ctx->profile();
+        return is_object($p) ? $p : null;
+    }
+
+    private function is_quick_profile($ctx): bool {
+        $p = $this->scan_profile($ctx);
+        if (!$p || !method_exists($p, 'get_profile_id')) {
+            return false;
+        }
+        return $p->get_profile_id() === 'quick';
     }
 
     private function ctx_cancelled($ctx): bool {
@@ -740,7 +812,18 @@ final class CleanSweep_Census {
             $inner = new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS);
             $filtered = new RecursiveCallbackFilterIterator($inner, static function ($current) use ($skip_dirs) {
                 if ($current->isDir()) {
-                    return !isset($skip_dirs[strtolower($current->getFilename())]);
+                    $name = $current->getFilename();
+                    if (isset($skip_dirs[strtolower($name)])) {
+                        return false;
+                    }
+                    if (class_exists('CleanSweep_ScanProfile', false)
+                        && CleanSweep_ScanProfile::is_backup_vault_name($name)
+                    ) {
+                        $parent = strtolower(basename(dirname($current->getPathname())));
+                        if ($parent !== 'plugins' && $parent !== 'themes') {
+                            return false;
+                        }
+                    }
                 }
                 return true;
             });
@@ -825,9 +908,25 @@ final class CleanSweep_Census {
         }
         $php = [];
         $media = [];
-        $iter = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS)
-        );
+        try {
+            $inner = new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS);
+            $filtered = new RecursiveCallbackFilterIterator($inner, static function ($current) {
+                if (!$current->isDir()) {
+                    return true;
+                }
+                $name = $current->getFilename();
+                if (class_exists('CleanSweep_ScanProfile', false)
+                    && CleanSweep_ScanProfile::is_backup_vault_name($name)
+                ) {
+                    $parent = strtolower(basename(dirname($current->getPathname())));
+                    return $parent === 'plugins' || $parent === 'themes';
+                }
+                return true;
+            });
+            $iter = new RecursiveIteratorIterator($filtered);
+        } catch (Throwable $e) {
+            return [];
+        }
         foreach ($iter as $file) {
             if (!$file->isFile()) {
                 continue;

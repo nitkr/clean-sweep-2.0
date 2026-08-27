@@ -28,6 +28,7 @@ class CleanSweep_UserAudit {
         'officialwp', 'wpsystem', 'backupadmin', 'db_admin',
         'wp_maintenance', 'security_check', 'admin_backup',
         'mr_administartor', 'wp_update', 'wp-bot', 'wp_bot',
+        'wpenginebot', 'wphiddenbot',
         'supportadmin', 'plugincheck', 'wpsecurity', 'adminbackup',
         'wordpressuser',
     ];

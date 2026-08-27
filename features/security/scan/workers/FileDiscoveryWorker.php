@@ -92,22 +92,24 @@ final class CleanSweep_FileDiscoveryWorker implements CleanSweep_Worker {
                 if ($item->isLink() && $item->isDir()) {
                     // Skip linked directories; still honor slice/cancel below.
                 } elseif ($item->isDir()) {
-                    if (!($defer_packages && $this->is_package_tree_name($path))
+                    if ($profile->is_exploded_site_copy($path) || $profile->is_backup_nested_skip($path)) {
+                        // Nested restore / vendor dump — not live site code.
+                    } elseif (!($defer_packages && $this->is_package_tree_name($path))
                         && !$profile->is_excluded($path)
-                        && $max_depth > 0
                         && $queue !== null
                     ) {
                         $budget = (int) $profile->get_tree_max_depth($path);
                         $from_content = (int) $profile->content_relative_depth($path);
                         $remain = $budget - $from_content;
-                        if ($remain >= 0) {
+                        $vault_surface = $profile->is_backup_vault_directory($path) && $remain <= 0;
+                        if ($remain > 0 || $vault_surface) {
                             $disc = CleanSweep_ScanWorkUnit::create(
                                 $state->scan_id,
                                 CleanSweep_ScanWorkUnit::TYPE_FILE_DISCOVERY,
                                 [
                                     'base_dir' => $path,
                                     'start_path' => $path,
-                                    'max_depth' => $remain,
+                                    'max_depth' => $vault_surface ? 0 : $remain,
                                 ],
                                 120
                             );
@@ -271,6 +273,7 @@ final class CleanSweep_FileDiscoveryWorker implements CleanSweep_Worker {
             'svg' => true, 'ico' => true, 'bmp' => true, 'tif' => true, 'tiff' => true,
             'mp4' => true, 'mp3' => true, 'wav' => true, 'avi' => true, 'mov' => true,
             'zip' => true, 'gz' => true, 'tar' => true, 'rar' => true, '7z' => true,
+            'wpress' => true, 'sql' => true,
             'pdf' => true, 'doc' => true, 'docx' => true, 'xls' => true, 'xlsx' => true,
             'woff' => true, 'woff2' => true, 'ttf' => true, 'eot' => true,
             'map' => true, 'lock' => true,

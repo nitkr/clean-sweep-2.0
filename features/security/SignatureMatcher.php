@@ -112,11 +112,16 @@ class CleanSweep_SignatureMatcher {
      * @param string $content
      * @param array $signatures Compiled list (ordered by caller if desired)
      * @param callable|null $on_tick function(int $n): bool  return true to pause/stop
-     * @return array<int, array{index:int,pattern:string,match:string,meta:array}>
+     * @param int $start_offset Byte offset to start searching (not a substr; ^ still means start of $content)
+     * @return array<int, array{index:int,pattern:string,match:string,offset:int,meta:array}>
      */
-    public static function match_content($content, array $signatures, $on_tick = null) {
+    public static function match_content($content, array $signatures, $on_tick = null, $start_offset = 0) {
         $hits = [];
         $n = 0;
+        $start_offset = (int) $start_offset;
+        if ($start_offset < 0) {
+            $start_offset = 0;
+        }
 
         foreach ($signatures as $key => $item) {
             if (is_array($item)) {
@@ -137,18 +142,21 @@ class CleanSweep_SignatureMatcher {
                 }
             }
 
-            if (@preg_match($pattern, $content, $matches) === false) {
+            if (@preg_match($pattern, $content, $matches, PREG_OFFSET_CAPTURE, $start_offset) === false) {
                 continue;
             }
-            if (empty($matches[0])) {
+            if (!isset($matches[0][0]) || $matches[0][0] === '') {
                 continue;
             }
+
+            $match_text = $matches[0][0];
+            $match_offset = (int) $matches[0][1];
 
             $meta = self::enrich($index, $pattern);
             // Re-score with matched content for heuristic fallback path
             $meta['risk_score'] = CleanSweep_ThreatCollector::resolve_risk_score(
                 $pattern,
-                $matches[0],
+                $match_text,
                 $meta['severity']
             );
             $meta['threat_level'] = CleanSweep_ThreatCollector::risk_score_to_level($meta['risk_score']);
@@ -156,7 +164,8 @@ class CleanSweep_SignatureMatcher {
             $hits[] = [
                 'index' => $index,
                 'pattern' => $pattern,
-                'match' => $matches[0],
+                'match' => $match_text,
+                'offset' => $match_offset,
                 'meta' => $meta,
             ];
         }

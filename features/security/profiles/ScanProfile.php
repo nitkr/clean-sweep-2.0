@@ -160,15 +160,15 @@ class CleanSweep_ScanProfile {
     private static function standard_file_types() {
         return [
             'php', 'phtml', 'php3', 'php4', 'php5', 'php7', 'php8', 'phar',
-            'js', 'json',
+            'js', 'json', 'html', 'htm',
             'conf', 'cfg', 'ini', 'config',
         ];
     }
 
     /**
      * Create QUICK profile — light scope for low-resource / shared hosts.
-     * Depth 2 (same as original default): plugins/themes/mu-plugins plus
-     * shallow uploads (uploads/ and uploads/YYYY/, not month folders).
+     * Plugin/theme tree depth 5 (assets/js); shallow uploads (uploads/ and
+     * uploads/YYYY/, not month folders).
      *
      * @return self
      */
@@ -361,6 +361,19 @@ class CleanSweep_ScanProfile {
      */
     public function get_tree_max_depth($path) {
         $n = str_replace('\\', '/', (string) $path);
+        // Vault / exploded dump under uploads: surface only (direct files).
+        // Checked before generic uploads depth so snapshot-backups is not walked.
+        if ($this->is_exploded_site_copy($n) || $this->is_backup_nested_skip($n)) {
+            return 0;
+        }
+        if ($this->is_backup_path($n)) {
+            $from = $this->content_relative_depth($n);
+            if ($this->include_backups && $this->profile_id === self::DEEP) {
+                return max($from, 6);
+            }
+            // Quick/Standard: enqueue the vault with remain=0 (top-level PHP only).
+            return $from;
+        }
         if ($this->path_has_segment($n, 'uploads')) {
             if (!$this->include_uploads) {
                 return 0;
@@ -373,9 +386,6 @@ class CleanSweep_ScanProfile {
         }
         if ($this->path_has_segment($n, 'vendor')) {
             return ($this->include_vendor && $this->profile_id === self::DEEP) ? 6 : 0;
-        }
-        if ($this->is_backup_path($n)) {
-            return ($this->include_backups && $this->profile_id === self::DEEP) ? 6 : 0;
         }
         if ($this->path_is_cache($n)) {
             if ($this->profile_id === self::QUICK) {
@@ -390,7 +400,8 @@ class CleanSweep_ScanProfile {
                 return 12;
             }
             if ($this->profile_id === self::QUICK) {
-                return 2;
+                // 4 reaches plugins/<slug>/assets/js (wp-content=0 … js=4).
+                return 5;
             }
             return 8;
         }
@@ -1023,7 +1034,13 @@ class CleanSweep_ScanProfile {
         if (!$this->include_vendor && $this->path_has_segment($normalized, 'vendor')) {
             return true;
         }
-        if (!$this->include_backups && $this->is_backup_path($normalized)) {
+        // Exploded site copies and vendor inside a dump: never signature-scan.
+        if ($this->is_exploded_site_copy($normalized) || $this->is_backup_nested_skip($normalized)) {
+            return true;
+        }
+        // Quick/Standard: skip vault *interiors* (nested restore trees), not the
+        // vault root or its direct files (dropper layer).
+        if (!$this->include_backups && $this->is_backup_interior($normalized)) {
             return true;
         }
 
@@ -1036,6 +1053,11 @@ class CleanSweep_ScanProfile {
                     return !$this->is_php_family_file($normalized);
                 }
                 return false;
+            }
+            // Bundled plugin/theme *.min.js stays skipped (packer FPs). Uploads
+            // min.js is a common malware drop and is still scanned.
+            if ($pattern === '*.min.js' && $this->path_has_segment($normalized, 'uploads')) {
+                continue;
             }
             if ($this->matches_pattern($normalized, $pattern)) {
                 return true;
@@ -1065,23 +1087,171 @@ class CleanSweep_ScanProfile {
     }
 
     /**
-     * Backup-related directories (backups, backup, backup-*, updraft, etc.).
+     * Directory basename looks like a backup/migration vault (not a plugin slug).
      *
-     * @param string $normalized_path
+     * @param string $basename
      * @return bool
      */
-    private function is_backup_path($normalized_path) {
-        // Segment starts with "backup" (backup, backups, backup-db, …)
-        if (preg_match('#/(backup[^/]*)(/|$)#i', $normalized_path)) {
+    public static function is_backup_vault_name($basename) {
+        $b = strtolower((string) $basename);
+        if ($b === '' || $b === '.' || $b === '..') {
+            return false;
+        }
+        if (strpos($b, 'backup') === 0 || substr($b, -7) === 'backups') {
             return true;
         }
-        // Common WP backup plugin folder names
-        foreach (['updraft', 'backwpup', 'backupbuddy', 'wpvivid', 'ai1wm-backups'] as $name) {
-            if ($this->path_has_segment($normalized_path, $name)) {
-                return true;
+        if (strpos($b, 'backwpup') === 0) {
+            return true;
+        }
+        static $exact = [
+            'updraft' => true,
+            'ai1wm-backups' => true,
+            'all-in-one-wp-migration-backups' => true,
+            'snapshot-backups' => true,
+            'wp-snapshots' => true,
+            'wpvividbackups' => true,
+            'pb_backupbuddy' => true,
+            'upsupsystic' => true,
+            'wp-backups' => true,
+            'wp-migrate-db' => true,
+            'duplicator-backups' => true,
+            'duplicator-pro-files' => true,
+            'boldgrid-backup' => true,
+            'iwp-backups' => true,
+        ];
+        return isset($exact[$b]);
+    }
+
+    /**
+     * Path sits in a backup/migration vault (uploads/snapshot-backups, wp-content/updraft, …).
+     * Plugin/theme slugs that happen to contain "backup" are not vaults.
+     *
+     * @param string $path
+     * @return bool
+     */
+    public function is_backup_path($path) {
+        $n = str_replace('\\', '/', (string) $path);
+        $parts = explode('/', trim($n, '/'));
+        $count = count($parts);
+        for ($i = 0; $i < $count; $i++) {
+            if (!self::is_backup_vault_name($parts[$i])) {
+                continue;
             }
+            $prev = $i > 0 ? strtolower($parts[$i - 1]) : '';
+            if ($prev === 'plugins' || $prev === 'themes') {
+                continue;
+            }
+            return true;
         }
         return false;
+    }
+
+    /**
+     * This directory itself is a vault root (basename matches).
+     *
+     * @param string $path
+     * @return bool
+     */
+    public function is_backup_vault_directory($path) {
+        $n = str_replace('\\', '/', (string) $path);
+        $base = basename(rtrim($n, '/'));
+        if (!self::is_backup_vault_name($base)) {
+            return false;
+        }
+        $parent = strtolower(basename(dirname($n)));
+        return $parent !== 'plugins' && $parent !== 'themes';
+    }
+
+    /**
+     * Nested path inside a vault (not the vault root or a direct child file/dir).
+     *
+     * @param string $path
+     * @return bool
+     */
+    public function is_backup_interior($path) {
+        $n = rtrim(str_replace('\\', '/', (string) $path), '/');
+        $vault = $this->backup_vault_root($n);
+        if ($vault === null) {
+            return false;
+        }
+        if (strcasecmp($n, $vault) === 0) {
+            return false;
+        }
+        $rel = ltrim(substr($n, strlen($vault)), '/');
+        return strpos($rel, '/') !== false;
+    }
+
+    /**
+     * Nested WordPress tree inside uploads or a vault (Snapshot import, …).
+     *
+     * @param string $path
+     * @return bool
+     */
+    public function is_exploded_site_copy($path) {
+        $n = str_replace('\\', '/', (string) $path);
+        $rest = null;
+        // Only the WordPress media dir — a parent folder named "uploads" must not
+        // mark wp-content/plugins as an exploded dump.
+        $up = stripos($n, '/wp-content/uploads/');
+        if ($up !== false) {
+            $rest = substr($n, $up + strlen('/wp-content/uploads/'));
+        } else {
+            $vault = $this->backup_vault_root($n);
+            if ($vault !== null && strncasecmp($n, $vault, strlen($vault)) === 0) {
+                $rest = ltrim(substr($n, strlen($vault)), '/');
+            }
+        }
+        if ($rest === null || $rest === '') {
+            return false;
+        }
+        // Require a dump prefix (vault/hash/import) before the nested WP tree so
+        // uploads/wp-includes/shell.php is still scanned as a dropper.
+        return (bool) preg_match(
+            '#/.+/(?:wp-content/(?:plugins|themes)|wp-includes|wp-admin)(?:/|$)#i',
+            '/' . $rest
+        );
+    }
+
+    /**
+     * vendor/node_modules inside a backup vault (even on Deep).
+     *
+     * @param string $path
+     * @return bool
+     */
+    public function is_backup_nested_skip($path) {
+        $n = str_replace('\\', '/', (string) $path);
+        if (!$this->is_backup_path($n) && !$this->is_exploded_site_copy($n)) {
+            return false;
+        }
+        return $this->path_has_segment($n, 'vendor')
+            || $this->path_has_segment($n, 'node_modules')
+            || $this->path_has_segment($n, '.git');
+    }
+
+    /**
+     * Path of the vault directory containing $path, if any.
+     *
+     * @param string $normalized_path
+     * @return string|null
+     */
+    private function backup_vault_root($normalized_path) {
+        $n = str_replace('\\', '/', (string) $normalized_path);
+        $abs = ($n !== '' && $n[0] === '/');
+        $parts = [];
+        foreach (explode('/', trim($n, '/')) as $seg) {
+            if ($seg !== '') {
+                $parts[] = $seg;
+            }
+        }
+        foreach ($parts as $i => $seg) {
+            $prev = $i > 0 ? strtolower($parts[$i - 1]) : '';
+            if (!self::is_backup_vault_name($seg) || $prev === 'plugins' || $prev === 'themes') {
+                continue;
+            }
+            $slice = array_slice($parts, 0, $i + 1);
+            return ($abs ? '/' : '') . implode('/', $slice);
+        }
+        return null;
     }
 
     /**

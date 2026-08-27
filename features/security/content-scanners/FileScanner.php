@@ -100,6 +100,9 @@ class CleanSweep_FileScanner {
     /** @var string[]|null Cached realpath roots for is_allowed_scan_path */
     private $cached_allowed_roots = null;
 
+    /** @var array<string,true> Hits already emitted for the file being scanned */
+    private $file_hit_seen = [];
+
     /**
      * Constructor.
      *
@@ -668,9 +671,20 @@ class CleanSweep_FileScanner {
             $file_signatures = $this->signature_filter->get_compiled_for_filetype('php');
         }
 
+        // PHP hidden as .js / .php.js, or a <?php opener in a non-PHP file.
+        if ($this->signature_filter && $this->should_apply_php_signatures($file_path, $base, $extension)) {
+            $file_signatures = $this->merge_compiled_signatures(
+                is_array($file_signatures) ? $file_signatures : [],
+                $this->signature_filter->get_compiled_for_filetype('php')
+            );
+        }
+
         if (empty($file_signatures)) {
             return $threats;
         }
+
+        // Overlap is re-scanned so the same hit can appear in two chunks.
+        $this->file_hit_seen = [];
 
         // Scan file in chunks
         $this->chunk_processor->read_chunks($file_path, function($chunk, $chunk_info) use ($file_path, $file_signatures, &$threats) {
@@ -687,6 +701,64 @@ class CleanSweep_FileScanner {
     }
 
     /**
+     * PHP-family rules for disguises (shell.php.js) or a <?php opener in JS/HTML.
+     */
+    private function should_apply_php_signatures($file_path, $base, $extension) {
+        if (method_exists($this->profile, 'looks_like_php_disguise')
+            && $this->profile->looks_like_php_disguise($base)) {
+            return true;
+        }
+        if (!in_array($extension, ['js', 'html', 'htm'], true)) {
+            return false;
+        }
+        return $this->file_starts_like_php($file_path);
+    }
+
+    /**
+     * Peek the first 4KB for a PHP opener. Do not sniff on PHP tokens like eval(.
+     */
+    private function file_starts_like_php($file_path) {
+        $handle = @fopen($file_path, 'rb');
+        if (!$handle) {
+            return false;
+        }
+        $head = fread($handle, 4096);
+        fclose($handle);
+        if (!is_string($head) || $head === '') {
+            return false;
+        }
+        if (strncmp($head, "\xEF\xBB\xBF", 3) === 0) {
+            $head = substr($head, 3);
+        }
+        return (bool) preg_match('/<\?(?:php|=)\b/i', $head);
+    }
+
+    /**
+     * Union compiled signature lists by pack index.
+     *
+     * @param array $base
+     * @param array $extra
+     * @return array
+     */
+    private function merge_compiled_signatures(array $base, array $extra) {
+        $seen = [];
+        $out = [];
+        foreach (array_merge($base, $extra) as $item) {
+            if (!is_array($item) || !isset($item['index'])) {
+                $out[] = $item;
+                continue;
+            }
+            $i = (int) $item['index'];
+            if (isset($seen[$i])) {
+                continue;
+            }
+            $seen[$i] = true;
+            $out[] = $item;
+        }
+        return $out;
+    }
+
+    /**
      * Match signatures against chunk content.
      *
      * @param string $content Chunk content
@@ -700,18 +772,35 @@ class CleanSweep_FileScanner {
 
         $signatures = CleanSweep_SignatureMatcher::order_by_severity($signatures);
         $throttler = $this->throttler;
-
-        $hits = CleanSweep_SignatureMatcher::match_content(
-            $content,
-            $signatures,
-            function ($n) use ($throttler) {
-                if ($throttler) {
-                    $throttler->micro_yield($n);
-                }
-                // should_pause_for_time_limit() sets needs_pause for the outer loop
-                return ($n % 25 === 0 && $this->should_pause_for_time_limit());
+        $tick = function ($n) use ($throttler) {
+            if ($throttler) {
+                $throttler->micro_yield($n);
             }
-        );
+            // should_pause_for_time_limit() sets needs_pause for the outer loop
+            return ($n % 25 === 0 && $this->should_pause_for_time_limit());
+        };
+
+        $hits = CleanSweep_SignatureMatcher::match_content($content, $signatures, $tick);
+
+        // A hit in the overlap prefix is leftmost; preg_match then never sees a
+        // later copy in this chunk's unique bytes. Re-search from the unique start.
+        $overlap_len = strlen($chunk_info['previous_tail'] ?? '');
+        if ($overlap_len > 0 && empty($chunk_info['is_first']) && $hits) {
+            $rescan = [];
+            foreach ($hits as $hit) {
+                if ((int) ($hit['offset'] ?? 0) < $overlap_len) {
+                    $rescan[] = [
+                        'index' => (int) $hit['index'],
+                        'pattern' => (string) $hit['pattern'],
+                    ];
+                }
+            }
+            if ($rescan !== []) {
+                foreach (CleanSweep_SignatureMatcher::match_content($content, $rescan, $tick, $overlap_len) as $extra) {
+                    $hits[] = $extra;
+                }
+            }
+        }
 
         foreach ($hits as $hit) {
             $pattern = $hit['pattern'];
@@ -720,17 +809,29 @@ class CleanSweep_FileScanner {
             $sig_index = (int) $hit['index'];
             $sig_id = $meta['id'];
 
-            $match_position = strpos($content, $match);
-            if ($match_position === false) {
-                $match_position = 0;
+            if (isset($hit['offset'])) {
+                $match_position = (int) $hit['offset'];
+            } else {
+                $match_position = strpos($content, $match);
+                if ($match_position === false) {
+                    $match_position = 0;
+                }
             }
             $line_number = $this->chunk_processor->calculate_line_number($content, $match_position, $chunk_info);
+            $byte_offset = $this->chunk_processor->calculate_byte_offset($match_position, $chunk_info);
+
+            // Same sink token in the overlap window is one finding, not two.
+            $hit_key = $sig_id . ':' . $byte_offset;
+            if (isset($this->file_hit_seen[$hit_key])) {
+                continue;
+            }
+            $this->file_hit_seen[$hit_key] = true;
 
             $risk_score = $this->maybe_demote_package_eval_fp($file_path, $pattern, $match, (int) $meta['risk_score']);
             $threat_level = CleanSweep_ThreatCollector::risk_score_to_level($risk_score);
 
             $threat = [
-                'id' => md5($file_path . $sig_id . $match . $line_number),
+                'id' => md5($file_path . $sig_id . $match . $line_number . ':' . $byte_offset),
                 'pattern' => $sig_id,
                 'signature_id' => $sig_id,
                 'signature_index' => $sig_index,
@@ -738,7 +839,7 @@ class CleanSweep_FileScanner {
                 'match' => substr($match, 0, 100),
                 'file' => $file_path,
                 'line_number' => $line_number,
-                'byte_offset' => $this->chunk_processor->calculate_byte_offset($match_position, $chunk_info),
+                'byte_offset' => $byte_offset,
                 'chunk_index' => $chunk_info['chunk_index'],
                 'open_in_editor' => $file_path . ':' . $line_number,
                 'content_preview' => $this->chunk_processor->extract_preview($content, $match_position),
