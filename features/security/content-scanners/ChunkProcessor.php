@@ -11,8 +11,9 @@ class CleanSweep_ChunkProcessor {
     /** @var int Standard chunk size (16KB) */
     const CHUNK_SIZE = 16384;
 
-    /** @var int Overlap size carried forward (2KB; wide (?s) malware windows) */
-    const OVERLAP_SIZE = 2048;
+    /** @var int Overlap carried into the next chunk. Must be >= the widest
+     *  packer conjunction window (cs_0395 looks ahead 12KB). */
+    const OVERLAP_SIZE = 12288;
 
     /** @var int Files smaller than this are loaded fully */
     const SMALL_FILE_THRESHOLD = 32768;
@@ -96,12 +97,15 @@ class CleanSweep_ChunkProcessor {
             // Count newlines in raw chunk
             $newlines_in_raw = substr_count($raw_chunk, "\n");
 
-            // Build chunk info
+            // start_offset is the file offset of chunk_to_scan[0] (overlap prefix
+            // plus new bytes). Overlap is 12KB so this is not the start of the
+            // unique fread; calculate_byte_offset adds match_position onto this.
+            $new_start = ftell($handle) - strlen($raw_chunk);
             $chunk_info = [
                 'chunk_index' => $this->chunk_index,
                 'is_first' => ($this->chunk_index === 0),
                 'is_last' => (ftell($handle) >= $file_size),
-                'start_offset' => ftell($handle) - strlen($this->previous_tail) - strlen($raw_chunk),
+                'start_offset' => $new_start - strlen($this->previous_tail),
                 'new_content_length' => $new_content_length,
                 'total_newlines_before' => $this->total_newlines_before,
                 'file_size' => $file_size,
@@ -164,27 +168,15 @@ class CleanSweep_ChunkProcessor {
     /**
      * Get byte offset within the original file for a match position.
      *
+     * start_offset is the file offset of chunk_to_scan[0] (overlap included).
+     *
      * @param int $match_position Position within chunk (including overlap)
      * @param array $chunk_info Chunk metadata
      * @return int Byte offset in original file
      */
     public function calculate_byte_offset($match_position, $chunk_info) {
-        $overlap_len = strlen($chunk_info['previous_tail']);
-        $chunk_start = $chunk_info['start_offset'];
-
-        if ($chunk_info['is_first'] ?? false) {
-            return $match_position;
-        }
-
-        // Adjust for overlap - the match position includes the overlap
-        // but the byte offset should be relative to new content only
-        if ($match_position < $overlap_len) {
-            // Match in overlap region
-            return $chunk_start - $overlap_len + $match_position;
-        }
-
-        // Match in new content
-        return $chunk_start + ($match_position - $overlap_len);
+        $offset = (int) ($chunk_info['start_offset'] ?? 0) + (int) $match_position;
+        return $offset < 0 ? 0 : $offset;
     }
 
     /**
