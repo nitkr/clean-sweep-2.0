@@ -1203,7 +1203,12 @@ class CleanSweep_ScanProfile {
         if ($rest === null || $rest === '') {
             return false;
         }
-        return (bool) preg_match('#/(?:wp-content/(?:plugins|themes)|wp-includes|wp-admin)(?:/|$)#i', '/' . $rest);
+        // Require a dump prefix (vault/hash/import) before the nested WP tree so
+        // uploads/wp-includes/shell.php is still scanned as a dropper.
+        return (bool) preg_match(
+            '#/.+/(?:wp-content/(?:plugins|themes)|wp-includes|wp-admin)(?:/|$)#i',
+            '/' . $rest
+        );
     }
 
     /**

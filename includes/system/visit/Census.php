@@ -4,6 +4,16 @@
  */
 final class CleanSweep_Census {
 
+    private static function ensure_scan_profile_loaded() {
+        if (class_exists('CleanSweep_ScanProfile', false)) {
+            return;
+        }
+        $sp = dirname(__DIR__, 3) . '/features/security/profiles/ScanProfile.php';
+        if (is_readable($sp)) {
+            require_once $sp;
+        }
+    }
+
     private const PHP_EXTS = ['php', 'phtml', 'php3', 'php4', 'php5', 'php7', 'php8', 'phar'];
 
     private const EXTRA_PHP_PER_TREE = 8000;
@@ -371,7 +381,20 @@ final class CleanSweep_Census {
         try {
             $inner = new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS);
             $filtered = new RecursiveCallbackFilterIterator($inner, static function ($current) use ($profile) {
-                if (!$current->isDir() || !$profile) {
+                if (!$current->isDir()) {
+                    return true;
+                }
+                self::ensure_scan_profile_loaded();
+                if (!$profile && class_exists('CleanSweep_ScanProfile', false)) {
+                    // Integrity snapshot path: skip vaults even without a scan ctx.
+                    $name = $current->getFilename();
+                    if (CleanSweep_ScanProfile::is_backup_vault_name($name)) {
+                        $parent = strtolower(basename(dirname($current->getPathname())));
+                        return $parent === 'plugins' || $parent === 'themes';
+                    }
+                    return true;
+                }
+                if (!$profile) {
                     return true;
                 }
                 $path = $current->getPathname();
