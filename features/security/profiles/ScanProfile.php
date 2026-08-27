@@ -1109,7 +1109,6 @@ class CleanSweep_ScanProfile {
             'all-in-one-wp-migration-backups' => true,
             'snapshot-backups' => true,
             'wp-snapshots' => true,
-            'snapshots' => true,
             'wpvividbackups' => true,
             'pb_backupbuddy' => true,
             'upsupsystic' => true,
@@ -1191,9 +1190,11 @@ class CleanSweep_ScanProfile {
     public function is_exploded_site_copy($path) {
         $n = str_replace('\\', '/', (string) $path);
         $rest = null;
-        $up = stripos($n, '/uploads/');
+        // Only the WordPress media dir — a parent folder named "uploads" must not
+        // mark wp-content/plugins as an exploded dump.
+        $up = stripos($n, '/wp-content/uploads/');
         if ($up !== false) {
-            $rest = substr($n, $up + strlen('/uploads/'));
+            $rest = substr($n, $up + strlen('/wp-content/uploads/'));
         } else {
             $vault = $this->backup_vault_root($n);
             if ($vault !== null && strncasecmp($n, $vault, strlen($vault)) === 0) {
