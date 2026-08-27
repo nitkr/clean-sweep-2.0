@@ -859,7 +859,11 @@ final class CleanSweep_Scanner {
         if ($payload === null) {
             return;
         }
-        $new = CleanSweep_ScanWorkUnit::create($scan_id, $type, $payload, 100);
+        $priority = 100;
+        if ($type === CleanSweep_ScanWorkUnit::TYPE_VISIT_CENSUS) {
+            $priority = 200;
+        }
+        $new = CleanSweep_ScanWorkUnit::create($scan_id, $type, $payload, $priority);
         // Soft-batch a single follow-on so index/meta rewrite once (unit file still written).
         $this->queue->begin_batch($scan_id);
         try {
@@ -1168,15 +1172,15 @@ final class CleanSweep_Scanner {
         // the relative-path footgun (skip checksums while still scanning full wp-content).
         $skip_sitewide_file_extras = $path_scoped || !$want_files;
 
-        // Priority (lower runs first): discovery/FILE_BATCH before census and
-        // checksums so the UI shows file progress early. Package trees are still
-        // deferred until PACKAGE_CHECKSUM finishes (see CleanSweep_PackageChecksumWorker).
+        // Priority (lower runs first): seed discovery/FILE_BATCH (70–82), then
+        // checksums (110–120) and child discovery (120). Visit census is 200 so
+        // a uploads dump cannot block malware start. Finalize is 300.
         if ($want_files && !$skip_sitewide_file_extras) {
             $this->queue->enqueue(CleanSweep_ScanWorkUnit::create(
                 $scan_id,
                 CleanSweep_ScanWorkUnit::TYPE_VISIT_CENSUS,
                 ['phase' => 'site_owned', 'offset' => 0],
-                100
+                200
             ));
             $this->queue->enqueue(CleanSweep_ScanWorkUnit::create(
                 $scan_id,
