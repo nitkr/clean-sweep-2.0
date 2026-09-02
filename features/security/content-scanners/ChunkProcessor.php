@@ -135,6 +135,77 @@ class CleanSweep_ChunkProcessor {
     }
 
     /**
+     * Chunk an in-memory string with the same overlap as file reads.
+     * Callback may return false to stop.
+     *
+     * @param string $content
+     * @param callable $callback function(string $chunk, array $chunk_info): mixed
+     * @return array
+     */
+    public function iterate_string($content, $callback) {
+        $results = [];
+        $content = (string) $content;
+        $len = strlen($content);
+        $this->previous_tail = '';
+        $this->total_newlines_before = 0;
+        $this->chunk_index = 0;
+
+        if ($len < self::SMALL_FILE_THRESHOLD) {
+            $chunk_info = [
+                'chunk_index' => 0,
+                'is_first' => true,
+                'is_last' => true,
+                'start_offset' => 0,
+                'new_content_length' => $len,
+                'total_newlines_before' => 0,
+                'file_size' => $len,
+                'is_single_chunk' => true,
+                'previous_tail' => '',
+                'raw_chunk' => $content,
+            ];
+            $results[] = $callback($content, $chunk_info);
+            return $results;
+        }
+
+        $offset = 0;
+        while ($offset < $len) {
+            $raw_chunk = substr($content, $offset, self::CHUNK_SIZE);
+            if ($raw_chunk === '') {
+                break;
+            }
+            $chunk_to_scan = $this->previous_tail . $raw_chunk;
+            $new_content_length = strlen($raw_chunk);
+            $chunk_info = [
+                'chunk_index' => $this->chunk_index,
+                'is_first' => ($this->chunk_index === 0),
+                'is_last' => ($offset + $new_content_length >= $len),
+                'start_offset' => $offset - strlen($this->previous_tail),
+                'new_content_length' => $new_content_length,
+                'total_newlines_before' => $this->total_newlines_before,
+                'file_size' => $len,
+                'is_single_chunk' => false,
+                'previous_tail' => $this->previous_tail,
+                'raw_chunk' => $raw_chunk,
+            ];
+            $result = $callback($chunk_to_scan, $chunk_info);
+            if ($result === false) {
+                break;
+            }
+            if ($result !== null) {
+                $results[] = $result;
+            }
+            $this->previous_tail = $new_content_length >= self::OVERLAP_SIZE
+                ? substr($raw_chunk, -self::OVERLAP_SIZE)
+                : $raw_chunk;
+            $this->total_newlines_before += substr_count($raw_chunk, "\n");
+            $this->chunk_index++;
+            $offset += $new_content_length;
+        }
+
+        return $results;
+    }
+
+    /**
      * Calculate accurate line number for a match position.
      *
      * @param string $chunk_to_scan Full chunk content (including overlap)

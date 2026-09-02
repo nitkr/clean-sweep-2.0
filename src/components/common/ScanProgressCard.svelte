@@ -64,6 +64,14 @@
   /** @type {number|string|null} */
   export let lastDbId = null;
   /** @type {string|null} */
+  export let lastDbKey = null;
+  /** @type {number|null} */
+  export let lastDbBytes = null;
+  /** @type {string|null} */
+  export let lastDbMode = null;
+  /** @type {number} */
+  export let dbRowsEstimate = 0;
+  /** @type {string|null} */
   export let checksumNote = null;
   /** @type {number} */
   export let checksumChecked = 0;
@@ -253,6 +261,14 @@
     return base || p;
   }
 
+  function formatDbBytes(n) {
+    const v = Number(n);
+    if (!v || v < 0) return '';
+    if (v < 1024) return `${v} B`;
+    if (v < 1048576) return `${Math.round(v / 1024)} KB`;
+    return `${(v / 1048576).toFixed(1)} MB`;
+  }
+
   function shortTable(name) {
     if (!name) return '';
     const n = String(name);
@@ -300,9 +316,13 @@
       (!unitType && (phaseKey === 'database' || phaseKey === 'db' || filesSkipped))
     ) {
       const t = shortTable((currentUnit && currentUnit.table) || lastDbTable);
-      return t
-        ? `Database · ${t}${lastDbId ? ' #' + lastDbId : ''}`
-        : 'Checking database';
+      if (!t) return 'Checking database';
+      const id = lastDbId ? ` #${lastDbId}` : '';
+      const key = lastDbKey ? ` ${lastDbKey}` : '';
+      const size = formatDbBytes(lastDbBytes);
+      const mode = lastDbMode && lastDbMode !== 'full' ? ` ${lastDbMode}` : '';
+      const sizeMode = size || mode ? ` (${[size, mode.trim()].filter(Boolean).join(', ')})` : '';
+      return `Database · ${t}${id}${key}${sizeMode}`;
     }
     if (!unitType && phaseKey === 'integrity') {
       return packageChecksumNote || 'Checking core and package checksums';
@@ -345,7 +365,12 @@
     }
     const parts = [lead];
     if (dbish && dbRowsScanned > 0) {
-      parts.push(`${dbRowsScanned.toLocaleString()} rows scanned`);
+      const est = Number(dbRowsEstimate) || 0;
+      parts.push(
+        est > 0
+          ? `${dbRowsScanned.toLocaleString()} / ~${est.toLocaleString()} rows`
+          : `${dbRowsScanned.toLocaleString()} rows scanned`
+      );
     } else if (filesish && filesScanned > 0) {
       parts.push(`${filesScanned.toLocaleString()} files`);
     }
@@ -557,7 +582,7 @@
               <dt class="text-faint shrink-0 w-24">Last DB</dt>
               <dd class="font-mono text-ink min-w-0 truncate" title={lastDbTable || ''}>
                 {#if lastDbTable}
-                  {shortTable(lastDbTable)}{lastDbId ? ` #${lastDbId}` : ''}
+                  {shortTable(lastDbTable)}{lastDbId ? ` #${lastDbId}` : ''}{lastDbKey ? ` ${lastDbKey}` : ''}{lastDbBytes ? ` ${formatDbBytes(lastDbBytes)}` : ''}{lastDbMode && lastDbMode !== 'full' ? ` ${lastDbMode}` : ''}
                 {:else}
                   —
                 {/if}

@@ -607,8 +607,8 @@ class CleanSweep_ScanProfile {
     }
 
     /**
-     * ID span per DB work unit. Deep uses smaller spans because unpack/decode
-     * makes cost-per-row much less predictable.
+     * Target rows per DB work unit (not ID span). Deep uses smaller windows
+     * because unpack/decode makes cost-per-row less predictable.
      *
      * @return int
      */
@@ -617,6 +617,64 @@ class CleanSweep_ScanProfile {
             return $this->is_restricted_host() ? 250 : 400;
         }
         return 2000;
+    }
+
+    /**
+     * Rows at or under this LENGTH are scanned in full.
+     */
+    public function get_db_full_scan_bytes() {
+        return 32768;
+    }
+
+    /**
+     * Prefix length for bounded (large) rows.
+     */
+    public function get_db_prefix_bytes() {
+        if ($this->profile_id === self::DEEP) {
+            return 65536;
+        }
+        return 32768;
+    }
+
+    /**
+     * Do not fetch or match values larger than this; skip and log.
+     */
+    public function get_db_hard_skip_bytes() {
+        if ($this->profile_id === self::DEEP) {
+            return 1048576;
+        }
+        return 524288;
+    }
+
+    /**
+     * Max content bytes to pull in one fetch batch (not row count).
+     */
+    public function get_db_fetch_byte_budget() {
+        return $this->is_restricted_host() ? 262144 : 524288;
+    }
+
+    /**
+     * LENGTH() probe page size before packing a fetch batch.
+     */
+    public function get_db_length_probe_limit() {
+        return 500;
+    }
+
+    /**
+     * Wall-clock seconds for matching one large/bounded row.
+     */
+    public function get_db_row_time_budget() {
+        if ($this->profile_id === self::DEEP) {
+            return $this->is_restricted_host() ? 3.0 : 8.0;
+        }
+        return $this->is_restricted_host() ? 2.0 : 5.0;
+    }
+
+    /**
+     * Tight PCRE backtrack limit for bounded DB haystacks. 0 = do not change.
+     */
+    public function get_db_pcre_backtrack_limit() {
+        return 100000;
     }
 
     /**
