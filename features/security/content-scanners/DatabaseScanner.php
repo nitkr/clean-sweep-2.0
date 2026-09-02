@@ -1726,11 +1726,12 @@ class CleanSweep_DatabaseScanner {
                     if ($kind === 'poison' || $reason === 'too_large') {
                         $this->poison_skipped[] = $rid;
                     }
-                    $this->log_row_outcome($table, $rid, $row_key, $raw_len, 'skipped', $reason);
+                    $mode = ($reason === 'empty') ? 'empty' : 'skipped';
+                    $this->log_row_outcome($table, $rid, $row_key, $raw_len, $mode, $reason);
                     $last_id = $rid;
                     $scanned++;
                     $this->bump_row_counter();
-                    $this->mark_row_done($table, $rid, $row_key, $raw_len, 'skipped', $kind === 'poison' || $reason === 'too_large');
+                    $this->mark_row_done($table, $rid, $row_key, $raw_len, $mode, $kind === 'poison' || $reason === 'too_large');
                     continue;
                 }
 
@@ -2516,6 +2517,7 @@ class CleanSweep_DatabaseScanner {
         $key = $key !== '' ? $key : '-';
         $extra = $detail !== '' ? " {$detail}" : '';
         $level = ($mode === 'skipped' || $mode === 'truncated') ? 'info' : 'debug';
+        // empty is debug: Astra/layout flags are numerous and not security-relevant.
         clean_sweep_log_message(
             "DatabaseScanner: {$mode} {$table} #{$id} key={$key} bytes={$bytes}{$extra}",
             $level

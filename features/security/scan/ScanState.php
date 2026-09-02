@@ -53,7 +53,7 @@ final class CleanSweep_ScanState {
     public ?string $last_db_key = null;
     /** @var int|null LENGTH of last finished DB value */
     public ?int $last_db_bytes = null;
-    /** @var string|null full | truncated | skipped */
+    /** @var string|null full | truncated | skipped | empty */
     public ?string $last_db_mode = null;
     /** @var int|null Row currently inside scan_content (crash skip) */
     public ?int $db_in_progress_id = null;
