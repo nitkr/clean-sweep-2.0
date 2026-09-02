@@ -49,6 +49,16 @@ final class CleanSweep_ScanState {
     public ?string $last_file_path = null;
     public ?int $last_db_id = null;
     public ?string $last_db_table = null;
+    /** @var string|null meta_key / option_name of last finished DB row */
+    public ?string $last_db_key = null;
+    /** @var int|null LENGTH of last finished DB value */
+    public ?int $last_db_bytes = null;
+    /** @var string|null full | truncated | skipped */
+    public ?string $last_db_mode = null;
+    /** @var int|null Row currently inside scan_content (crash skip) */
+    public ?int $db_in_progress_id = null;
+    /** @var int Planner COUNT sum (soft remaining-work hint) */
+    public int $db_rows_estimate = 0;
 
     // --- Per-table DB cursors (for resumable DB phase) ---
     /** @var array<string,int> table => last_id_scanned */
@@ -116,6 +126,11 @@ final class CleanSweep_ScanState {
         $s->db_rows_scanned = (int)($raw['db_rows_scanned'] ?? 0);
         $s->last_db_id = $raw['last_db_id'] ?? null;
         $s->last_db_table = $raw['last_db_table'] ?? null;
+        $s->last_db_key = $raw['last_db_key'] ?? null;
+        $s->last_db_bytes = isset($raw['last_db_bytes']) ? (int)$raw['last_db_bytes'] : null;
+        $s->last_db_mode = $raw['last_db_mode'] ?? null;
+        $s->db_in_progress_id = isset($raw['db_in_progress_id']) ? (int)$raw['db_in_progress_id'] : null;
+        $s->db_rows_estimate = (int)($raw['db_rows_estimate'] ?? 0);
         $s->db_cursors = is_array($raw['db_cursors'] ?? null) ? $raw['db_cursors'] : [];
 
         $s->threats_found = (int)($raw['threats_found'] ?? 0);
@@ -164,6 +179,11 @@ final class CleanSweep_ScanState {
         $out['db_rows_scanned'] = $this->db_rows_scanned;
         if ($this->last_db_id !== null) $out['last_db_id'] = $this->last_db_id;
         if ($this->last_db_table !== null) $out['last_db_table'] = $this->last_db_table;
+        if ($this->last_db_key !== null) $out['last_db_key'] = $this->last_db_key;
+        if ($this->last_db_bytes !== null) $out['last_db_bytes'] = $this->last_db_bytes;
+        if ($this->last_db_mode !== null) $out['last_db_mode'] = $this->last_db_mode;
+        if ($this->db_in_progress_id !== null) $out['db_in_progress_id'] = $this->db_in_progress_id;
+        if ($this->db_rows_estimate > 0) $out['db_rows_estimate'] = $this->db_rows_estimate;
         if (!empty($this->db_cursors)) $out['db_cursors'] = $this->db_cursors;
 
         $out['threats_found'] = $this->threats_found;

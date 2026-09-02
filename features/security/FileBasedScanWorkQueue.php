@@ -855,6 +855,8 @@ class CleanSweep_FileBasedScanWorkQueue implements CleanSweep_ScanWorkQueueInter
             'table' => isset($payload['table']) ? (string) $payload['table'] : null,
             'base_dir' => is_string($base) && $base !== '' ? $base : null,
             'start' => isset($payload['start']) ? (int) $payload['start'] : null,
+            'start_id' => isset($payload['start_id']) ? (int) $payload['start_id'] : null,
+            'end_id' => isset($payload['end_id']) ? (int) $payload['end_id'] : null,
             'phase' => $unit_phase !== '' ? $unit_phase : null,
         ];
     }

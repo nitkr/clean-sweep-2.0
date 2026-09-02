@@ -934,6 +934,10 @@
           lastFilePath={$scanning.liveProgress?.last_file_path}
           lastDbTable={$scanning.liveProgress?.last_db_table}
           lastDbId={$scanning.liveProgress?.last_db_id}
+          lastDbKey={$scanning.liveProgress?.last_db_key}
+          lastDbBytes={$scanning.liveProgress?.last_db_bytes}
+          lastDbMode={$scanning.liveProgress?.last_db_mode}
+          dbRowsEstimate={$scanning.liveProgress?.db_rows_estimate || 0}
           checksumNote={$scanning.checksumNote}
           checksumChecked={$scanning.checksumChecked || 0}
           checksumVersion={$scanning.checksumVersion}

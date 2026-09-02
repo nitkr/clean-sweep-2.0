@@ -12,6 +12,7 @@ require_once dirname(__DIR__) . '/SignatureMatcher.php';
 require_once dirname(__DIR__) . '/CpuGovernor.php';
 require_once dirname(__DIR__) . '/scan/Worker.php';
 require_once dirname(__DIR__) . '/scan/ScanState.php';
+require_once __DIR__ . '/ChunkProcessor.php';
 
 /**
  * Database Scanner Class
@@ -138,6 +139,18 @@ class CleanSweep_DatabaseScanner {
     /** @var float Request start (for max_execution_time) */
     private $request_start_time = 0;
 
+    /** @var CleanSweep_ChunkProcessor|null */
+    private $chunk_processor = null;
+
+    /** @var bool Stop remaining signatures on the current row (time budget) */
+    private $row_sig_truncated = false;
+
+    /** @var int[] Poison / too-large ids skipped this invocation */
+    private $poison_skipped = [];
+
+    /** @var bool False when the last query_with_recovery hit a DB error */
+    private $last_query_ok = true;
+
     /**
      * Constructor.
      *
@@ -247,13 +260,21 @@ class CleanSweep_DatabaseScanner {
 
     /**
      * Execute query with connection recovery.
-     * ALWAYS returns an array (empty on error) - callers should NOT need to check for null.
+     * ALWAYS returns an array (empty on error or no rows). Check last_query_ok
+     * to distinguish a DB error from a legitimate empty result.
      *
      * @param string $query SQL query
      * @return array Query results (always array, never null)
      */
     private function query_with_recovery($query) {
         global $wpdb;
+        $this->last_query_ok = true;
+
+        if (!is_string($query) || $query === '') {
+            $this->last_query_ok = false;
+            clean_sweep_log_message('DatabaseScanner: empty or invalid SQL', 'error');
+            return [];
+        }
 
         $result = $wpdb->get_results($query);
 
@@ -269,26 +290,32 @@ class CleanSweep_DatabaseScanner {
                     if (method_exists($wpdb, 'db_connect')) {
                         $wpdb->db_connect();
                         $result = $wpdb->get_results($query);
-                        // If still failed, return empty array
                         if ($result === null || $result === false) {
+                            $this->last_query_ok = false;
                             clean_sweep_log_message("Database reconnection failed, returning empty result", 'error');
                             return [];
                         }
+                        // Recovered rows must be returned; do not fall through as empty.
                     } else {
+                        $this->last_query_ok = false;
                         return [];
                     }
                 } else {
-                    // Non-recoverable error - log and return empty
+                    $this->last_query_ok = false;
                     clean_sweep_log_message("Database query error: {$error}", 'error');
                     return [];
                 }
+            } else {
+                // No error message but null result — treat as a legitimate empty set.
+                return [];
             }
-            // No error message but null result - return empty array (legitimate empty result)
-            return [];
         }
 
-        // Ensure we always return array (wpdb can return array on success)
-        return is_array($result) ? $result : [];
+        if (!is_array($result)) {
+            $this->last_query_ok = false;
+            return [];
+        }
+        return $result;
     }
 
     /**
@@ -1386,22 +1413,109 @@ class CleanSweep_DatabaseScanner {
      * @param string $table
      * @return array
      */
-    private function scan_content($content, $table, $row_id = 0, $column = '') {
+    private function scan_content($content, $table, $row_id = 0, $column = '', array $opts = []) {
         $threats = [];
+        $this->row_sig_truncated = false;
 
         $compiled = CleanSweep_SignatureMatcher::order_by_severity($this->get_compiled_patterns());
         $throttler = $this->throttler;
+        $bounded = !empty($opts['bounded']);
+        $row_started = (float) ($opts['row_started'] ?? microtime(true));
+        $time_budget = (float) ($opts['time_budget'] ?? 0);
 
-        $hits = CleanSweep_SignatureMatcher::match_content(
-            $content,
-            $compiled,
-            function ($n) use ($throttler) {
-                if ($throttler) {
-                    $throttler->micro_yield($n);
-                }
-                return ($n % 25 === 0 && $this->should_pause());
+        $on_tick = function ($n) use ($throttler, $time_budget, $row_started) {
+            if ($throttler) {
+                $throttler->micro_yield($n);
             }
-        );
+            if ($this->should_pause()) {
+                return true;
+            }
+            if ($time_budget > 0 && (microtime(true) - $row_started) >= $time_budget) {
+                $this->row_sig_truncated = true;
+                return true;
+            }
+            return false;
+        };
+
+        $on_preg_error = function ($index, $pattern, $code) use ($table, $row_id) {
+            if ((int) $code === PREG_BACKTRACK_LIMIT_ERROR) {
+                clean_sweep_log_message(
+                    "DatabaseScanner: backtrack_killed {$table} #{$row_id} sig={$index}",
+                    'info'
+                );
+            }
+        };
+
+        $run_match = function ($text, $start_offset = 0) use ($compiled, $on_tick, $on_preg_error) {
+            return CleanSweep_SignatureMatcher::match_content(
+                $text,
+                $compiled,
+                $on_tick,
+                $start_offset,
+                $on_preg_error
+            );
+        };
+
+        $prev_limit = null;
+        $haystack_len = strlen((string) $content);
+        $tighten_pcre = $bounded || $haystack_len > CleanSweep_ChunkProcessor::CHUNK_SIZE;
+        if ($tighten_pcre) {
+            $new_limit = 0;
+            if (method_exists($this->profile, 'get_db_pcre_backtrack_limit')) {
+                $new_limit = (int) $this->profile->get_db_pcre_backtrack_limit();
+            }
+            if ($new_limit > 0) {
+                $prev_limit = ini_get('pcre.backtrack_limit');
+                ini_set('pcre.backtrack_limit', (string) $new_limit);
+            }
+        }
+
+        try {
+            $hits = [];
+            $len = strlen((string) $content);
+            if (($bounded || $tighten_pcre) && $len > CleanSweep_ChunkProcessor::CHUNK_SIZE) {
+                if ($this->chunk_processor === null) {
+                    $this->chunk_processor = new CleanSweep_ChunkProcessor();
+                }
+                $this->chunk_processor->iterate_string((string) $content, function ($chunk, $chunk_info) use (&$hits, $run_match, $on_tick, $on_preg_error) {
+                    if ($this->row_sig_truncated || $this->should_pause()) {
+                        return false;
+                    }
+                    $part = $run_match($chunk);
+                    $overlap_len = strlen($chunk_info['previous_tail'] ?? '');
+                    if ($overlap_len > 0 && empty($chunk_info['is_first']) && $part) {
+                        $rescan = [];
+                        foreach ($part as $hit) {
+                            if ((int) ($hit['offset'] ?? 0) < $overlap_len) {
+                                $rescan[] = [
+                                    'index' => (int) $hit['index'],
+                                    'pattern' => (string) $hit['pattern'],
+                                ];
+                            }
+                        }
+                        if ($rescan !== []) {
+                            foreach (CleanSweep_SignatureMatcher::match_content(
+                                $chunk,
+                                $rescan,
+                                $on_tick,
+                                $overlap_len,
+                                $on_preg_error
+                            ) as $extra) {
+                                $part[] = $extra;
+                            }
+                        }
+                    }
+                    $hits = array_merge($hits, $part);
+                    return null;
+                });
+            } else {
+                $hits = $run_match((string) $content);
+            }
+        } finally {
+            if ($prev_limit !== null) {
+                ini_set('pcre.backtrack_limit', (string) $prev_limit);
+            }
+        }
 
         foreach ($hits as $hit) {
             $meta = $hit['meta'];
@@ -1476,9 +1590,10 @@ class CleanSweep_DatabaseScanner {
      * @param int $start_id Start ID (inclusive)
      * @param int $end_id End ID (inclusive)
      * @param string|null $where_clause Optional WHERE clause (appended with AND)
+     * @param array $opts skip_ids: int[]
      * @return array ['scanned' => int, 'threats_found' => int, 'last_id' => int]
      */
-    public function scan_table_segment($table, $id_column = 'ID', $start_id = 0, $end_id = 0, $where_clause = null) {
+    public function scan_table_segment($table, $id_column = 'ID', $start_id = 0, $end_id = 0, $where_clause = null, array $opts = []) {
         global $wpdb;
 
         if ($this->phase_start_time <= 0) {
@@ -1488,14 +1603,49 @@ class CleanSweep_DatabaseScanner {
             $this->request_start_time = (float)($_SERVER['REQUEST_TIME_FLOAT'] ?? $_SERVER['REQUEST_TIME'] ?? $this->phase_start_time);
         }
 
+        $this->poison_skipped = [];
+        $skip_ids = self::normalize_skip_ids($opts['skip_ids'] ?? []);
+
+        $table_q = $this->quote_ident($table);
+        $id_q = $this->quote_ident($id_column);
+        if ($table_q === null || $id_q === null) {
+            clean_sweep_log_message("DatabaseScanner: invalid identifier {$table}.{$id_column}", 'error');
+            return [
+                'scanned' => 0,
+                'threats_found' => 0,
+                'last_id' => (int) $start_id,
+                'paused' => false,
+                'flagged_post_ids' => [],
+                'poison_ids' => [],
+            ];
+        }
+
         clean_sweep_log_message("DatabaseScanner: Scanning table segment {$table} after ID {$start_id} to {$end_id}", 'info');
 
         $threats = [];
         $flagged_post_ids = [];
         $scanned = 0;
-        $last_id = (int)$start_id;
-        $batch_size = $this->profile->get_batch_size('db_rows');
+        $last_id = (int) $start_id;
         $suffix = $this->table_suffix($table);
+        $content_col = $this->get_content_column($table);
+        $content_q = $this->quote_ident($content_col);
+        $key_col = $this->sql_key_column($suffix);
+        $key_q = $key_col !== '' ? $this->quote_ident($key_col) : null;
+
+        $full_bytes = method_exists($this->profile, 'get_db_full_scan_bytes')
+            ? (int) $this->profile->get_db_full_scan_bytes() : 32768;
+        $prefix_bytes = method_exists($this->profile, 'get_db_prefix_bytes')
+            ? (int) $this->profile->get_db_prefix_bytes() : 32768;
+        $hard_skip = method_exists($this->profile, 'get_db_hard_skip_bytes')
+            ? (int) $this->profile->get_db_hard_skip_bytes() : 524288;
+        $byte_budget = method_exists($this->profile, 'get_db_fetch_byte_budget')
+            ? (int) $this->profile->get_db_fetch_byte_budget() : 524288;
+        $probe_limit = method_exists($this->profile, 'get_db_length_probe_limit')
+            ? (int) $this->profile->get_db_length_probe_limit() : 500;
+        $row_time = method_exists($this->profile, 'get_db_row_time_budget')
+            ? (float) $this->profile->get_db_row_time_budget() : 2.0;
+
+        $where_sql = $where_clause ? " AND " . $where_clause : "";
 
         do {
             if ($this->should_pause()) {
@@ -1503,72 +1653,180 @@ class CleanSweep_DatabaseScanner {
                 break;
             }
 
-            $query = $wpdb->prepare(
-                "SELECT * FROM {$table} WHERE {$id_column} > %d AND {$id_column} <= %d" .
-                ($where_clause ? " AND " . $where_clause : "") .
-                " ORDER BY {$id_column} LIMIT %d",
+            $select = "{$id_q} AS id, LENGTH({$content_q}) AS len";
+            if ($key_q) {
+                $select .= ", {$key_q} AS row_key";
+            }
+            $probe_sql = $wpdb->prepare(
+                "SELECT {$select} FROM {$table_q} WHERE {$id_q} > %d AND {$id_q} <= %d{$where_sql} ORDER BY {$id_q} ASC LIMIT %d",
                 $last_id,
                 $end_id,
-                $batch_size
+                $probe_limit
             );
-
-            $rows = $this->query_with_recovery($query);
-
-            if (empty($rows)) {
+            $probes = $this->query_with_recovery(is_string($probe_sql) ? $probe_sql : '');
+            if (!$this->last_query_ok) {
+                clean_sweep_log_message(
+                    "DatabaseScanner: probe failed for {$table} after id {$last_id}, pausing to retry",
+                    'warning'
+                );
+                $this->needs_pause = true;
+                break;
+            }
+            if (empty($probes)) {
                 break;
             }
 
-            foreach ($rows as $row) {
+            $probe_rows = [];
+            foreach ($probes as $p) {
+                $pid = (int) ($p->id ?? 0);
+                if ($pid <= 0) {
+                    continue;
+                }
+                $probe_rows[] = [
+                    'id' => $pid,
+                    'len' => (int) ($p->len ?? 0),
+                    'key' => (string) ($p->row_key ?? ''),
+                ];
+            }
+
+            $packed = self::pack_ids_by_bytes($probe_rows, $byte_budget, $full_bytes, $hard_skip, $skip_ids);
+            if ($packed['last_id'] === null) {
+                break;
+            }
+
+            $full_ids = array_map(static function ($r) { return (int) $r['id']; }, $packed['full']);
+            $prefix_ids = array_map(static function ($r) { return (int) $r['id']; }, $packed['prefix']);
+
+            $fetched = [];
+            if ($full_ids !== []) {
+                foreach ($this->fetch_segment_rows($table, $id_column, $full_ids, 0) as $row) {
+                    $rid = (int) $row->$id_column;
+                    $fetched[$rid] = ['row' => $row, 'bounded' => false];
+                }
+            }
+            if ($prefix_ids !== []) {
+                foreach ($this->fetch_segment_rows($table, $id_column, $prefix_ids, $prefix_bytes) as $row) {
+                    $rid = (int) $row->$id_column;
+                    $fetched[$rid] = ['row' => $row, 'bounded' => true];
+                }
+            }
+
+            foreach (self::ordered_batch_items($packed) as $rid => $item) {
                 if ($this->should_pause()) {
                     clean_sweep_log_message("DatabaseScanner: Pause mid-segment {$table} at id {$last_id}", 'info');
                     break 2;
                 }
 
-                $content = $this->extract_table_content($table, $row);
-                if ($this->should_skip_transient_row($suffix, $row, $content)) {
-                    $last_id = (int)$row->$id_column;
+                $kind = (string) ($item['kind'] ?? '');
+                $row_key = (string) ($item['key'] ?? '');
+                $raw_len = (int) ($item['len'] ?? 0);
+
+                if ($kind === 'poison' || $kind === 'skip') {
+                    $reason = $kind === 'poison' ? 'poison' : (string) ($item['reason'] ?? 'too_large');
+                    if ($kind === 'poison' || $reason === 'too_large') {
+                        $this->poison_skipped[] = $rid;
+                    }
+                    $this->log_row_outcome($table, $rid, $row_key, $raw_len, 'skipped', $reason);
+                    $last_id = $rid;
+                    $scanned++;
+                    $this->bump_row_counter();
+                    $this->mark_row_done($table, $rid, $row_key, $raw_len, 'skipped', $kind === 'poison' || $reason === 'too_large');
                     continue;
                 }
 
-                if (!empty($content)) {
+                if (!isset($fetched[$rid])) {
+                    clean_sweep_log_message(
+                        "DatabaseScanner: fetch missed {$table} #{$rid}, leaving row unfinished",
+                        'warning'
+                    );
+                    $this->needs_pause = true;
+                    break 2;
+                }
+
+                $row = $fetched[$rid]['row'];
+                $bounded = !empty($fetched[$rid]['bounded']);
+                $content = $this->extract_table_content($table, $row);
+                if ($this->should_skip_transient_row($suffix, $row, $content)) {
+                    $last_id = $rid;
+                    $scanned++;
+                    $this->mark_row_done($table, $rid, $row_key, $raw_len, 'skipped', false);
+                    continue;
+                }
+
+                $mode = $bounded ? 'truncated' : 'full';
+                if ($content !== '') {
+                    $this->mark_row_in_progress($table, $rid, $row_key, $raw_len, $mode, $bounded);
+                    if ($bounded && strlen($content) > $prefix_bytes) {
+                        $content = substr($content, 0, $prefix_bytes);
+                    }
                     $content = $this->expand_scan_text($content, $suffix, $row);
-                    $row_threats = $this->scan_content($content, $table, $row->$id_column, $this->get_content_column($table));
+                    $use_budget = $bounded || strlen($content) > $full_bytes;
+                    $row_started = microtime(true);
+                    $row_threats = $this->scan_content(
+                        $content,
+                        $table,
+                        $rid,
+                        $content_col,
+                        [
+                            'bounded' => $bounded,
+                            'row_started' => $row_started,
+                            'time_budget' => $use_budget ? $row_time : 0,
+                        ]
+                    );
+
+                    if ($this->needs_continuation() && !$this->row_sig_truncated) {
+                        clean_sweep_log_message(
+                            "DatabaseScanner: slice pause during {$table} #{$rid}, leaving row unfinished",
+                            'info'
+                        );
+                        break 2;
+                    }
 
                     foreach ($row_threats as $threat) {
                         $threat['table'] = $table;
-                        $threat['row_id'] = $row->$id_column;
+                        $threat['row_id'] = $rid;
                         $threats[] = $threat;
                         $this->counters['threats_found']++;
-
                         if ($this->collector) {
                             $this->collector->add($threat);
                         }
                     }
 
                     if ($suffix === 'posts' && !empty($row_threats)) {
-                        $ptype = (string)($row->post_type ?? '');
+                        $ptype = (string) ($row->post_type ?? '');
                         if ($ptype !== 'revision') {
-                            $flagged_post_ids[] = (int)$row->$id_column;
+                            $flagged_post_ids[] = $rid;
                         }
+                    }
+
+                    if ($mode === 'truncated' || $this->row_sig_truncated) {
+                        $mode = 'truncated';
+                        $detail = $this->row_sig_truncated ? 'time_budget' : 'prefix';
+                        $this->log_row_outcome($table, $rid, $row_key, $raw_len, 'truncated', $detail);
+                    }
+
+                    if ($bounded && $this->collector) {
+                        $this->collector->flush();
                     }
                 }
 
-                $last_id = (int)$row->$id_column;
+                $last_id = $rid;
                 $scanned++;
-                $this->counters['db_rows_scanned']++;
-
-                if ($this->collector) {
-                    $this->collector->db_rows_scanned(1);
-                }
+                $this->bump_row_counter();
+                $this->mark_row_done($table, $rid, $row_key, $raw_len, $mode, $bounded);
             }
 
             if ($this->throttler) {
                 $this->throttler->batch_yield();
             }
-
             $this->ping_if_needed();
 
+            if (count($probes) < $probe_limit) {
+                break;
+            }
         } while ($last_id < $end_id);
+
+        $this->clear_in_progress();
 
         return [
             'scanned' => $scanned,
@@ -1576,6 +1834,7 @@ class CleanSweep_DatabaseScanner {
             'last_id' => $last_id,
             'paused' => $this->needs_continuation(),
             'flagged_post_ids' => array_values(array_unique($flagged_post_ids)),
+            'poison_ids' => array_values(array_unique(array_map('intval', $this->poison_skipped))),
         ];
     }
 
@@ -1989,5 +2248,277 @@ class CleanSweep_DatabaseScanner {
             $layers++;
         }
         return $layers > 0 ? $decoded : '';
+    }
+
+    /**
+     * Accept both [id => true] maps and [id, id] lists.
+     *
+     * @param mixed $raw
+     * @return array<int,true>
+     */
+    public static function normalize_skip_ids($raw) {
+        $out = [];
+        foreach ((array) $raw as $k => $v) {
+            if ($v === true && (int) $k > 0) {
+                $out[(int) $k] = true;
+            } elseif ($v !== true && (int) $v > 0) {
+                $out[(int) $v] = true;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Poison/skip/full/prefix items in meta_id order so last_id never jumps.
+     *
+     * @param array $packed
+     * @return array<int,array>
+     */
+    public static function ordered_batch_items(array $packed) {
+        $work = [];
+        foreach (['poison' => 'poison', 'skip' => 'skip', 'full' => 'full', 'prefix' => 'prefix'] as $bucket => $kind) {
+            foreach ($packed[$bucket] ?? [] as $item) {
+                $id = (int) ($item['id'] ?? 0);
+                if ($id <= 0) {
+                    continue;
+                }
+                $item['kind'] = $kind;
+                $work[$id] = $item;
+            }
+        }
+        ksort($work, SORT_NUMERIC);
+        return $work;
+    }
+
+    private function bump_row_counter() {
+        $this->counters['db_rows_scanned']++;
+        if ($this->collector) {
+            $this->collector->db_rows_scanned(1);
+        }
+    }
+
+    /**
+     * Pack LENGTH() probes into a fetch batch under a byte budget.
+     *
+     * @param array<int,array{id:int,len:int,key?:string}> $probes
+     * @param array<int,bool|int> $skip_ids
+     * @return array{full:array,prefix:array,skip:array,poison:array,bytes:int,last_id:?int}
+     */
+    public static function pack_ids_by_bytes(array $probes, int $byte_budget, int $full_bytes, int $hard_skip_bytes, array $skip_ids = []) {
+        $skip_map = self::normalize_skip_ids($skip_ids);
+
+        $full = [];
+        $prefix = [];
+        $skip = [];
+        $poison = [];
+        $bytes = 0;
+        $last_id = null;
+        $have_fetch = false;
+        $byte_budget = max(1, $byte_budget);
+        $full_bytes = max(1, $full_bytes);
+        $hard_skip_bytes = max($full_bytes, $hard_skip_bytes);
+
+        foreach ($probes as $p) {
+            $id = (int) ($p['id'] ?? 0);
+            $len = (int) ($p['len'] ?? 0);
+            $key = (string) ($p['key'] ?? '');
+            if ($id <= 0) {
+                continue;
+            }
+
+            if (isset($skip_map[$id])) {
+                $poison[] = ['id' => $id, 'len' => $len, 'key' => $key];
+                $last_id = $id;
+                continue;
+            }
+
+            if ($len <= 0) {
+                $skip[] = ['id' => $id, 'len' => $len, 'key' => $key, 'reason' => 'empty'];
+                $last_id = $id;
+                continue;
+            }
+
+            if ($len > $hard_skip_bytes) {
+                $skip[] = ['id' => $id, 'len' => $len, 'key' => $key, 'reason' => 'too_large'];
+                $last_id = $id;
+                continue;
+            }
+
+            $charge = $len > $full_bytes ? $full_bytes : $len;
+            if ($have_fetch && ($bytes + $charge) > $byte_budget) {
+                break;
+            }
+
+            $bytes += $charge;
+            $have_fetch = true;
+            $last_id = $id;
+            $item = ['id' => $id, 'len' => $len, 'key' => $key];
+            if ($len > $full_bytes) {
+                $prefix[] = $item;
+            } else {
+                $full[] = $item;
+            }
+        }
+
+        return [
+            'full' => $full,
+            'prefix' => $prefix,
+            'skip' => $skip,
+            'poison' => $poison,
+            'bytes' => $bytes,
+            'last_id' => $last_id,
+        ];
+    }
+
+    private function quote_ident($name) {
+        $name = (string) $name;
+        if (!preg_match('/^[A-Za-z0-9_]+$/', $name)) {
+            return null;
+        }
+        return '`' . $name . '`';
+    }
+
+    private function sql_key_column($suffix) {
+        if ($suffix === 'options') {
+            return 'option_name';
+        }
+        if (in_array($suffix, ['postmeta', 'usermeta', 'sitemeta', 'termmeta', 'commentmeta', 'blogmeta'], true)) {
+            return 'meta_key';
+        }
+        return '';
+    }
+
+    private function fetch_segment_rows($table, $id_column, array $ids, $prefix_bytes) {
+        global $wpdb;
+        $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
+        if ($ids === []) {
+            return [];
+        }
+        $id_q = $this->quote_ident($id_column);
+        $select = $this->fetch_select_sql($table, $id_column, (int) $prefix_bytes);
+        if ($select === null || $id_q === null) {
+            return [];
+        }
+        $placeholders = implode(',', array_fill(0, count($ids), '%d'));
+        $sql = $wpdb->prepare(
+            "{$select} WHERE {$id_q} IN ({$placeholders}) ORDER BY {$id_q} ASC",
+            ...$ids
+        );
+        return $this->query_with_recovery($sql);
+    }
+
+    private function fetch_select_sql($table, $id_column, $prefix_bytes) {
+        $table_q = $this->quote_ident($table);
+        $id_q = $this->quote_ident($id_column);
+        $content_q = $this->quote_ident($this->get_content_column($table));
+        if ($table_q === null || $id_q === null || $content_q === null) {
+            return null;
+        }
+        if ($prefix_bytes <= 0) {
+            return "SELECT * FROM {$table_q}";
+        }
+        $n = (int) $prefix_bytes;
+        $content_expr = 'SUBSTRING(CAST(' . $content_q . ' AS BINARY), 1, ' . $n . ') AS ' . $content_q;
+        $suffix = $this->table_suffix($table);
+        switch ($suffix) {
+            case 'posts':
+                $cols = "{$id_q}, `post_title`, `post_excerpt`, `post_content_filtered`, `guid`, `post_type`, {$content_expr}";
+                break;
+            case 'options':
+                $cols = "{$id_q}, `option_name`, {$content_expr}";
+                break;
+            case 'comments':
+                $cols = "{$id_q}, {$content_expr}, `comment_author_url`, `comment_author`, `comment_author_email`";
+                break;
+            case 'postmeta':
+                $cols = "{$id_q}, `post_id`, `meta_key`, {$content_expr}";
+                break;
+            case 'usermeta':
+                $cols = "{$id_q}, `user_id`, `meta_key`, {$content_expr}";
+                break;
+            case 'sitemeta':
+                $cols = "{$id_q}, `site_id`, `meta_key`, {$content_expr}";
+                break;
+            case 'termmeta':
+                $cols = "{$id_q}, `term_id`, `meta_key`, {$content_expr}";
+                break;
+            case 'commentmeta':
+                $cols = "{$id_q}, `comment_id`, `meta_key`, {$content_expr}";
+                break;
+            case 'blogmeta':
+                $cols = "{$id_q}, `blog_id`, `meta_key`, {$content_expr}";
+                break;
+            case 'users':
+                $cols = "{$id_q}, `user_url`, `user_email`, `display_name`, `user_nicename`";
+                break;
+            case 'terms':
+                $cols = "{$id_q}, `name`, `slug`";
+                break;
+            case 'term_taxonomy':
+                $cols = "{$id_q}, {$content_expr}";
+                break;
+            case 'blogs':
+                $cols = "{$id_q}, `domain`, `path`";
+                break;
+            case 'signups':
+                $cols = "{$id_q}, `user_login`, `user_email`, `domain`, `path`, `activation_key`";
+                break;
+            default:
+                return "SELECT * FROM {$table_q}";
+        }
+        return "SELECT {$cols} FROM {$table_q}";
+    }
+
+    private function mark_row_in_progress($table, $id, $key, $bytes, $mode, $force_flush) {
+        if (!$this->context) {
+            return;
+        }
+        $this->context->mergeState([
+            'phase' => 'database',
+            'last_db_table' => (string) $table,
+            'last_db_id' => (int) $id,
+            'last_db_key' => $key !== '' ? (string) $key : null,
+            'last_db_bytes' => (int) $bytes,
+            'last_db_mode' => (string) $mode,
+            'db_in_progress_id' => (int) $id,
+        ]);
+        if ($force_flush && method_exists($this->context, 'flushPending')) {
+            $this->context->flushPending();
+        }
+    }
+
+    private function mark_row_done($table, $id, $key, $bytes, $mode, $force_flush) {
+        if (!$this->context) {
+            return;
+        }
+        $this->context->mergeState([
+            'phase' => 'database',
+            'last_db_table' => (string) $table,
+            'last_db_id' => (int) $id,
+            'last_db_key' => $key !== '' ? (string) $key : null,
+            'last_db_bytes' => (int) $bytes,
+            'last_db_mode' => (string) $mode,
+            'db_in_progress_id' => null,
+        ]);
+        if ($force_flush && method_exists($this->context, 'flushPending')) {
+            $this->context->flushPending();
+        }
+    }
+
+    private function clear_in_progress() {
+        if (!$this->context) {
+            return;
+        }
+        $this->context->mergeState(['db_in_progress_id' => null]);
+    }
+
+    private function log_row_outcome($table, $id, $key, $bytes, $mode, $detail = '') {
+        $key = $key !== '' ? $key : '-';
+        $extra = $detail !== '' ? " {$detail}" : '';
+        $level = ($mode === 'skipped' || $mode === 'truncated') ? 'info' : 'debug';
+        clean_sweep_log_message(
+            "DatabaseScanner: {$mode} {$table} #{$id} key={$key} bytes={$bytes}{$extra}",
+            $level
+        );
     }
 }

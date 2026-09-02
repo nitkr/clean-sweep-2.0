@@ -103,6 +103,10 @@ function createScanningStore() {
       last_file_path: null,
       last_db_table: null,
       last_db_id: null,
+      last_db_key: null,
+      last_db_bytes: null,
+      last_db_mode: null,
+      db_rows_estimate: 0,
       package_checksum_note: null,
       current_unit: null,
       last_drain_activity_at: 0,
@@ -787,6 +791,10 @@ function createScanningStore() {
               last_file_path: status.last_file_path ?? null,
               last_db_table: status.last_db_table ?? null,
               last_db_id: status.last_db_id ?? null,
+              last_db_key: status.last_db_key ?? null,
+              last_db_bytes: status.last_db_bytes ?? null,
+              last_db_mode: status.last_db_mode ?? null,
+              db_rows_estimate: status.db_rows_estimate ?? 0,
               package_checksum_note: status.package_checksum_note ?? null,
               current_unit: q.current_unit ?? null,
               last_drain_activity_at: status.last_drain_activity_at ?? 0,
@@ -1100,12 +1108,14 @@ function createScanningStore() {
         const lastFile = progress.last_file_path ?? s.liveProgress?.last_file_path ?? '';
         const lastTable = progress.last_db_table ?? s.liveProgress?.last_db_table ?? '';
         const lastDbId = progress.last_db_id ?? s.liveProgress?.last_db_id ?? '';
+        const lastDbKey = progress.last_db_key ?? s.liveProgress?.last_db_key ?? '';
+        const lastDbMode = progress.last_db_mode ?? s.liveProgress?.last_db_mode ?? '';
         const unitType = (progress.current_unit && progress.current_unit.type)
           || (s.liveProgress?.current_unit && s.liveProgress.current_unit.type)
           || '';
         const pkgNote = progress.package_checksum_note ?? s.liveProgress?.package_checksum_note ?? '';
         const drainAt = progress.last_drain_activity_at ?? s.liveProgress?.last_drain_activity_at ?? 0;
-        const activityKey = [files, skipped, visited, dbRows, threats, items, pending, completed, lastFile, lastTable, lastDbId, unitType, pkgNote, drainAt].join('|');
+        const activityKey = [files, skipped, visited, dbRows, threats, items, pending, completed, lastFile, lastTable, lastDbId, lastDbKey, lastDbMode, unitType, pkgNote, drainAt].join('|');
         const prevKey = s.liveProgress?.activity_key || '';
         const now = Date.now();
         const activityChanged = activityKey !== prevKey;
@@ -1137,6 +1147,18 @@ function createScanningStore() {
             last_db_id: progress.last_db_id !== undefined
               ? progress.last_db_id
               : (s.liveProgress?.last_db_id ?? null),
+            last_db_key: progress.last_db_key !== undefined
+              ? progress.last_db_key
+              : (s.liveProgress?.last_db_key ?? null),
+            last_db_bytes: progress.last_db_bytes !== undefined
+              ? progress.last_db_bytes
+              : (s.liveProgress?.last_db_bytes ?? null),
+            last_db_mode: progress.last_db_mode !== undefined
+              ? progress.last_db_mode
+              : (s.liveProgress?.last_db_mode ?? null),
+            db_rows_estimate: progress.db_rows_estimate !== undefined
+              ? progress.db_rows_estimate
+              : (s.liveProgress?.db_rows_estimate ?? 0),
             package_checksum_note: progress.package_checksum_note !== undefined
               ? progress.package_checksum_note
               : (s.liveProgress?.package_checksum_note ?? null),
@@ -1175,6 +1197,10 @@ function createScanningStore() {
           last_file_path: null,
           last_db_table: null,
           last_db_id: null,
+          last_db_key: null,
+          last_db_bytes: null,
+          last_db_mode: null,
+          db_rows_estimate: 0,
           package_checksum_note: null,
           current_unit: null,
           last_drain_activity_at: 0,
@@ -1324,6 +1350,10 @@ function createScanningStore() {
               last_file_path: null,
               last_db_table: null,
               last_db_id: null,
+              last_db_key: null,
+              last_db_bytes: null,
+              last_db_mode: null,
+              db_rows_estimate: 0,
               package_checksum_note: null,
               current_unit: null,
               last_drain_activity_at: 0,
@@ -1787,6 +1817,10 @@ function createScanningStore() {
           last_file_path: status.last_file_path ?? s.liveProgress?.last_file_path ?? null,
           last_db_table: status.last_db_table ?? s.liveProgress?.last_db_table ?? null,
           last_db_id: status.last_db_id ?? s.liveProgress?.last_db_id ?? null,
+          last_db_key: status.last_db_key ?? s.liveProgress?.last_db_key ?? null,
+          last_db_bytes: status.last_db_bytes ?? s.liveProgress?.last_db_bytes ?? null,
+          last_db_mode: status.last_db_mode ?? s.liveProgress?.last_db_mode ?? null,
+          db_rows_estimate: status.db_rows_estimate ?? s.liveProgress?.db_rows_estimate ?? 0,
           package_checksum_note: status.package_checksum_note ?? s.liveProgress?.package_checksum_note ?? null,
           current_unit: status.queue?.current_unit ?? s.liveProgress?.current_unit ?? null,
           last_drain_activity_at: status.last_drain_activity_at ?? s.liveProgress?.last_drain_activity_at ?? 0,

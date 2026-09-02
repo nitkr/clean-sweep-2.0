@@ -113,9 +113,10 @@ class CleanSweep_SignatureMatcher {
      * @param array $signatures Compiled list (ordered by caller if desired)
      * @param callable|null $on_tick function(int $n): bool  return true to pause/stop
      * @param int $start_offset Byte offset to start searching (not a substr; ^ still means start of $content)
+     * @param callable|null $on_preg_error function(int $index, string $pattern, int $code): void
      * @return array<int, array{index:int,pattern:string,match:string,offset:int,meta:array}>
      */
-    public static function match_content($content, array $signatures, $on_tick = null, $start_offset = 0) {
+    public static function match_content($content, array $signatures, $on_tick = null, $start_offset = 0, $on_preg_error = null) {
         $hits = [];
         $n = 0;
         $start_offset = (int) $start_offset;
@@ -143,6 +144,9 @@ class CleanSweep_SignatureMatcher {
             }
 
             if (@preg_match($pattern, $content, $matches, PREG_OFFSET_CAPTURE, $start_offset) === false) {
+                if (is_callable($on_preg_error)) {
+                    $on_preg_error($index, $pattern, (int) preg_last_error());
+                }
                 continue;
             }
             if (!isset($matches[0][0]) || $matches[0][0] === '') {

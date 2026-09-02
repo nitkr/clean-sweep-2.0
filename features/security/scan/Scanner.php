@@ -360,6 +360,11 @@ final class CleanSweep_Scanner {
             'last_file_path' => $state->last_file_path,
             'last_db_table' => $state->last_db_table,
             'last_db_id' => $state->last_db_id,
+            'last_db_key' => $state->last_db_key,
+            'last_db_bytes' => $state->last_db_bytes,
+            'last_db_mode' => $state->last_db_mode,
+            'db_in_progress_id' => $state->db_in_progress_id,
+            'db_rows_estimate' => $state->db_rows_estimate,
             'environment_advisory' => $options['environment_advisory'] ?? null,
             'restricted_host' => !empty($options['restricted_host']),
             'scan_scope' => $options['scan_scope'] ?? 'full',
@@ -1279,11 +1284,13 @@ final class CleanSweep_Scanner {
             return;
         }
 
+        $row_total = 0;
         $globals = CleanSweep_DbScanPlanner::enqueue_global_tables(
             $this->queue,
             $scan_id,
             $this->profile,
-            $this->host
+            $this->host,
+            $row_total
         );
 
         $current_prefix = (string)$wpdb->prefix;
@@ -1295,7 +1302,8 @@ final class CleanSweep_Scanner {
             $scan_id,
             $current_prefix,
             $this->profile,
-            $this->host
+            $this->host,
+            $row_total
         );
 
         // Quick (and first Standard/Deep tick): also cover the main site
@@ -1307,7 +1315,8 @@ final class CleanSweep_Scanner {
                 $scan_id,
                 $base_prefix,
                 $this->profile,
-                $this->host
+                $this->host,
+                $row_total
             );
             $skip[] = 1;
         }
@@ -1328,8 +1337,12 @@ final class CleanSweep_Scanner {
             $this->queue->enqueue($disc);
         }
 
+        if ($row_total > 0) {
+            $this->checkpoint->merge(['db_rows_estimate' => $row_total]);
+        }
+
         clean_sweep_log_message(
-            "CleanSweep_Scanner: queued DB globals={$globals} blog_segments={$blog_segments} multisite=" .
+            "CleanSweep_Scanner: queued DB globals={$globals} blog_segments={$blog_segments} rows~{$row_total} multisite=" .
             ($is_ms ? 'yes' : 'no') . " discovery=" . ($wants_discovery ? 'yes' : 'no'),
             'info'
         );

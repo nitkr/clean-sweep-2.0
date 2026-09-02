@@ -159,8 +159,25 @@ final class CleanSweep_DbScanPlanner {
     }
 
     /**
+     * Rows packed into one DB work unit given table COUNT and host cap.
+     */
+    public static function segment_row_quota(int $cnt, int $span, int $max_segments): int {
+        $span = max(50, $span);
+        $max_segments = max(1, $max_segments);
+        $cnt = max(0, $cnt);
+        if ($cnt === 0) {
+            return $span;
+        }
+        if ((int) ceil($cnt / $span) > $max_segments) {
+            $span = (int) ceil($cnt / $max_segments);
+        }
+        return max(50, $span);
+    }
+
+    /**
      * Enqueue ID-range segments for one physical table.
      *
+     * @param int|null $row_total Accumulates planner COUNT for UI estimate
      * @return int Number of work units enqueued
      */
     public static function enqueue_table(
@@ -170,7 +187,8 @@ final class CleanSweep_DbScanPlanner {
         string $suffix,
         CleanSweep_ScanProfile $profile,
         CleanSweep_HostDetector $host,
-        array $extra_payload = []
+        array $extra_payload = [],
+        ?int &$row_total = null
     ): int {
         global $wpdb;
         if (!isset($wpdb) || !self::table_exists($table)) {
@@ -213,21 +231,26 @@ final class CleanSweep_DbScanPlanner {
             }
         }
 
-        $batch_size = (int)$profile->get_db_segment_span();
-        if ($batch_size < 50) {
-            $batch_size = 50;
+        if ($row_total !== null) {
+            $row_total += $cnt;
         }
+
         $max_segments = $host->isSharedHosting() ? 80 : 200;
-        $id_span = max(1, $max - $min + 1);
-        $est = (int)ceil($id_span / max(1, $batch_size));
-        if ($est > $max_segments) {
-            $batch_size = (int)ceil($id_span / $max_segments);
-        }
+        $rows_per = self::segment_row_quota($cnt, (int)$profile->get_db_segment_span(), $max_segments);
 
         $cur = $min;
         $segments = 0;
         while ($cur <= $max && $segments < $max_segments) {
-            $end = min($cur + $batch_size - 1, $max);
+            // phpcs:ignore WordPress.DB.PreparedSQL
+            $nth = $wpdb->get_var($wpdb->prepare(
+                "SELECT `{$idcol}` FROM `{$table}` WHERE `{$idcol}` >= %d{$where_sql} ORDER BY `{$idcol}` ASC LIMIT %d,1",
+                $cur,
+                max(0, $rows_per - 1)
+            ));
+            $end = ($nth === null) ? $max : min((int)$nth, $max);
+            if ($end < $cur) {
+                $end = $max;
+            }
             $payload = array_merge([
                 'table' => $table,
                 'id_column' => $idcol,
@@ -253,7 +276,7 @@ final class CleanSweep_DbScanPlanner {
 
         if ($cur <= $max) {
             clean_sweep_log_message(
-                "CleanSweep_DbScanPlanner: capped segments for {$table} at {$segments} (span={$batch_size})",
+                "CleanSweep_DbScanPlanner: capped segments for {$table} at {$segments} (rows_per={$rows_per})",
                 'info'
             );
         }
@@ -271,7 +294,8 @@ final class CleanSweep_DbScanPlanner {
         string $scan_id,
         string $blog_prefix,
         CleanSweep_ScanProfile $profile,
-        CleanSweep_HostDetector $host
+        CleanSweep_HostDetector $host,
+        ?int &$row_total = null
     ): int {
         $allowed = $profile->get_effective_db_suffixes();
         $per_blog = array_intersect($profile->get_per_blog_db_suffixes(), $allowed);
@@ -283,7 +307,9 @@ final class CleanSweep_DbScanPlanner {
                 $blog_prefix . $suffix,
                 $suffix,
                 $profile,
-                $host
+                $host,
+                [],
+                $row_total
             );
         }
         return $n;
@@ -298,7 +324,8 @@ final class CleanSweep_DbScanPlanner {
         CleanSweep_FileBasedScanWorkQueue $queue,
         string $scan_id,
         CleanSweep_ScanProfile $profile,
-        CleanSweep_HostDetector $host
+        CleanSweep_HostDetector $host,
+        ?int &$row_total = null
     ): int {
         $allowed = $profile->get_effective_db_suffixes();
         $globals = array_intersect($profile->get_global_db_suffixes(), $allowed);
@@ -311,7 +338,9 @@ final class CleanSweep_DbScanPlanner {
                 $base . $suffix,
                 $suffix,
                 $profile,
-                $host
+                $host,
+                [],
+                $row_total
             );
         }
         return $n;

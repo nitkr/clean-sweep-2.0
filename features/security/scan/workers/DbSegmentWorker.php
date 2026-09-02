@@ -70,7 +70,22 @@ final class CleanSweep_DbSegmentWorker implements CleanSweep_Worker {
         $cursor = array_key_exists('last_processed_id', $payload)
             ? (int)$payload['last_processed_id']
             : ($start_id - 1);
-        $result = $db_scanner->scan_table_segment($table, $id_column, $cursor, $end_id, $where_extra);
+
+        $skip_ids = CleanSweep_DatabaseScanner::normalize_skip_ids($payload['poison_ids'] ?? []);
+        if (($state->last_db_table ?? '') === $table) {
+            $in_progress = (int) ($state->db_in_progress_id ?? 0);
+            $checkpoint_id = (int) ($state->last_db_id ?? 0);
+            if ($in_progress > 0) {
+                $skip_ids[$in_progress] = true;
+            }
+            if ($checkpoint_id > $cursor && $checkpoint_id !== $in_progress) {
+                $cursor = $checkpoint_id;
+            }
+        }
+
+        $result = $db_scanner->scan_table_segment($table, $id_column, $cursor, $end_id, $where_extra, [
+            'skip_ids' => $skip_ids,
+        ]);
 
         // Flush any buffered threats
         $collector->flush();
@@ -84,10 +99,23 @@ final class CleanSweep_DbSegmentWorker implements CleanSweep_Worker {
         if ($threats > 0) {
             $ctx->incrementCounter('threats_found', $threats);
         }
+        $poison_map = CleanSweep_DatabaseScanner::normalize_skip_ids($payload['poison_ids'] ?? []);
+        foreach (CleanSweep_DatabaseScanner::normalize_skip_ids($result['poison_ids'] ?? []) as $pid => $on) {
+            if ($on) {
+                $poison_map[$pid] = true;
+            }
+        }
+        $poison = array_keys($poison_map);
+        sort($poison, SORT_NUMERIC);
+        if (count($poison) > 50) {
+            $poison = array_slice($poison, -50);
+        }
+
         $ctx->mergeState([
             'phase' => 'database',
             'last_db_id' => $last_processed,
             'last_db_table' => $table,
+            'db_in_progress_id' => null,
         ]);
 
         $this->enqueueRevisionFollowOn($ctx, $payload, $table, $result);
@@ -102,7 +130,10 @@ final class CleanSweep_DbSegmentWorker implements CleanSweep_Worker {
                 'last_id' => $last_processed,
                 'table' => $table,
                 'duration_seconds' => time() - $start_time,
-                'follow_on_payload' => array_merge($payload, ['last_processed_id' => $last_processed]),
+                'follow_on_payload' => array_merge($payload, [
+                    'last_processed_id' => $last_processed,
+                    'poison_ids' => $poison,
+                ]),
             ]);
         }
 

@@ -75,6 +75,7 @@ final class CleanSweep_DbSiteDiscoveryWorker implements CleanSweep_Worker {
         $host = new CleanSweep_HostDetector();
         $enqueued_sites = 0;
         $segments = 0;
+        $row_total = 0;
         $new_last = $last_blog_id;
         $seen = 0;
 
@@ -95,7 +96,8 @@ final class CleanSweep_DbSiteDiscoveryWorker implements CleanSweep_Worker {
                     $state->scan_id,
                     $prefix,
                     $profile,
-                    $host
+                    $host,
+                    $row_total
                 );
                 $enqueued_sites++;
                 $seen++;
@@ -111,6 +113,11 @@ final class CleanSweep_DbSiteDiscoveryWorker implements CleanSweep_Worker {
         }
 
         $sites_done += $enqueued_sites;
+        if ($row_total > 0) {
+            $ctx->mergeState([
+                'db_rows_estimate' => (int) $state->db_rows_estimate + $row_total,
+            ]);
+        }
 
         clean_sweep_log_message(
             "CleanSweep_DbSiteDiscoveryWorker: +{$enqueued_sites} sites, {$segments} segments (last_blog={$new_last}, done={$sites_done})",
