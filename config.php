@@ -108,9 +108,10 @@ if (!file_exists(CLEAN_SWEEP_TEMP_DIR)) {
     mkdir(CLEAN_SWEEP_TEMP_DIR, 0755, true);
 }
 
-// Enable error reporting for debugging
+// Log all errors. Do not print them on HTTP (PHP warning HTML corrupts JSON APIs).
 error_reporting(E_ALL);
-ini_set('display_errors', 1);
+ini_set('log_errors', '1');
+ini_set('display_errors', PHP_SAPI === 'cli' ? '1' : '0');
 
 // Security check - only allow access from specific IPs or with authentication
 // Uncomment and modify as needed

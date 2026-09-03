@@ -263,13 +263,13 @@ final class CleanSweep_HostDetector {
     }
 
     private function detectCpuCores(): int {
-        if (function_exists('shell_exec') && is_readable('/proc/cpuinfo')) {
+        if (function_exists('shell_exec') && @is_readable('/proc/cpuinfo')) {
             $out = @shell_exec('grep -c ^processor /proc/cpuinfo 2>/dev/null');
             if (is_string($out) && (int)trim($out) > 0) {
                 return (int)trim($out);
             }
         }
-        if (defined('PHP_OS_FAMILY') && PHP_OS_FAMILY === 'Linux' && is_readable('/sys/fs/cgroup/cpu.max')) {
+        if (defined('PHP_OS_FAMILY') && PHP_OS_FAMILY === 'Linux' && @is_readable('/sys/fs/cgroup/cpu.max')) {
             $raw = @file_get_contents('/sys/fs/cgroup/cpu.max');
             if ($raw && preg_match('/(\d+)\s+(\d+)/', $raw, $m)) {
                 $quota = (float)$m[1];

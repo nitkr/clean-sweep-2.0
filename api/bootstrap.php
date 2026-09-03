@@ -83,6 +83,10 @@ $base_dir = dirname(__DIR__);
 
 // Load configuration
 require_once $base_dir . '/config.php';
+// config.php may set display_errors for CLI; JSON responses must never print warnings.
+ini_set('display_errors', '0');
+ini_set('html_errors', '0');
+ini_set('log_errors', '1');
 
 // Load utility functions
 require_once $base_dir . '/utils.php';
