@@ -103,10 +103,7 @@ define('CLEAN_SWEEP_MAX_EXECUTION_TIME', CLEAN_SWEEP_HOSTING_SHARED_LIMITS ? 25 
 define('CLEAN_SWEEP_BATCH_SIZE_SHARED', CLEAN_SWEEP_HOSTING_SHARED_LIMITS ? 3 : 5); // Smaller batches for shared hosting
 define('CLEAN_SWEEP_PROGRESS_HEARTBEAT_INTERVAL', 2); // Progress updates every 2 seconds
 
-// Create temp directory if it doesn't exist
-if (!file_exists(CLEAN_SWEEP_TEMP_DIR)) {
-    mkdir(CLEAN_SWEEP_TEMP_DIR, 0755, true);
-}
+// backups/temp is created when a download or upload needs it (clean_sweep_ensure_writable_dir).
 
 // Log all errors. Do not print them on HTTP (PHP warning HTML corrupts JSON APIs).
 error_reporting(E_ALL);

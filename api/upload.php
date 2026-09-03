@@ -178,8 +178,13 @@ function clean_sweep_handle_upload() {
     $upload_id = 'upload_' . bin2hex(random_bytes(8));
     $temp_dir = clean_sweep_upload_temp_dir($upload_id);
 
-    if (!mkdir($temp_dir, 0755, true)) {
-        CleanSweep_ApiResponse::sendError('Failed to create temporary directory', 'TEMP_DIR_ERROR');
+    if (!defined('CLEAN_SWEEP_TEMP_DIR') || !clean_sweep_ensure_writable_dir(CLEAN_SWEEP_TEMP_DIR)
+        || !@mkdir($temp_dir, 0755, true)
+    ) {
+        CleanSweep_ApiResponse::sendError(
+            'Cannot write to backups/temp. The web user needs write access to the Clean Sweep backups folder.',
+            'TEMP_DIR_ERROR'
+        );
     }
 
     $uploaded_path = $temp_dir . $safe_name;
