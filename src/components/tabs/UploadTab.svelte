@@ -1,7 +1,12 @@
 <script>
+  import { onMount } from 'svelte';
   import { upload, UPLOAD_DEST_OPTIONS, UPLOAD_PATH_CHIPS, UPLOAD_REINSTALL_CARDS } from '../../lib/stores/upload.js';
   import { Button } from 'bits-ui';
   import { isFeatureEnabled } from '../../config/features.ts';
+
+  onMount(() => {
+    upload.loadLimits();
+  });
 
   let dragOver = $derived($upload.dragOver);
   let uploadQueue = $derived($upload.uploadQueue);
@@ -28,6 +33,7 @@
   let createBackup = $derived($upload.createBackup);
   let mixedBatch = $derived($upload.mixedBatch);
   let batchResult = $derived($upload.batchResult);
+  let hostLimitBytes = $derived($upload.hostLimitBytes);
 
   let destLabel = $derived(destination ? upload.destLabel(destination, customRel) : '');
   let destValid = $derived(upload.destIsValid($upload));
@@ -328,7 +334,9 @@
               onchange={(e) => upload.handleFileSelect(e)}
             >
           </label>
-          <p class="text-xs text-faint mt-2">Only .zip files are accepted</p>
+          <p class="text-xs text-faint mt-2">
+            Only .zip files are accepted{#if hostLimitBytes > 0} · this host allows {upload.formatFileSize(hostLimitBytes)}{/if}
+          </p>
         </div>
 
         {#if uploadQueue.length > 0}

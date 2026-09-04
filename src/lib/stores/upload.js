@@ -92,6 +92,9 @@ function initialState() {
     browsePath: '',
     browseEntries: [],
     browseLoading: false,
+    hostLimitBytes: 0,
+    hostPostMaxSize: '',
+    hostUploadMaxFilesize: '',
   };
 }
 
@@ -275,7 +278,7 @@ function createUploadStore() {
       event.preventDefault();
       update(s => ({ ...s, dragOver: false }));
       if (isBusy(readState())) return;
-      queueZipFiles(event.dataTransfer.files, update);
+      queueZipFiles(event.dataTransfer.files, update, readState().hostLimitBytes);
     },
 
     /**
@@ -283,7 +286,7 @@ function createUploadStore() {
      */
     handleFileSelect: (event) => {
       if (isBusy(readState())) return;
-      queueZipFiles(event.target.files, update);
+      queueZipFiles(event.target.files, update, readState().hostLimitBytes);
     },
 
     /**
@@ -291,7 +294,29 @@ function createUploadStore() {
      */
     addFilesToQueue: (files) => {
       if (isBusy(readState())) return;
-      queueZipFiles(files, update);
+      queueZipFiles(files, update, readState().hostLimitBytes);
+    },
+
+    /**
+     * Host PHP cap from get_upload_limits. Best-effort; staging still checks server-side.
+     */
+    async loadLimits() {
+      const state = readState();
+      if (state.hostLimitBytes > 0) return;
+      try {
+        const response = await adapters.upload.limits();
+        const bytes = response.success ? Number(response.data?.limit_bytes) : 0;
+        if (bytes > 0) {
+          update(s => ({
+            ...s,
+            hostLimitBytes: bytes,
+            hostPostMaxSize: response.data?.post_max_size || '',
+            hostUploadMaxFilesize: response.data?.upload_max_filesize || '',
+          }));
+        }
+      } catch (e) {
+        debug.error('UPLOAD', 'Failed to load host upload limit', e.message);
+      }
     },
 
     /**
@@ -440,16 +465,7 @@ function createUploadStore() {
       }));
     },
 
-    /**
-     * Format file size
-     */
-    formatFileSize: (bytes) => {
-      if (bytes === 0) return '0 Bytes';
-      const k = 1024;
-      const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-      const i = Math.floor(Math.log(bytes) / Math.log(k));
-      return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-    },
+    formatFileSize,
 
     /**
      * Stage queued ZIPs. Does not extract.
@@ -486,23 +502,42 @@ function createUploadStore() {
             )
           }));
 
+          const hostLimit = readState().hostLimitBytes;
+          if (hostLimit > 0 && file.size > hostLimit) {
+            const tooLarge = `${file.name} is ${formatFileSize(file.size)}; this host allows ${formatFileSize(hostLimit)}. Raise post_max_size and upload_max_filesize, then retry.`;
+            update(s => ({
+              ...s,
+              uploading: false,
+              error: tooLarge,
+              uploadQueue: s.uploadQueue.map((row) =>
+                row.id === rowId
+                  ? { ...row, status: 'error', error: tooLarge }
+                  : row
+              )
+            }));
+            errors.add({ message: tooLarge, code: 'FILE_TOO_LARGE' });
+            return false;
+          }
+
           const response = await adapters.upload.uploadZip(file, (percent) => {
             const overall = Math.round(((i + percent / 100) / queue.length) * 80);
             update(s => ({ ...s, uploadProgress: overall }));
           });
 
           if (!response.success || !response.data?.upload_id) {
+            const failMsg = response.error || 'Upload failed';
+            const failCode = response.code || 'UPLOAD_ERROR';
             update(s => ({
               ...s,
               uploading: false,
-              error: response.error || 'Upload failed',
+              error: failMsg,
               uploadQueue: s.uploadQueue.map((row) =>
                 row.id === rowId
-                  ? { ...row, status: 'error', error: response.error || 'Upload failed' }
+                  ? { ...row, status: 'error', error: failMsg }
                   : row
               )
             }));
-            errors.add({ message: response.error || 'Upload failed', code: 'UPLOAD_ERROR' });
+            errors.add({ message: failMsg, code: failCode, details: response.details || null });
             return false;
           }
 
@@ -983,27 +1018,43 @@ function extractFailMeta(extracted) {
   return { destination_name, backup_rel };
 }
 
-function queueZipFiles(files, update) {
+function formatFileSize(bytes) {
+  const n = Number(bytes) || 0;
+  if (n === 0) return '0 Bytes';
+  const k = 1024;
+  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+  const i = Math.min(sizes.length - 1, Math.floor(Math.log(n) / Math.log(k)));
+  return parseFloat((n / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+function queueZipFiles(files, update, limitBytes = 0) {
   if (!files || !files.length) return;
   update(s => {
     const newFiles = [];
     for (const file of files) {
-      if (file.name && String(file.name).toLowerCase().endsWith('.zip')) {
-        newFiles.push({
-          id: nextQueueId(),
-          file,
-          uploadId: null,
-          inspect: null,
-          status: 'queued',
-          error: null,
-        });
-      } else {
+      if (!file.name || !String(file.name).toLowerCase().endsWith('.zip')) {
         errors.add({
           message: `${file.name || 'File'} is not a ZIP file`,
           code: 'INVALID_FILE_TYPE',
           level: 'warning'
         });
+        continue;
       }
+      if (limitBytes > 0 && file.size > limitBytes) {
+        errors.add({
+          message: `${file.name} is ${formatFileSize(file.size)}; this host allows ${formatFileSize(limitBytes)}. Raise post_max_size and upload_max_filesize, then retry.`,
+          code: 'FILE_TOO_LARGE',
+        });
+        continue;
+      }
+      newFiles.push({
+        id: nextQueueId(),
+        file,
+        uploadId: null,
+        inspect: null,
+        status: 'queued',
+        error: null,
+      });
     }
     return { ...s, uploadQueue: [...s.uploadQueue, ...newFiles], uploadResult: null };
   });

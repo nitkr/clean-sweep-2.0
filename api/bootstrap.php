@@ -368,7 +368,7 @@ function clean_sweep_api_get_endpoints() {
         ],
         'upload' => [
             'file' => __DIR__ . '/upload.php',
-            'actions' => ['upload_zip', 'inspect_zip', 'extract_zip', 'discard_upload', 'get_upload_progress', 'get_upload_status', 'get_progress']
+            'actions' => ['upload_zip', 'inspect_zip', 'extract_zip', 'discard_upload', 'get_upload_progress', 'get_upload_status', 'get_upload_limits', 'get_progress']
         ],
         'cleanup' => [
             'file' => __DIR__ . '/cleanup.php',
@@ -432,40 +432,142 @@ function clean_sweep_api_get_endpoints() {
 // ============================================================================
 
 /**
- * Route API request to appropriate handler
+ * Parse a PHP ini size (512M, 128K, 1G) to bytes. 0 / -1 / empty → 0 (unlimited).
+ */
+function clean_sweep_api_ini_bytes($value) {
+    $value = trim((string) $value);
+    if ($value === '' || $value === '-1' || $value === '0') {
+        return 0;
+    }
+    if (preg_match('/^(\d+)([KMG])$/i', $value, $m)) {
+        $v = (int) $m[1];
+        switch (strtoupper($m[2])) {
+            case 'K':
+                return $v * 1024;
+            case 'M':
+                return $v * 1024 * 1024;
+            case 'G':
+                return $v * 1024 * 1024 * 1024;
+        }
+    }
+    return (int) $value;
+}
+
+/**
+ * True when this request's target script is api/bootstrap.php (not an
+ * endpoint that included bootstrap for JSON headers).
+ */
+function clean_sweep_api_is_bootstrap_script() {
+    $script = (string) ($_SERVER['SCRIPT_FILENAME'] ?? '');
+    if ($script === '') {
+        $script = (string) ($_SERVER['SCRIPT_NAME'] ?? '');
+    }
+    return basename(str_replace('\\', '/', $script)) === 'bootstrap.php';
+}
+
+/**
+ * PHP discards $_POST/$_FILES when the body is larger than post_max_size.
+ * CONTENT_LENGTH is still set.
+ */
+function clean_sweep_api_post_exceeds_limit() {
+    $content_length = (int) ($_SERVER['CONTENT_LENGTH'] ?? 0);
+    if ($content_length <= 0) {
+        return false;
+    }
+    $post_max = clean_sweep_api_ini_bytes((string) ini_get('post_max_size'));
+    return $post_max > 0 && $content_length > $post_max;
+}
+
+function clean_sweep_api_available_actions() {
+    $actions = [];
+    foreach (clean_sweep_api_get_endpoints() as $endpoint) {
+        if (empty($endpoint['actions']) || !is_array($endpoint['actions'])) {
+            continue;
+        }
+        foreach ($endpoint['actions'] as $name) {
+            $actions[] = $name;
+        }
+    }
+    if (function_exists('clean_sweep_api_recovery_setup_actions')) {
+        foreach (clean_sweep_api_recovery_setup_actions() as $name) {
+            $actions[] = $name;
+        }
+    }
+    return array_values(array_unique($actions));
+}
+
+function clean_sweep_api_send_post_too_large() {
+    $post_max = (string) ini_get('post_max_size');
+    $upload_max = (string) ini_get('upload_max_filesize');
+    $content_length = (int) ($_SERVER['CONTENT_LENGTH'] ?? 0);
+    $limit_bytes = 512 * 1024 * 1024;
+    foreach ([$post_max, $upload_max] as $ini) {
+        $bytes = clean_sweep_api_ini_bytes($ini);
+        if ($bytes > 0 && $bytes < $limit_bytes) {
+            $limit_bytes = $bytes;
+        }
+    }
+    if (function_exists('clean_sweep_upload_limit_bytes')) {
+        $limit_bytes = clean_sweep_upload_limit_bytes();
+    }
+    CleanSweep_ApiResponse::sendError(
+        'Upload exceeds this host\'s PHP post size limit (post_max_size=' . $post_max . ', upload_max_filesize=' . $upload_max . '). Raise those limits, then retry.',
+        'FILE_TOO_LARGE',
+        [
+            'content_length' => $content_length,
+            'post_max_size' => $post_max,
+            'upload_max_filesize' => $upload_max,
+            'limit_bytes' => $limit_bytes,
+        ]
+    );
+}
+
+/**
+ * Route API request to appropriate handler.
+ * Endpoint files include this bootstrap for JSON headers; they run their own
+ * switch. Only route when the request target is bootstrap.php itself.
  */
 function clean_sweep_api_route_request() {
+    if (!clean_sweep_api_is_bootstrap_script()) {
+        return;
+    }
+
     $action = $_POST['action'] ?? $_GET['action'] ?? '';
 
     if (function_exists('clean_sweep_api_recovery_setup_actions') && in_array($action, clean_sweep_api_recovery_setup_actions(), true)) {
         return;
     }
-    
-    if (empty($action)) {
+
+    if ($action === '' && !empty($_FILES['file'])) {
+        $action = 'upload_zip';
+    }
+
+    if ($action === '') {
+        if (clean_sweep_api_post_exceeds_limit()) {
+            clean_sweep_api_send_post_too_large();
+        }
         CleanSweep_ApiResponse::sendError(
-            'No action specified. Available actions: analyze_plugins, reinstall_plugins, scan_malware, reinstall_core, upload_zip, extract_zip, run_cleanup',
-            'NO_ACTION'
+            'No action specified.',
+            'NO_ACTION',
+            ['available_actions' => clean_sweep_api_available_actions()]
         );
     }
-    
-    // Find which endpoint handles this action
+
     $endpoints = clean_sweep_api_get_endpoints();
-    
-    foreach ($endpoints as $name => $endpoint) {
-        if (in_array($action, $endpoint['actions'])) {
-            // Include the endpoint file
+
+    foreach ($endpoints as $endpoint) {
+        if (in_array($action, $endpoint['actions'], true)) {
             require_once $endpoint['file'];
             return;
         }
     }
-    
-    // Action not found
+
     CleanSweep_ApiResponse::sendError(
         "Unknown action: $action",
         'UNKNOWN_ACTION',
-        ['available_actions' => array_merge(...array_column($endpoints, 'actions'))]
+        ['available_actions' => clean_sweep_api_available_actions()]
     );
 }
 
-// Route the request
+// Route only when this file is the request target.
 clean_sweep_api_route_request();

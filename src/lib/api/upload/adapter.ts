@@ -11,6 +11,7 @@ import type {
   UploadExtractResult,
   UploadInspectResult,
   UploadStageResult,
+  UploadLimitsResult,
   UploadStatusResult,
 } from '../../../shared/types/api.js';
 import { API_CONFIG } from '../../../config/api.js';
@@ -79,6 +80,17 @@ export class UploadApiAdapter {
     formData.append('upload_id', uploadId);
 
     return this.adapter.request<UploadStatusResult>(endpoint, {
+      method: 'POST',
+      body: formData
+    });
+  }
+
+  async limits(): Promise<ApiResponse<UploadLimitsResult>> {
+    const endpoint = API_CONFIG.endpoints.upload.base;
+    const formData = new FormData();
+    formData.append('action', 'get_upload_limits');
+
+    return this.adapter.request<UploadLimitsResult>(endpoint, {
       method: 'POST',
       body: formData
     });
