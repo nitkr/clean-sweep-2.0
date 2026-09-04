@@ -159,6 +159,46 @@ function extractFirstJsonObject(text: string): string | null {
   return null;
 }
 
+function isPhpDiagnosticHtml(trimmed: string): boolean {
+  return (
+    /^<br\s*\/?>/i.test(trimmed) ||
+    /^<b>(Warning|Notice|Deprecated|Fatal error|Parse error)/i.test(trimmed) ||
+    /^(Warning|Notice|Deprecated|Fatal error|Parse error)\s*:/i.test(trimmed)
+  );
+}
+
+function phpDiagnosticSummary(text: string): string {
+  const plain = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  if (plain === '') {
+    return 'PHP warning in server response';
+  }
+  return plain.length > 240 ? plain.slice(0, 240) + '…' : plain;
+}
+
+/** PHP warning HTML vs WAF/login document. Real firewall pages stay HTML_RESPONSE. */
+function nonJsonBodyError(text: string, contentType?: string | null): ApiResponse<never> {
+  const trimmed = text.trim();
+  const details = { responseText: text.substring(0, 1000) };
+  const timestamp = Date.now();
+  if (isPhpDiagnosticHtml(trimmed)) {
+    return {
+      success: false,
+      error: phpDiagnosticSummary(text),
+      code: 'PHP_WARNING',
+      details,
+      timestamp
+    };
+  }
+  const extra = contentType ? ` (Content-Type: ${contentType})` : '';
+  return {
+    success: false,
+    error: `Server returned HTML instead of JSON${extra}. This may indicate a security plugin or firewall blocking the request.`,
+    code: 'HTML_RESPONSE',
+    details,
+    timestamp
+  };
+}
+
 /**
  * Default adapter implementation using fetch
  */
@@ -329,13 +369,7 @@ export class HttpApiAdapter implements IApiAdapter {
                        (trimmed.startsWith('<') && !trimmed.startsWith('{"'));
         
         if (isHtml) {
-          return {
-            success: false,
-            error: `Server returned HTML instead of JSON (Content-Type: ${contentType}). Check console for full response.`,
-            code: 'HTML_RESPONSE',
-            details: { responseText: text.substring(0, 1000) },
-            timestamp: Date.now()
-          };
+          return nonJsonBodyError(text, contentType);
         }
         
         return {
@@ -376,14 +410,7 @@ export class HttpApiAdapter implements IApiAdapter {
           console.error('[ADAPTER] Content-Type header:', contentType);
           console.error('[ADAPTER] Response status:', response.status);
           console.error('[ADAPTER] Full response text:', text.substring(0, 500));
-          
-          return {
-            success: false,
-            error: `Server returned HTML instead of JSON. This may indicate a security plugin or firewall blocking the request.`,
-            code: 'HTML_RESPONSE',
-            details: { responseText: text.substring(0, 1000) },
-            timestamp: Date.now()
-          };
+          return nonJsonBodyError(text, contentType);
         }
         
         const json = parseJsonAllowingTrailer(jsonText) as ApiResponse<T> & { toolkit_integrity?: unknown; visit_key?: string; data?: { visit_key?: string } };
@@ -485,13 +512,7 @@ export class HttpApiAdapter implements IApiAdapter {
         
         if (isHtml && xhr.status >= 200 && xhr.status < 300) {
           console.warn('[UPLOAD] Received HTML instead of JSON');
-          resolve({
-            success: false,
-            error: `Server returned HTML instead of JSON. This may indicate a security plugin blocking the request.`,
-            code: 'HTML_RESPONSE',
-            details: { responseText: responseText.substring(0, 500) },
-            timestamp: Date.now()
-          });
+          resolve(nonJsonBodyError(responseText));
           return;
         }
         
