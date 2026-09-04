@@ -186,6 +186,7 @@ function clean_sweep_handle_reinstall_core() {
             CleanSweep_ApiResponse::sendError($final_progress['message'], 'REINSTALL_FAILED', [
                 'results' => $processed,
                 'progress_file' => $progress_file,
+                'failed_files' => $results['failed_files'] ?? [],
             ]);
         }
 

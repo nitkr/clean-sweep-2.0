@@ -55,6 +55,126 @@ function clean_sweep_delete_core_directory($dir_path) {
     return @rmdir($dir_path);
 }
 
+function clean_sweep_core_rel_path($wordpress_dir, $pathname) {
+    $base = rtrim(str_replace('\\', '/', (string) $wordpress_dir), '/') . '/';
+    $path = str_replace('\\', '/', (string) $pathname);
+    if (strpos($path, $base) === 0) {
+        return substr($path, strlen($base));
+    }
+    return ltrim($path, '/');
+}
+
+function clean_sweep_core_should_preserve($relative_path, array $preserve_files) {
+    foreach ($preserve_files as $preserve) {
+        if ($relative_path === $preserve || strpos($relative_path, $preserve . '/') === 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function clean_sweep_core_copy_file($source, $target) {
+    $parent = dirname($target);
+    if (!is_dir($parent) && !@mkdir($parent, 0755, true)) {
+        return false;
+    }
+    if (is_file($target) && !is_writable($target)) {
+        if (!@unlink($target)) {
+            return false;
+        }
+    }
+    $tmp = $parent . '/.cs-' . basename($target) . '.' . bin2hex(random_bytes(3));
+    if (!@copy($source, $tmp)) {
+        @unlink($tmp);
+        return @copy($source, $target);
+    }
+    if (@rename($tmp, $target)) {
+        return true;
+    }
+    @unlink($target);
+    if (@rename($tmp, $target)) {
+        return true;
+    }
+    $ok = @copy($tmp, $target);
+    @unlink($tmp);
+    return $ok;
+}
+
+function clean_sweep_core_copy_failures_message(array $failed) {
+    $failed = array_values(array_unique($failed));
+    $shown = array_slice($failed, 0, 8);
+    $msg = 'The update cannot be installed because some files could not be copied. This is usually due to inconsistent file permissions: ' . implode(', ', $shown);
+    if (count($failed) > 8) {
+        $msg .= ' (+' . (count($failed) - 8) . ' more)';
+    }
+    return $msg;
+}
+
+function clean_sweep_core_verify_after_install($site_root, $wp_version) {
+    $site_root = rtrim(str_replace('\\', '/', (string) $site_root), '/') . '/';
+    $version_file = $site_root . 'wp-includes/version.php';
+    if (!is_readable($version_file)) {
+        return 'wp-includes/version.php is missing after install. This is usually due to inconsistent file permissions.';
+    }
+    $src = (string) file_get_contents($version_file);
+    if (!preg_match('/\$wp_version\s*=\s*[\'"]([^\'"]+)[\'"]/', $src, $m)) {
+        return 'Could not read the installed WordPress version from wp-includes/version.php.';
+    }
+    $installed = $m[1];
+    if ($wp_version !== 'latest' && $wp_version !== '' && version_compare($installed, (string) $wp_version, '!=')) {
+        return "Installed wp-includes/version.php is {$installed}, expected {$wp_version}. Some files could not be replaced (inconsistent file permissions).";
+    }
+    $settings = $site_root . 'wp-settings.php';
+    if (!is_readable($settings)) {
+        return 'wp-settings.php is missing after install. This is usually due to inconsistent file permissions.';
+    }
+    $st = (string) file_get_contents($settings);
+    if (preg_match_all('/WPINC\s*\.\s*[\'"]\/([^\'"]+)[\'"]/', $st, $mm)) {
+        foreach ($mm[1] as $inc) {
+            if (!is_file($site_root . 'wp-includes/' . $inc)) {
+                return 'wp-settings.php requires wp-includes/' . $inc . ' which is missing (inconsistent file permissions or mixed WordPress versions).';
+            }
+        }
+    }
+    return null;
+}
+
+function clean_sweep_core_copy_tree($wordpress_dir, $site_root, array $preserve_files, $root_files_only) {
+    $failed = [];
+    $copied = 0;
+    $iterator = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator($wordpress_dir, RecursiveDirectoryIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::SELF_FIRST
+    );
+    foreach ($iterator as $item) {
+        $rel = clean_sweep_core_rel_path($wordpress_dir, $item->getPathname());
+        if ($rel === '' || clean_sweep_core_should_preserve($rel, $preserve_files)) {
+            continue;
+        }
+        $is_root_file = $item->isFile() && strpos($rel, '/') === false;
+        if ($root_files_only && !$is_root_file) {
+            continue;
+        }
+        if (!$root_files_only && $is_root_file) {
+            continue;
+        }
+        $target = rtrim(str_replace('\\', '/', $site_root), '/') . '/' . $rel;
+        if ($item->isDir()) {
+            if (!is_dir($target) && !@mkdir($target, 0755, true)) {
+                $failed[] = $rel;
+            }
+            continue;
+        }
+        if (clean_sweep_core_copy_file($item->getPathname(), $target)) {
+            $copied++;
+        } else {
+            $failed[] = $rel;
+            clean_sweep_log_message('Failed to copy core file: ' . $rel, 'error');
+        }
+    }
+    return [$copied, $failed];
+}
+
 /**
  * Create ZIP backup of core files that need to be preserved
  *
@@ -495,93 +615,93 @@ function clean_sweep_execute_core_reinstallation($wp_version = 'latest') {
         return ['success' => false, 'message' => 'Failed to extract WordPress'];
     }
 
-    // SECURITY ENHANCEMENT: Delete entire wp-admin and wp-includes directories from REAL SITE ROOT
-    $directories_to_clean = ['wp-admin', 'wp-includes'];
-
-    clean_sweep_log_message("Security: Completely removing wp-admin and wp-includes directories from real site for fresh install");
-
-    foreach ($directories_to_clean as $dir) {
-        $full_dir_path = $site_root . $dir;
-        if (is_dir($full_dir_path)) {
-            clean_sweep_log_message("Removing directory from real site: $full_dir_path");
-
-            // Use WP_Filesystem for better compatibility
-            if (!empty($wp_filesystem) && $wp_filesystem->rmdir($full_dir_path, true)) {
-                clean_sweep_log_message("Successfully removed: $full_dir_path");
-            } else {
-                // Fallback to PHP functions with error suppression
-                $success = @clean_sweep_delete_core_directory($full_dir_path);
-                if ($success) {
-                    clean_sweep_log_message("Successfully removed (fallback method): $full_dir_path");
-                } else {
-                    clean_sweep_log_message("Failed to remove directory: $full_dir_path", 'warning');
-                }
-            }
-        }
-    }
-
-    // Install WordPress core files with complete error suppression
-    clean_sweep_log_message("Installing WordPress core files");
-
-    $progress_data['status'] = 'installing';
-    $progress_data['progress'] = 90;
-    $progress_data['message'] = 'Installing WordPress core files...';
-    $progress_data['step'] = 4;
-    clean_sweep_write_progress_file($progress_file, $progress_data);
-
     $wordpress_dir = $extract_dir . '/wordpress';
-
-    // Also suppress all errors for this section using @ operator
-    $old_error_reporting = error_reporting(0); // Suppress all errors
-
-    try {
-        $files_copied = 0;
-
-        // Use simple recursive copy with error suppression
-        $iterator = new RecursiveIteratorIterator(
-            new RecursiveDirectoryIterator($wordpress_dir, RecursiveDirectoryIterator::SKIP_DOTS),
-            RecursiveIteratorIterator::SELF_FIRST
-        );
-
-        foreach ($iterator as $item) {
-            $relative_path = str_replace($wordpress_dir . '/', '', $item->getPathname());
-            $target_path = $site_root . $relative_path;  // INSTALL TO REAL SITE ROOT
-
-            // Skip preserve files - for wp-admin/wp-includes, no longer needed since directories are fresh
-            $skip = false;
-            foreach ($preserve_files as $preserve) {
-                if (strpos($relative_path, $preserve) === 0) {
-                    $skip = true;
-                    break;
-                }
-            }
-
-            if (!$skip) {
-                if ($item->isDir()) {
-                    // Create directory with error suppression
-                    if (!is_dir($target_path)) {
-                        @mkdir($target_path, 0755, true);
-                    }
-                } else {
-                    // Copy file with error suppression
-                    if (@copy($item->getPathname(), $target_path)) {
-                        $files_copied++;
-                    }
-                }
-            }
-        }
-
-        clean_sweep_log_message("Core files installation completed with $files_copied files copied");
-        clean_sweep_log_message("Security: wp-admin and wp-includes directories reinstalled fresh (malware removed)");
-
-    } finally {
-        // CRITICAL: Restore error handling
-        error_reporting($old_error_reporting);
+    if (!is_dir($wordpress_dir)) {
+        clean_sweep_log_message('Extracted WordPress package is missing the wordpress/ folder', 'error');
         if ($original_error_handler) {
             set_error_handler($original_error_handler);
         } else {
             restore_error_handler();
         }
+        return ['success' => false, 'message' => 'Extracted WordPress package is missing the wordpress/ folder'];
+    }
+
+    $fail_install = function ($msg, $failed = []) use ($progress_file, &$progress_data, $original_error_handler, $extract_dir, $temp_file) {
+        clean_sweep_log_message($msg, 'error');
+        $progress_data['status'] = 'error';
+        $progress_data['progress'] = 0;
+        $progress_data['message'] = $msg;
+        clean_sweep_write_progress_file($progress_file, $progress_data);
+        if ($original_error_handler) {
+            set_error_handler($original_error_handler);
+        } else {
+            restore_error_handler();
+        }
+        clean_sweep_recursive_delete($extract_dir);
+        if (file_exists($temp_file)) {
+            @unlink($temp_file);
+        }
+        $out = ['success' => false, 'message' => $msg];
+        if (!empty($failed)) {
+            $out['failed_files'] = $failed;
+        }
+        return $out;
+    };
+
+    $progress_data['status'] = 'installing';
+    $progress_data['progress'] = 85;
+    $progress_data['message'] = 'Installing WordPress root files...';
+    $progress_data['step'] = 4;
+    clean_sweep_write_progress_file($progress_file, $progress_data);
+
+    // Replace root wp-*.php before deleting wp-includes so a permission miss cannot mix versions.
+    list($root_copied, $root_failed) = clean_sweep_core_copy_tree($wordpress_dir, $site_root, $preserve_files, true);
+    if (!empty($root_failed)) {
+        return $fail_install(clean_sweep_core_copy_failures_message($root_failed), $root_failed);
+    }
+
+    $directories_to_clean = ['wp-admin', 'wp-includes'];
+    clean_sweep_log_message('Security: Completely removing wp-admin and wp-includes directories from real site for fresh install');
+
+    foreach ($directories_to_clean as $dir) {
+        $full_dir_path = $site_root . $dir;
+        if (is_dir($full_dir_path)) {
+            clean_sweep_log_message('Removing directory from real site: ' . $full_dir_path);
+            if (!empty($wp_filesystem) && $wp_filesystem->rmdir($full_dir_path, true)) {
+                clean_sweep_log_message('Successfully removed: ' . $full_dir_path);
+            } else {
+                $success = @clean_sweep_delete_core_directory($full_dir_path);
+                if ($success) {
+                    clean_sweep_log_message('Successfully removed (fallback method): ' . $full_dir_path);
+                } else {
+                    clean_sweep_log_message('Failed to remove directory: ' . $full_dir_path, 'warning');
+                }
+            }
+        }
+    }
+
+    $progress_data['progress'] = 90;
+    $progress_data['message'] = 'Installing WordPress core files...';
+    clean_sweep_write_progress_file($progress_file, $progress_data);
+
+    list($tree_copied, $tree_failed) = clean_sweep_core_copy_tree($wordpress_dir, $site_root, $preserve_files, false);
+    $files_copied = $root_copied + $tree_copied;
+    if (!empty($tree_failed)) {
+        return $fail_install(clean_sweep_core_copy_failures_message($tree_failed), $tree_failed);
+    }
+
+    $verify = clean_sweep_core_verify_after_install($site_root, $wp_version);
+    if ($verify !== null) {
+        return $fail_install($verify);
+    }
+
+    clean_sweep_log_message('Core files installation completed with ' . $files_copied . ' files copied');
+    clean_sweep_log_message('Security: wp-admin and wp-includes directories reinstalled fresh (malware removed)');
+
+    if ($original_error_handler) {
+        set_error_handler($original_error_handler);
+    } else {
+        restore_error_handler();
     }
 
     // Clean up temporary files
