@@ -9,7 +9,7 @@ Token lists for SEO-spam signatures (`cs_0264`–`cs_0267`, `cs_0396`, `cs_0397`
 3. Rebuild the pack — list changes are **not** live in `current.csig` until:
 
 ```bash
-php features/security/signatures/build/build_signatures.php --version=2.21.0
+php features/security/signatures/build/build_signatures.php --version=2.22.0
 php bin/test-signature-fixtures.php
 ```
 
@@ -22,6 +22,7 @@ php bin/test-signature-fixtures.php
 - **cs_0397** is two distinct core/brand tokens within 200 chars. Comparison copy (`vs`, `versus`, `compared`, `comparison`, `review`) in the gap is skipped so “Bet365 vs 1xbet” stays clean.
 - **gated / needles[]:** catalog-backed SEO rules set `gated: true` (cs_0374 is `false`). The sealed pack stores `needles.seo` so the matcher gate cannot drift from baked regexes.
 - **html files:** cs_0264 / cs_0396 / cs_0397 also target `html`/`htm`. The prefilter unions those with the JS/skimmer set (it does not replace it).
+- **Japanese:** `オンラインカジノ` / `入金不要` are literals (no `\\b`). Do not dump a CJK dictionary.
 - Do not add locale modifiers (`giriş`, `güncel`, `bahis`, `deneme`).
 - Japanese file is a stub until a non-`\b` matcher exists.
 

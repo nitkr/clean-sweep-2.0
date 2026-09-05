@@ -139,17 +139,56 @@ class CleanSweep_SeoKeywordCatalog {
 
     /**
      * Whole-word gate regex from a token list (pack needles or live catalog).
+     * Latin uses alnum lookaround; CJK is a literal (\\b is ASCII-only).
      *
      * @param string[] $tokens
      * @return string
      */
     public static function needle_regex_for(array $tokens) {
-        $alt = self::alternation(self::unique_ci($tokens));
-        return '/(?<![A-Za-z0-9])(?:' . $alt . ')(?![A-Za-z0-9])/i';
+        list($latin, $cjk) = self::split_script($tokens);
+        $parts = [];
+        if ($latin !== []) {
+            $parts[] = '(?<![A-Za-z0-9])(?:' . self::alternation($latin) . ')(?![A-Za-z0-9])';
+        }
+        if ($cjk !== []) {
+            $parts[] = '(?:' . self::alternation($cjk) . ')';
+        }
+        if ($parts === []) {
+            throw new RuntimeException('SEO keyword alternation is empty');
+        }
+        return '/' . implode('|', $parts) . '/' . self::flags_for($cjk);
     }
 
     public static function needle_regex() {
         return self::needle_regex_for(self::gate_needle_tokens());
+    }
+
+    /**
+     * Keyword group for cs_0264–0267: \\b on Latin, literal CJK.
+     *
+     * @return string
+     */
+    public static function keyword_group() {
+        list($latin, $cjk) = self::split_script(self::gate_needles());
+        $parts = [];
+        if ($latin !== []) {
+            $parts[] = '\\b(?:' . self::alternation($latin) . ')\\b';
+        }
+        if ($cjk !== []) {
+            $parts[] = '(?:' . self::alternation($cjk) . ')';
+        }
+        if ($parts === []) {
+            throw new RuntimeException('SEO keyword alternation is empty');
+        }
+        return count($parts) === 1 ? $parts[0] : '(?:' . implode('|', $parts) . ')';
+    }
+
+    /**
+     * @return string i or iu
+     */
+    public static function regex_flags() {
+        list(, $cjk) = self::split_script(self::needles());
+        return self::flags_for($cjk);
     }
 
     /**
@@ -222,7 +261,7 @@ class CleanSweep_SeoKeywordCatalog {
         $edge = '(?<![A-Za-z0-9])';
         $end = '(?![A-Za-z0-9])';
         $gap = '(?:(?!\\b(?:vs\\.?|versus|compared|comparison|review)\\b)[\\s\\S]){0,200}?';
-        return '/' . $edge . '(' . $alt . ')' . $end . $gap . $edge . '(?!\\1)' . '(?:' . $alt . ')' . $end . '/i';
+        return '/' . $edge . '(' . $alt . ')' . $end . $gap . $edge . '(?!\\1)' . '(?:' . $alt . ')' . $end . '/' . self::regex_flags();
     }
 
     /**
@@ -240,12 +279,12 @@ class CleanSweep_SeoKeywordCatalog {
      * @return string
      */
     public static function content_conjunction_pattern() {
-        $kw = '\\b(?:' . self::keyword_alternation() . ')\\b';
+        $kw = self::keyword_group();
         $hide = '(?:' . self::hide_css_alternation() . ')';
         $w = '[\\s\\S]{0,120}';
         $wh = '[\\s\\S]{0,160}';
         $link = '(?:<a\\s' . $wh . '|href\\s*=' . $wh . '|src\\s*=' . $wh . '|https?:\\/\\/[^\\s\'"]{0,160})';
-        return '/(?:' . $hide . $w . $kw . '|' . $kw . $w . $hide . '|' . $link . $kw . ')/i';
+        return '/(?:' . $hide . $w . $kw . '|' . $kw . $w . $hide . '|' . $link . $kw . ')/' . self::regex_flags();
     }
 
     /**
@@ -255,7 +294,7 @@ class CleanSweep_SeoKeywordCatalog {
      */
     public static function slug_segment_pattern() {
         $alt = self::slug_alternation();
-        return '/(?:^|[-_\\/])(?:' . $alt . ')(?:[-_\\/]|$)/i';
+        return '/(?:^|[-_\\/])(?:' . $alt . ')(?:[-_\\/]|$)/' . self::regex_flags();
     }
 
     /**
@@ -277,6 +316,39 @@ class CleanSweep_SeoKeywordCatalog {
      * @param string[] $tokens
      * @return string[]
      */
+    /**
+     * @param string $token
+     * @return bool
+     */
+    private static function is_cjk($token) {
+        return (bool) preg_match('/[\\x{3040}-\\x{30FF}\\x{4E00}-\\x{9FFF}]/u', (string) $token);
+    }
+
+    /**
+     * @param string[] $tokens
+     * @return array{0:string[],1:string[]}
+     */
+    private static function split_script(array $tokens) {
+        $latin = [];
+        $cjk = [];
+        foreach ($tokens as $t) {
+            if (self::is_cjk($t)) {
+                $cjk[] = $t;
+            } else {
+                $latin[] = $t;
+            }
+        }
+        return [$latin, $cjk];
+    }
+
+    /**
+     * @param string[] $cjk
+     * @return string
+     */
+    private static function flags_for(array $cjk) {
+        return $cjk !== [] ? 'iu' : 'i';
+    }
+
     private static function unique_ci(array $tokens) {
         $seen = [];
         $out = [];
