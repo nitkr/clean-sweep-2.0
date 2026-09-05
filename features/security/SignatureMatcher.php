@@ -6,6 +6,8 @@
  * so file and DB detection cannot drift.
  */
 
+require_once __DIR__ . '/seo-keywords/CleanSweep_SeoKeywordCatalog.php';
+
 class CleanSweep_SignatureMatcher {
 
     /** @var array<string,int> */
@@ -124,6 +126,8 @@ class CleanSweep_SignatureMatcher {
             $start_offset = 0;
         }
 
+        $seo_needles_hit = null;
+
         foreach ($signatures as $key => $item) {
             if (is_array($item)) {
                 $index = (int) ($item['index'] ?? $key);
@@ -140,6 +144,15 @@ class CleanSweep_SignatureMatcher {
                 $n++;
                 if ($on_tick($n) === true) {
                     break;
+                }
+            }
+
+            if (self::is_seo_catalog_gated($index)) {
+                if ($seo_needles_hit === null) {
+                    $seo_needles_hit = self::seo_gate_needles_present($content);
+                }
+                if ($seo_needles_hit === false) {
+                    continue;
                 }
             }
 
@@ -175,6 +188,39 @@ class CleanSweep_SignatureMatcher {
         }
 
         return $hits;
+    }
+
+    /**
+     * Catalog-backed SEO rules (cs_0264–0267, cs_0396). cs_0374 is inject-shape
+     * only and must still run when no spam keywords are present.
+     *
+     * @param int $index
+     * @return bool
+     */
+    private static function is_seo_catalog_gated($index) {
+        $mgr = self::manager();
+        if (!$mgr) {
+            return false;
+        }
+        $id = method_exists($mgr, 'get_signature_id') ? (string) $mgr->get_signature_id($index) : '';
+        if ($id === 'cs_0374') {
+            return false;
+        }
+        $family = method_exists($mgr, 'get_family') ? (string) $mgr->get_family($index) : '';
+        return $family === 'seo_spam' || $family === 'seo_spam_inject';
+    }
+
+    /**
+     * Whole-word gate (alnum lookaround, not PCRE \b). Do not stripos raw
+     * tokens (casio inside macasion).
+     *
+     * @param string $content
+     * @return bool
+     */
+    private static function seo_gate_needles_present($content) {
+        $rx = CleanSweep_SeoKeywordCatalog::needle_regex();
+        $hit = @preg_match($rx, (string) $content);
+        return $hit === 1;
     }
 
     /**
