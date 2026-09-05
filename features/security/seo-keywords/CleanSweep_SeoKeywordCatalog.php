@@ -156,7 +156,10 @@ class CleanSweep_SeoKeywordCatalog {
         if ($parts === []) {
             throw new RuntimeException('SEO keyword alternation is empty');
         }
-        return '/' . implode('|', $parts) . '/' . self::flags_for($cjk);
+        // /i only: /u on invalid UTF-8 haystacks makes preg_match fail and the
+        // gate then skips every catalog SEO rule, including Latin hide/href.
+        // CJK tokens are UTF-8 literals and match without /u.
+        return '/' . implode('|', $parts) . '/i';
     }
 
     public static function needle_regex() {
@@ -187,8 +190,7 @@ class CleanSweep_SeoKeywordCatalog {
      * @return string i or iu
      */
     public static function regex_flags() {
-        list(, $cjk) = self::split_script(self::needles());
-        return self::flags_for($cjk);
+        return 'i';
     }
 
     /**
@@ -261,7 +263,7 @@ class CleanSweep_SeoKeywordCatalog {
         $edge = '(?<![A-Za-z0-9])';
         $end = '(?![A-Za-z0-9])';
         $gap = '(?:(?!\\b(?:vs\\.?|versus|compared|comparison|review)\\b)[\\s\\S]){0,200}?';
-        return '/' . $edge . '(' . $alt . ')' . $end . $gap . $edge . '(?!\\1)' . '(?:' . $alt . ')' . $end . '/' . self::regex_flags();
+        return '/' . $edge . '(' . $alt . ')' . $end . $gap . $edge . '(?!\\1)' . '(?:' . $alt . ')' . $end . '/i';
     }
 
     /**
@@ -284,7 +286,7 @@ class CleanSweep_SeoKeywordCatalog {
         $w = '[\\s\\S]{0,120}';
         $wh = '[\\s\\S]{0,160}';
         $link = '(?:<a\\s' . $wh . '|href\\s*=' . $wh . '|src\\s*=' . $wh . '|https?:\\/\\/[^\\s\'"]{0,160})';
-        return '/(?:' . $hide . $w . $kw . '|' . $kw . $w . $hide . '|' . $link . $kw . ')/' . self::regex_flags();
+        return '/(?:' . $hide . $w . $kw . '|' . $kw . $w . $hide . '|' . $link . $kw . ')/i';
     }
 
     /**
@@ -294,7 +296,7 @@ class CleanSweep_SeoKeywordCatalog {
      */
     public static function slug_segment_pattern() {
         $alt = self::slug_alternation();
-        return '/(?:^|[-_\\/])(?:' . $alt . ')(?:[-_\\/]|$)/' . self::regex_flags();
+        return '/(?:^|[-_\\/])(?:' . $alt . ')(?:[-_\\/]|$)/i';
     }
 
     /**
@@ -312,10 +314,6 @@ class CleanSweep_SeoKeywordCatalog {
         return implode('|', $out);
     }
 
-    /**
-     * @param string[] $tokens
-     * @return string[]
-     */
     /**
      * @param string $token
      * @return bool
@@ -339,14 +337,6 @@ class CleanSweep_SeoKeywordCatalog {
             }
         }
         return [$latin, $cjk];
-    }
-
-    /**
-     * @param string[] $cjk
-     * @return string
-     */
-    private static function flags_for(array $cjk) {
-        return $cjk !== [] ? 'iu' : 'i';
     }
 
     private static function unique_ci(array $tokens) {
