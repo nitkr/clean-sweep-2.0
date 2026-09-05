@@ -408,7 +408,7 @@ class CleanSweep_DatabaseScanner {
      */
     private static function content_looks_like_php($content) {
         return (bool) preg_match(
-            '/<\?(?:php|=)|\$wpdb\s*->|\b(?:eval|assert|create_function)\s*\(|\$_(?:GET|POST|REQUEST|COOKIE)\s*\[/i',
+            '/<\?(?:php|=)|\$wpdb\s*->|\$_(?:GET|POST|REQUEST|COOKIE)\s*\[|eval\s*\(\s*base64_decode|create_function\s*\(/i',
             (string) $content
         );
     }

@@ -121,16 +121,6 @@ class CleanSweep_SeoKeywordCatalog {
     }
 
     /**
-     * Whole-word gate regex (must not use stripos on raw tokens).
-     *
-     * PCRE \b treats `_` as a word char, so `buy_cialis_online` would never
-     * open the gate for cs_0396. Use alnum lookaround instead. Spaced tokens
-     * (`slot gacor`) also emit hyphen/underscore slug forms so
-     * `slot-gacor-hari-ini` still reaches cs_0396.
-     *
-     * @return string
-     */
-    /**
      * Expanded gate tokens (spaced brands also emit hyphen/underscore forms).
      *
      * @return string[]
