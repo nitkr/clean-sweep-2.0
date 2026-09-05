@@ -130,7 +130,12 @@ class CleanSweep_SeoKeywordCatalog {
      *
      * @return string
      */
-    public static function needle_regex() {
+    /**
+     * Expanded gate tokens (spaced brands also emit hyphen/underscore forms).
+     *
+     * @return string[]
+     */
+    public static function gate_needle_tokens() {
         $tokens = [];
         foreach (self::gate_needles() as $t) {
             $tokens[] = $t;
@@ -139,8 +144,22 @@ class CleanSweep_SeoKeywordCatalog {
                 $tokens[] = str_replace(' ', '_', $t);
             }
         }
+        return self::unique_ci($tokens);
+    }
+
+    /**
+     * Whole-word gate regex from a token list (pack needles or live catalog).
+     *
+     * @param string[] $tokens
+     * @return string
+     */
+    public static function needle_regex_for(array $tokens) {
         $alt = self::alternation(self::unique_ci($tokens));
         return '/(?<![A-Za-z0-9])(?:' . $alt . ')(?![A-Za-z0-9])/i';
+    }
+
+    public static function needle_regex() {
+        return self::needle_regex_for(self::gate_needle_tokens());
     }
 
     /**

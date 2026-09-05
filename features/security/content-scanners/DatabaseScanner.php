@@ -354,6 +354,66 @@ class CleanSweep_DatabaseScanner {
     }
 
     /**
+     * Drop PHP-syntax rules on HTML-only DB rows (posts/comments/terms).
+     * Options/meta stay `any` because they store PHP snippets.
+     *
+     * @param array $compiled
+     * @param string $table
+     * @param string $content
+     * @return array
+     */
+    private function filter_compiled_for_haystack(array $compiled, $table, $content) {
+        if ($this->classify_haystack($table, $content) !== 'html') {
+            return $compiled;
+        }
+        if (!function_exists('clean_sweep_get_malware_signatures')) {
+            return $compiled;
+        }
+        $mgr = clean_sweep_get_malware_signatures();
+        if (!$mgr || !method_exists($mgr, 'get_syntax')) {
+            return $compiled;
+        }
+        $out = [];
+        foreach ($compiled as $item) {
+            $index = is_array($item) ? (int) ($item['index'] ?? 0) : 0;
+            if ($mgr->get_syntax($index) === 'php') {
+                continue;
+            }
+            $out[] = $item;
+        }
+        return $out;
+    }
+
+    /**
+     * @param string $table
+     * @param string $content
+     * @return string html|php|any
+     */
+    private function classify_haystack($table, $content) {
+        $suffix = $this->table_suffix($table);
+        if (in_array($suffix, [
+            'options', 'postmeta', 'usermeta', 'sitemeta', 'termmeta', 'commentmeta', 'blogmeta',
+        ], true)) {
+            return 'any';
+        }
+        if (self::content_looks_like_php($content)) {
+            return 'php';
+        }
+        return 'html';
+    }
+
+    /**
+     * @param string $content
+     * @return bool
+     */
+    private static function content_looks_like_php($content) {
+        return (bool) preg_match(
+            '/<\?(?:php|=)|\$wpdb\s*->|\b(?:eval|assert|create_function)\s*\(|\$_(?:GET|POST|REQUEST|COOKIE)\s*\[/i',
+            (string) $content
+        );
+    }
+
+    /**
      * Get compiled patterns for database content.
      *
      * @return array Compiled patterns
@@ -1417,7 +1477,9 @@ class CleanSweep_DatabaseScanner {
         $threats = [];
         $this->row_sig_truncated = false;
 
-        $compiled = CleanSweep_SignatureMatcher::order_by_severity($this->get_compiled_patterns());
+        $compiled = CleanSweep_SignatureMatcher::order_by_severity(
+            $this->filter_compiled_for_haystack($this->get_compiled_patterns(), $table, (string) $content)
+        );
         $throttler = $this->throttler;
         $bounded = !empty($opts['bounded']);
         $row_started = (float) ($opts['row_started'] ?? microtime(true));

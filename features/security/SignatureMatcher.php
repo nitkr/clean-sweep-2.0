@@ -147,7 +147,7 @@ class CleanSweep_SignatureMatcher {
                 }
             }
 
-            if (self::is_seo_catalog_gated($index)) {
+            if (self::is_gated($index)) {
                 if ($seo_needles_hit === null) {
                     $seo_needles_hit = self::seo_gate_needles_present($content);
                 }
@@ -191,16 +191,19 @@ class CleanSweep_SignatureMatcher {
     }
 
     /**
-     * Catalog-backed SEO rules (cs_0264–0267, cs_0396). cs_0374 is inject-shape
-     * only and must still run when no spam keywords are present.
+     * Pack `gated` flag. Old packs without the field fall back to SEO family
+     * except cs_0374 (inject-shape, no catalog keywords).
      *
      * @param int $index
      * @return bool
      */
-    private static function is_seo_catalog_gated($index) {
+    private static function is_gated($index) {
         $mgr = self::manager();
         if (!$mgr) {
             return false;
+        }
+        if (method_exists($mgr, 'is_gated')) {
+            return $mgr->is_gated($index);
         }
         $id = method_exists($mgr, 'get_signature_id') ? (string) $mgr->get_signature_id($index) : '';
         if ($id === 'cs_0374') {
@@ -211,14 +214,21 @@ class CleanSweep_SignatureMatcher {
     }
 
     /**
-     * Whole-word gate (alnum lookaround, not PCRE \b). Do not stripos raw
-     * tokens (casio inside macasion).
+     * Whole-word gate (alnum lookaround, not PCRE \b). Prefer pack needles[]
+     * so the sealed regexes and the gate cannot drift.
      *
      * @param string $content
      * @return bool
      */
     private static function seo_gate_needles_present($content) {
-        $rx = CleanSweep_SeoKeywordCatalog::needle_regex();
+        $tokens = [];
+        $mgr = self::manager();
+        if ($mgr && method_exists($mgr, 'get_needles')) {
+            $tokens = $mgr->get_needles('seo');
+        }
+        $rx = $tokens !== []
+            ? CleanSweep_SeoKeywordCatalog::needle_regex_for($tokens)
+            : CleanSweep_SeoKeywordCatalog::needle_regex();
         $hit = @preg_match($rx, (string) $content);
         return $hit === 1;
     }
