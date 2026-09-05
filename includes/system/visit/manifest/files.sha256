@@ -1,5 +1,5 @@
 # Clean Sweep shipped watchable paths. Extra files not listed are kind A.
-# Generated 2026-08-23T05:57:22+00:00 paths only
+# Generated 2026-09-05T09:23:54+00:00 paths only
 api/bootstrap.php
 api/cleanup.php
 api/core.php
@@ -14,8 +14,13 @@ api/users.php
 api/vulnerabilities.php
 bin/generate-visit-manifest.php
 bin/run-scan.php
+bin/test-backup-vault-scope.php
+bin/test-census-slice.php
+bin/test-db-row-budget.php
 bin/test-deep-scope-plan.php
+bin/test-drain-slice.php
 bin/test-file-threat-carry.php
+bin/test-scan-js-scope.php
 bin/test-upload-fixtures.php
 bin/test-wpmudev-multisite-active.php
 clean-sweep.php
@@ -82,6 +87,12 @@ features/security/scan/workers/FinalizeWorker.php
 features/security/scan/workers/IntegrityWorker.php
 features/security/scan/workers/PackageChecksumWorker.php
 features/security/scan/workers/RootConfigWorker.php
+features/security/seo-keywords/CleanSweep_SeoKeywordCatalog.php
+features/security/seo-keywords/seo-kw-brands-global.php
+features/security/seo-keywords/seo-kw-brands-id.php
+features/security/seo-keywords/seo-kw-brands-ja.php
+features/security/seo-keywords/seo-kw-brands-tr.php
+features/security/seo-keywords/seo-kw-core.php
 features/security/signatures.php
 features/security/signatures/SignatureCrypto.php
 features/security/signatures/SignatureEmbeddedKeys.php
