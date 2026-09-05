@@ -182,6 +182,41 @@ class CleanSweep_SeoKeywordCatalog {
     }
 
     /**
+     * Core + brands, plus hyphen/underscore forms of spaced tokens.
+     * Generic stays out (cs_0397 is two-operator spam, not poker+roulette).
+     *
+     * @return string
+     */
+    public static function brand_alternation() {
+        $tokens = [];
+        foreach (self::needles() as $t) {
+            $tokens[] = $t;
+            if (strpos($t, ' ') !== false) {
+                $tokens[] = str_replace(' ', '-', $t);
+                $tokens[] = str_replace(' ', '_', $t);
+            }
+        }
+        return self::alternation(self::unique_ci($tokens));
+    }
+
+    /**
+     * Two distinct core/brand tokens within 200 chars (cs_0397).
+     *
+     * FP policy: skip comparison discourse (vs / versus / compared /
+     * comparison / review) in the gap so "Bet365 vs 1xbet: our comparison"
+     * does not hit. Do not require hide/href (that is cs_0264).
+     *
+     * @return string
+     */
+    public static function two_brand_pattern() {
+        $alt = self::brand_alternation();
+        $edge = '(?<![A-Za-z0-9])';
+        $end = '(?![A-Za-z0-9])';
+        $gap = '(?:(?!\\b(?:vs\\.?|versus|compared|comparison|review)\\b)[\\s\\S]){0,200}?';
+        return '/' . $edge . '(' . $alt . ')' . $end . $gap . $edge . '(?!\\1)' . '(?:' . $alt . ')' . $end . '/i';
+    }
+
+    /**
      * Hide-CSS fragment alternation (already regex).
      *
      * @return string
