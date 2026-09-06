@@ -6,6 +6,7 @@
  */
 
 require_once __DIR__ . '/ChunkProcessor.php';
+require_once __DIR__ . '/PhpDisguiseSniff.php';
 require_once dirname(__DIR__) . '/SignaturePreFilter.php';
 require_once dirname(__DIR__) . '/SignatureMatcher.php';
 require_once dirname(__DIR__) . '/ThreatCollector.php';
@@ -671,12 +672,28 @@ class CleanSweep_FileScanner {
             $file_signatures = $this->signature_filter->get_compiled_for_filetype('php');
         }
 
-        // PHP hidden as .js / .php.js, or a <?php opener in a non-PHP file.
+        // PHP hidden as .js / .php.js / media, or a <?php opener in a non-PHP file.
         if ($this->signature_filter && $this->should_apply_php_signatures($file_path, $base, $extension)) {
             $file_signatures = $this->merge_compiled_signatures(
                 is_array($file_signatures) ? $file_signatures : [],
                 $this->signature_filter->get_compiled_for_filetype('php')
             );
+        }
+
+        $media_sniff = null;
+        if ($this->profile->should_sniff_media_disguise()
+            && $this->profile->is_media_disguise_extension($extension)
+        ) {
+            $media_sniff = CleanSweep_PhpDisguiseSniff::inspect($file_path, $this->profile);
+            if ($this->profile->should_deep_inspect_media()
+                && !empty($media_sniff['mismatch'])
+                && empty($media_sniff['php_opener'])
+            ) {
+                $threats[] = $this->media_magic_mismatch_finding($file_path, $extension);
+                if ($this->collector) {
+                    $this->collector->add($threats[count($threats) - 1]);
+                }
+            }
         }
 
         if (empty($file_signatures)) {
@@ -701,17 +718,23 @@ class CleanSweep_FileScanner {
     }
 
     /**
-     * PHP-family rules for disguises (shell.php.js) or a <?php opener in JS/HTML.
+     * PHP-family rules for disguises (shell.php.js) or a <?php opener in JS/HTML/media.
      */
     private function should_apply_php_signatures($file_path, $base, $extension) {
         if (method_exists($this->profile, 'looks_like_php_disguise')
             && $this->profile->looks_like_php_disguise($base)) {
             return true;
         }
-        if (!in_array($extension, ['js', 'html', 'htm'], true)) {
-            return false;
+        if (in_array($extension, ['js', 'html', 'htm'], true)) {
+            return $this->file_starts_like_php($file_path);
         }
-        return $this->file_starts_like_php($file_path);
+        if ($this->profile->should_sniff_media_disguise()
+            && $this->profile->is_media_disguise_extension($extension)
+        ) {
+            $info = CleanSweep_PhpDisguiseSniff::inspect($file_path, $this->profile);
+            return !empty($info['php_opener']);
+        }
+        return false;
     }
 
     /**
@@ -722,15 +745,42 @@ class CleanSweep_FileScanner {
         if (!$handle) {
             return false;
         }
-        $head = fread($handle, 4096);
+        $head = fread($handle, CleanSweep_PhpDisguiseSniff::HEAD_BYTES);
         fclose($handle);
-        if (!is_string($head) || $head === '') {
-            return false;
-        }
-        if (strncmp($head, "\xEF\xBB\xBF", 3) === 0) {
-            $head = substr($head, 3);
-        }
-        return (bool) preg_match('/<\?(?:php|=)\b/i', $head);
+        return CleanSweep_PhpDisguiseSniff::has_php_opener(is_string($head) ? $head : '');
+    }
+
+    /**
+     * Deep-only heuristic: claimed image/video whose bytes are not that type.
+     */
+    private function media_magic_mismatch_finding($file_path, $extension) {
+        $ext = strtolower((string) $extension);
+        $match = 'extension=.' . $ext;
+        return [
+            'id' => md5($file_path . '|media_magic_mismatch|' . $ext),
+            'pattern' => 'media_magic_mismatch',
+            'signature_id' => 'media_magic_mismatch',
+            'signature_index' => null,
+            'category' => 'obfuscation',
+            'match' => $match,
+            'file' => $file_path,
+            'line_number' => 1,
+            'byte_offset' => 0,
+            'chunk_index' => 0,
+            'open_in_editor' => $file_path . ':1',
+            'content_preview' => 'File extension does not match contents',
+            'matched_content' => $match,
+            'description' => 'File extension does not match its contents. Common malware hide (PHP or payload stored as an image/video).',
+            'source' => 'file',
+            'table' => null,
+            'row_id' => null,
+            'column' => null,
+            'threat_level' => 'medium',
+            'risk_score' => 55,
+            'severity' => 'medium',
+            'family' => 'php_disguise',
+            'detected_at' => date('c'),
+        ];
     }
 
     /**
