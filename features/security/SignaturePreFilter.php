@@ -158,15 +158,22 @@ class CleanSweep_SignaturePreFilter {
     private function indices_for_extension($extension) {
         $extension = strtolower($extension);
 
-        if (is_array($this->target_index_map) && isset($this->target_index_map[$extension])) {
-            return array_values(array_unique($this->target_index_map[$extension]));
+        // HTML files keep the JS/skimmer alias AND any html/htm-specific rules.
+        // A first `html` target used to replace the JS set (23 rules dropped).
+        if (is_array($this->target_index_map) && in_array($extension, ['html', 'htm'], true)) {
+            $indices = [];
+            foreach (['js', 'html', 'htm'] as $key) {
+                if (!empty($this->target_index_map[$key]) && is_array($this->target_index_map[$key])) {
+                    $indices = array_merge($indices, $this->target_index_map[$key]);
+                }
+            }
+            if ($indices !== []) {
+                return array_values(array_unique($indices));
+            }
         }
 
-        // Inline <script> in HTML uses the JS rule set (not a separate html target).
-        if (is_array($this->target_index_map) && in_array($extension, ['html', 'htm'], true)
-            && isset($this->target_index_map['js'])
-        ) {
-            return array_values(array_unique($this->target_index_map['js']));
+        if (is_array($this->target_index_map) && isset($this->target_index_map[$extension])) {
+            return array_values(array_unique($this->target_index_map[$extension]));
         }
 
         // Alias: PHP shells / includes share php-targeted rules

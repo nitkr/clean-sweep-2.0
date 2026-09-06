@@ -337,7 +337,49 @@ class CleanSweep_ScanProfile {
         }
 
         $ext = strtolower(pathinfo($base, PATHINFO_EXTENSION));
-        return $ext !== '' && in_array($ext, $this->scan_file_types, true);
+        if ($ext !== '' && in_array($ext, $this->scan_file_types, true)) {
+            return true;
+        }
+
+        // Media/video names are not signature targets. Standard/Deep peek for a
+        // PHP opener (Deep also flags magic mismatch) before queueing.
+        if ($this->should_sniff_media_disguise() && $this->is_media_disguise_extension($ext)) {
+            require_once dirname(__DIR__) . '/content-scanners/PhpDisguiseSniff.php';
+            return CleanSweep_PhpDisguiseSniff::is_scan_candidate($normalized, $this);
+        }
+
+        return false;
+    }
+
+    /**
+     * Image/video extensions commonly used to hide PHP. Not scan_file_types.
+     *
+     * @param string $ext
+     * @return bool
+     */
+    public function is_media_disguise_extension($ext) {
+        static $media = [
+            'jpg' => true, 'jpeg' => true, 'png' => true, 'gif' => true, 'webp' => true,
+            'svg' => true, 'ico' => true, 'bmp' => true, 'tif' => true, 'tiff' => true,
+            'mp4' => true, 'm4v' => true, 'mp3' => true, 'wav' => true, 'avi' => true,
+            'mov' => true, 'ogv' => true, 'ogg' => true, 'oga' => true, 'wmv' => true,
+            'asf' => true, 'webm' => true,
+        ];
+        return isset($media[strtolower((string) $ext)]);
+    }
+
+    /**
+     * Quick never peeks media. Standard/Deep/custom may.
+     */
+    public function should_sniff_media_disguise() {
+        return $this->profile_id !== self::QUICK;
+    }
+
+    /**
+     * Deep: also sniff the tail (polyglot) and report magic/extension mismatch.
+     */
+    public function should_deep_inspect_media() {
+        return $this->profile_id === self::DEEP;
     }
 
     /**

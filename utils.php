@@ -40,19 +40,30 @@ function clean_sweep_log_message($message, $type = 'info') {
     $timestamp = date('Y-m-d H:i:s');
     $log_entry = "[$timestamp] [$type] $message\n";
 
-    // Ensure logs directory exists
-    if (!is_dir(CLEAN_SWEEP_LOGS_DIR)) {
-        mkdir(CLEAN_SWEEP_LOGS_DIR, 0755, true);
+    if (defined('CLEAN_SWEEP_LOGS_DIR') && clean_sweep_ensure_writable_dir(CLEAN_SWEEP_LOGS_DIR)) {
+        @file_put_contents(CLEAN_SWEEP_LOGS_DIR . CLEAN_SWEEP_LOG_FILE, $log_entry, FILE_APPEND);
     }
-
-    // Write to log file
-    file_put_contents(CLEAN_SWEEP_LOGS_DIR . CLEAN_SWEEP_LOG_FILE, $log_entry, FILE_APPEND);
 
     // Output to screen/console (only for CLI, hide from browser since we have separate log file)
     if (defined('WP_CLI') && WP_CLI) {
         echo $log_entry;
     }
     // Browser logs are now hidden - all logging goes to file only
+}
+
+/**
+ * Create $dir if needed. True only when it exists and is writable.
+ * Failed mkdir must not print; callers that need the dir must handle false.
+ */
+function clean_sweep_ensure_writable_dir($dir) {
+    $dir = rtrim(str_replace('\\', '/', (string) $dir), '/');
+    if ($dir === '' || $dir === '.') {
+        return false;
+    }
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0755, true);
+    }
+    return is_dir($dir) && is_writable($dir);
 }
 
 /**
@@ -218,10 +229,9 @@ function clean_sweep_write_progress_file($progress_file, $data) {
 
     $json_data = json_encode($data, JSON_PRETTY_PRINT);
 
-    // Ensure directory exists
     $dir = dirname($file_path);
-    if (!is_dir($dir)) {
-        mkdir($dir, 0755, true);
+    if (!clean_sweep_ensure_writable_dir($dir)) {
+        return false;
     }
 
     $result = @file_put_contents($file_path, $json_data);
@@ -325,23 +335,38 @@ function clean_sweep_progress_heartbeat($progress_file, $data, &$last_heartbeat)
  * @return string|WP_Error Path to downloaded file or WP_Error on failure
  */
 function clean_sweep_download_url($url, $timeout = 300) {
-    // Ensure temp directory exists
-    if (!is_dir(CLEAN_SWEEP_TEMP_DIR)) {
-        mkdir(CLEAN_SWEEP_TEMP_DIR, 0755, true);
+    if (!defined('CLEAN_SWEEP_TEMP_DIR') || !clean_sweep_ensure_writable_dir(CLEAN_SWEEP_TEMP_DIR)) {
+        return new WP_Error(
+            'temp_dir_unwritable',
+            'Cannot write to backups/temp. The web user needs write access to the Clean Sweep backups folder.'
+        );
     }
 
-    // Create temporary file
-    $temp_file = tempnam(CLEAN_SWEEP_TEMP_DIR, 'clean_sweep_download_');
+    $temp_file = @tempnam(CLEAN_SWEEP_TEMP_DIR, 'clean_sweep_download_');
+    if ($temp_file === false) {
+        return new WP_Error(
+            'temp_file',
+            'Cannot write to backups/temp. The web user needs write access to the Clean Sweep backups folder.'
+        );
+    }
 
-    // Initialize cURL
     $ch = curl_init($url);
     if (!$ch) {
+        @unlink($temp_file);
         return new WP_Error('curl_init_failed', 'Failed to initialize cURL');
     }
 
-    // Set cURL options
+    $out = fopen($temp_file, 'w');
+    if ($out === false) {
+        @unlink($temp_file);
+        return new WP_Error(
+            'temp_file',
+            'Cannot write to backups/temp. The web user needs write access to the Clean Sweep backups folder.'
+        );
+    }
+
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, false);
-    curl_setopt($ch, CURLOPT_FILE, fopen($temp_file, 'w'));
+    curl_setopt($ch, CURLOPT_FILE, $out);
     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
     curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
@@ -353,10 +378,11 @@ function clean_sweep_download_url($url, $timeout = 300) {
     $error = curl_error($ch);
     $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
+    fclose($out);
 
     // Check for errors
     if ($result === false) {
-        unlink($temp_file);
+        @unlink($temp_file);
         return new WP_Error('download_failed', 'Download failed: ' . $error);
     }
 

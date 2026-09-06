@@ -24,9 +24,8 @@ if (!$clean_sweep_upload_helpers_only) {
 require_once __DIR__ . '/bootstrap.php';
 require_once __DIR__ . '/../includes/system/CleanSweep_Functions.php';
 
-// Increase upload limits for this endpoint
-@ini_set('upload_max_filesize', '512M');
-@ini_set('post_max_size', '512M');
+// Time limits are PHP_INI_ALL. upload_max_filesize / post_max_size are
+// PHP_INI_PERDIR — ini_set cannot raise them. Real cap: clean_sweep_upload_limit_bytes().
 @ini_set('max_execution_time', 300);
 @ini_set('max_input_time', 300);
 
@@ -70,6 +69,15 @@ if ($action === '' && !empty($_FILES['file'])) {
     $action = 'upload_zip';
 }
 
+if (
+    ($action === '' || $action === 'upload_zip')
+    && empty($_FILES['file'])
+    && function_exists('clean_sweep_api_post_exceeds_limit')
+    && clean_sweep_api_post_exceeds_limit()
+) {
+    clean_sweep_api_send_post_too_large();
+}
+
 switch ($action) {
     case 'upload_zip':
         if (function_exists('clean_sweep_require_toolkit_ok')) {
@@ -100,6 +108,10 @@ switch ($action) {
         clean_sweep_handle_get_upload_status();
         break;
 
+    case 'get_upload_limits':
+        clean_sweep_handle_get_upload_limits();
+        break;
+
     case 'get_progress':
     case 'get_upload_progress':
         clean_sweep_handle_get_progress();
@@ -121,6 +133,9 @@ switch ($action) {
 function clean_sweep_handle_upload() {
     // Check if file was uploaded
     if (empty($_FILES['file'])) {
+        if (function_exists('clean_sweep_api_post_exceeds_limit') && clean_sweep_api_post_exceeds_limit()) {
+            clean_sweep_api_send_post_too_large();
+        }
         CleanSweep_ApiResponse::sendError('No file uploaded', 'NO_FILE');
     }
     
@@ -178,8 +193,13 @@ function clean_sweep_handle_upload() {
     $upload_id = 'upload_' . bin2hex(random_bytes(8));
     $temp_dir = clean_sweep_upload_temp_dir($upload_id);
 
-    if (!mkdir($temp_dir, 0755, true)) {
-        CleanSweep_ApiResponse::sendError('Failed to create temporary directory', 'TEMP_DIR_ERROR');
+    if (!defined('CLEAN_SWEEP_TEMP_DIR') || !clean_sweep_ensure_writable_dir(CLEAN_SWEEP_TEMP_DIR)
+        || !@mkdir($temp_dir, 0755, true)
+    ) {
+        CleanSweep_ApiResponse::sendError(
+            'Cannot write to backups/temp. The web user needs write access to the Clean Sweep backups folder.',
+            'TEMP_DIR_ERROR'
+        );
     }
 
     $uploaded_path = $temp_dir . $safe_name;
@@ -448,6 +468,21 @@ function clean_sweep_handle_extract_zip() {
             'progress_file' => $progress_file
         ]);
     }
+}
+
+/**
+ * Host PHP upload cap. Used by the Upload tab before send.
+ */
+function clean_sweep_handle_get_upload_limits() {
+    $post_max = (string) ini_get('post_max_size');
+    $upload_max = (string) ini_get('upload_max_filesize');
+    CleanSweep_ApiResponse::sendSuccess([
+        'limit_bytes' => clean_sweep_upload_limit_bytes(),
+        'post_max_size' => $post_max,
+        'upload_max_filesize' => $upload_max,
+        'post_max_size_bytes' => clean_sweep_upload_ini_bytes($post_max),
+        'upload_max_filesize_bytes' => clean_sweep_upload_ini_bytes($upload_max),
+    ]);
 }
 
 /**
@@ -1126,6 +1161,9 @@ function clean_sweep_upload_zip_magic_ok(string $zip_path): bool {
  * Parse a PHP ini size (512M, 128K, 1G) to bytes. 0 / -1 / empty → 0 (unlimited).
  */
 function clean_sweep_upload_ini_bytes($value): int {
+    if (function_exists('clean_sweep_api_ini_bytes')) {
+        return clean_sweep_api_ini_bytes($value);
+    }
     $value = trim((string) $value);
     if ($value === '' || $value === '-1' || $value === '0') {
         return 0;

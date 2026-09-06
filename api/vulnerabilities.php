@@ -16,9 +16,8 @@ require_once __DIR__ . '/bootstrap.php';
 require_once CLEAN_SWEEP_ROOT . 'includes/ApiResponse.php';
 require_once CLEAN_SWEEP_ROOT . 'features/security/vulnerability-scanner.php';
 
-// Note: bootstrap.php always runs clean_sweep_api_route_request() on include. That only
-// succeeds when this file's actions are registered in clean_sweep_api_get_endpoints().
-// Direct hits to this file still need a local switch after bootstrap returns.
+// Note: bootstrap.php only routes when the request target is bootstrap.php itself.
+// Direct hits to this file run the local switch after bootstrap returns.
 
 $action = $_POST['action'] ?? $_GET['action'] ?? '';
 

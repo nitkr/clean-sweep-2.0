@@ -354,6 +354,66 @@ class CleanSweep_DatabaseScanner {
     }
 
     /**
+     * Drop PHP-syntax rules on HTML-only DB rows (posts/comments/terms).
+     * Options/meta stay `any` because they store PHP snippets.
+     *
+     * @param array $compiled
+     * @param string $table
+     * @param string $content
+     * @return array
+     */
+    private function filter_compiled_for_haystack(array $compiled, $table, $content) {
+        if ($this->classify_haystack($table, $content) !== 'html') {
+            return $compiled;
+        }
+        if (!function_exists('clean_sweep_get_malware_signatures')) {
+            return $compiled;
+        }
+        $mgr = clean_sweep_get_malware_signatures();
+        if (!$mgr || !method_exists($mgr, 'get_syntax')) {
+            return $compiled;
+        }
+        $out = [];
+        foreach ($compiled as $item) {
+            $index = is_array($item) ? (int) ($item['index'] ?? 0) : 0;
+            if ($mgr->get_syntax($index) === 'php') {
+                continue;
+            }
+            $out[] = $item;
+        }
+        return $out;
+    }
+
+    /**
+     * @param string $table
+     * @param string $content
+     * @return string html|php|any
+     */
+    private function classify_haystack($table, $content) {
+        $suffix = $this->table_suffix($table);
+        if (in_array($suffix, [
+            'options', 'postmeta', 'usermeta', 'sitemeta', 'termmeta', 'commentmeta', 'blogmeta',
+        ], true)) {
+            return 'any';
+        }
+        if (self::content_looks_like_php($content)) {
+            return 'php';
+        }
+        return 'html';
+    }
+
+    /**
+     * @param string $content
+     * @return bool
+     */
+    private static function content_looks_like_php($content) {
+        return (bool) preg_match(
+            '/<\?(?:php|=)|\$wpdb\s*->|\$_(?:GET|POST|REQUEST|COOKIE)\s*\[|eval\s*\(\s*base64_decode|create_function\s*\(/i',
+            (string) $content
+        );
+    }
+
+    /**
      * Get compiled patterns for database content.
      *
      * @return array Compiled patterns
@@ -662,7 +722,7 @@ class CleanSweep_DatabaseScanner {
         $count = 0;
         do {
             $query = $wpdb->prepare(
-                "SELECT ID, post_title, post_content, post_excerpt
+                "SELECT ID, post_title, post_content, post_excerpt, post_name
                  FROM {$wpdb->posts}
                  WHERE ID > %d
                  AND post_status IN ('publish', 'draft', 'private', 'pending')
@@ -676,7 +736,7 @@ class CleanSweep_DatabaseScanner {
             $rows = $this->query_with_recovery($query);
 
             foreach ($rows as $row) {
-                $content = $row->post_content . ' ' . $row->post_title . ' ' . $row->post_excerpt;
+                $content = $this->extract_table_content($wpdb->posts, $row);
                 $row_threats = $this->scan_content($content, $wpdb->posts, $row->ID, 'post_content');
 
                 foreach ($row_threats as $threat) {
@@ -1154,7 +1214,7 @@ class CleanSweep_DatabaseScanner {
             $rows = $this->query_with_recovery($query);
 
             foreach ($rows as $row) {
-                $content = $row->name . ' ' . $row->slug;
+                $content = $this->extract_table_content($wpdb->terms, $row);
                 $row_threats = $this->scan_content($content, $wpdb->terms, $row->term_id, 'name');
 
                 foreach ($row_threats as $threat) {
@@ -1417,7 +1477,9 @@ class CleanSweep_DatabaseScanner {
         $threats = [];
         $this->row_sig_truncated = false;
 
-        $compiled = CleanSweep_SignatureMatcher::order_by_severity($this->get_compiled_patterns());
+        $compiled = CleanSweep_SignatureMatcher::order_by_severity(
+            $this->filter_compiled_for_haystack($this->get_compiled_patterns(), $table, (string) $content)
+        );
         $throttler = $this->throttler;
         $bounded = !empty($opts['bounded']);
         $row_started = (float) ($opts['row_started'] ?? microtime(true));
@@ -1746,7 +1808,7 @@ class CleanSweep_DatabaseScanner {
 
                 $row = $fetched[$rid]['row'];
                 $bounded = !empty($fetched[$rid]['bounded']);
-                $content = $this->extract_table_content($table, $row);
+                $content = $this->extract_table_content($table, $row, $bounded, $prefix_bytes);
                 if ($this->should_skip_transient_row($suffix, $row, $content)) {
                     $last_id = $rid;
                     $scanned++;
@@ -1757,9 +1819,6 @@ class CleanSweep_DatabaseScanner {
                 $mode = $bounded ? 'truncated' : 'full';
                 if ($content !== '') {
                     $this->mark_row_in_progress($table, $rid, $row_key, $raw_len, $mode, $bounded);
-                    if ($bounded && strlen($content) > $prefix_bytes) {
-                        $content = substr($content, 0, $prefix_bytes);
-                    }
                     $content = $this->expand_scan_text($content, $suffix, $row);
                     $use_budget = $bounded || strlen($content) > $full_bytes;
                     $row_started = microtime(true);
@@ -1842,15 +1901,34 @@ class CleanSweep_DatabaseScanner {
     /**
      * Extract scannable content from a database row based on table type.
      *
+     * Prefix mode truncates only the primary content column. Title, excerpt,
+     * guid, and post_name stay attached so doorway slugs survive a 32KB body.
+     *
      * @param string $table
      * @param object $row
+     * @param bool $bounded Whether this row was prefix-fetched
+     * @param int $prefix_bytes Max bytes of the primary content column when bounded
      * @return string
      */
-    private function extract_table_content($table, $row) {
+    private function extract_table_content($table, $row, $bounded = false, $prefix_bytes = 0) {
         switch ($this->table_suffix($table)) {
             case 'posts':
-                return ($row->post_content ?? '') . ' ' . ($row->post_title ?? '') . ' ' . ($row->post_excerpt ?? '')
-                    . ' ' . ($row->post_content_filtered ?? '') . ' ' . ($row->guid ?? '');
+                $body = (string) ($row->post_content ?? '');
+                if ($bounded && $prefix_bytes > 0 && strlen($body) > $prefix_bytes) {
+                    $body = substr($body, 0, $prefix_bytes);
+                }
+                if (!$bounded) {
+                    $body .= ' ' . (string) ($row->post_content_filtered ?? '');
+                }
+                $meta = trim(implode(' ', array_filter([
+                    (string) ($row->post_title ?? ''),
+                    (string) ($row->post_excerpt ?? ''),
+                    (string) ($row->guid ?? ''),
+                    CleanSweep_SeoKeywordCatalog::wrap_slug_segment($row->post_name ?? ''),
+                ], static function ($part) {
+                    return $part !== '';
+                })));
+                return trim($meta . ' ' . $body);
             case 'options':
                 return (string)($row->option_value ?? '');
             case 'comments':
@@ -1867,7 +1945,8 @@ class CleanSweep_DatabaseScanner {
                 return ($row->user_url ?? '') . ' ' . ($row->user_email ?? '')
                     . ' ' . ($row->display_name ?? '') . ' ' . ($row->user_nicename ?? '');
             case 'terms':
-                return ($row->name ?? '') . ' ' . ($row->slug ?? '');
+                return trim((string) ($row->name ?? '') . ' '
+                    . CleanSweep_SeoKeywordCatalog::wrap_slug_segment($row->slug ?? ''));
             case 'term_taxonomy':
                 return (string)($row->description ?? '');
             case 'blogs':
@@ -2423,7 +2502,7 @@ class CleanSweep_DatabaseScanner {
         $suffix = $this->table_suffix($table);
         switch ($suffix) {
             case 'posts':
-                $cols = "{$id_q}, `post_title`, `post_excerpt`, `post_content_filtered`, `guid`, `post_type`, {$content_expr}";
+                $cols = "{$id_q}, `post_title`, `post_excerpt`, `post_content_filtered`, `guid`, `post_type`, `post_name`, {$content_expr}";
                 break;
             case 'options':
                 $cols = "{$id_q}, `option_name`, {$content_expr}";

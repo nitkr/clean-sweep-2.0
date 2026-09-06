@@ -506,6 +506,14 @@ export interface UploadStatusResult {
   message?: string;
 }
 
+export interface UploadLimitsResult {
+  limit_bytes: number;
+  post_max_size: string;
+  upload_max_filesize: string;
+  post_max_size_bytes?: number;
+  upload_max_filesize_bytes?: number;
+}
+
 export interface UploadDiscardResult {
   discarded: boolean;
 }

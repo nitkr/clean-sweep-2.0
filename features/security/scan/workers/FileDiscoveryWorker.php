@@ -267,11 +267,13 @@ final class CleanSweep_FileDiscoveryWorker implements CleanSweep_Worker {
         if ($ext === '') {
             return false;
         }
-        // Common media/binary skips in uploads trees.
+        // Common media/binary skips in uploads trees. Standard/Deep still
+        // pass media names through so should_scan_file() can cheap-sniff.
         static $reject = [
             'jpg' => true, 'jpeg' => true, 'png' => true, 'gif' => true, 'webp' => true,
             'svg' => true, 'ico' => true, 'bmp' => true, 'tif' => true, 'tiff' => true,
-            'mp4' => true, 'mp3' => true, 'wav' => true, 'avi' => true, 'mov' => true,
+            'mp4' => true, 'm4v' => true, 'mp3' => true, 'wav' => true, 'avi' => true, 'mov' => true,
+            'ogv' => true, 'ogg' => true, 'oga' => true, 'wmv' => true, 'asf' => true, 'webm' => true,
             'zip' => true, 'gz' => true, 'tar' => true, 'rar' => true, '7z' => true,
             'wpress' => true, 'sql' => true,
             'pdf' => true, 'doc' => true, 'docx' => true, 'xls' => true, 'xlsx' => true,
@@ -279,7 +281,8 @@ final class CleanSweep_FileDiscoveryWorker implements CleanSweep_Worker {
             'map' => true, 'lock' => true,
         ];
         if (isset($reject[$ext])) {
-            return false;
+            return $profile->should_sniff_media_disguise()
+                && $profile->is_media_disguise_extension($ext);
         }
         return true;
     }

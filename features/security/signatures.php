@@ -23,8 +23,11 @@ class CleanSweep_MalwareSignatures {
     /** @var array<int, string> Regex patterns for scanners (indexed) */
     private $signatures = [];
 
-    /** @var array<int, array{id:string,category:string,pattern:string,severity?:string,targets?:string[],family?:string}> */
+    /** @var array<int, array{id:string,category:string,pattern:string,severity?:string,targets?:string[],family?:string,gated?:bool,syntax?:string}> */
     private $entries = [];
+
+    /** @var array<string, string[]> Pack-level gate needles (family => tokens) */
+    private $needles = [];
 
     /** @var string */
     private $source = 'unknown';
@@ -111,6 +114,7 @@ class CleanSweep_MalwareSignatures {
         }
 
         $this->ingest_signature_list($payload['signatures']);
+        $this->needles = is_array($payload['needles'] ?? null) ? $payload['needles'] : [];
         $this->version = (string) ($pack['version'] ?? $payload['version'] ?? '');
         $this->source = 'csig-v1:' . ($this->version !== '' ? $this->version : basename($path));
         $this->log('Loaded ' . count($this->signatures) . ' signatures from ' . $this->source);
@@ -199,7 +203,7 @@ class CleanSweep_MalwareSignatures {
 
     /**
      * Accept list of strings or entry objects:
-     * {id, pattern, category, severity?, targets?, family?}.
+     * {id, pattern, category, severity?, targets?, family?, gated?, syntax?}.
      */
     private function ingest_signature_list(array $list) {
         $this->signatures = [];
@@ -207,6 +211,8 @@ class CleanSweep_MalwareSignatures {
         $i = 0;
         foreach ($list as $item) {
             $i++;
+            $gated = null;
+            $syntax = null;
             if (is_string($item)) {
                 $id = sprintf('cs_%04d', $i);
                 $pattern = $item;
@@ -234,6 +240,12 @@ class CleanSweep_MalwareSignatures {
                     $targets = array_values(array_unique(array_map('strval', $targets)));
                 }
                 $family = (string) ($item['family'] ?? '');
+                if (array_key_exists('gated', $item)) {
+                    $gated = (bool) $item['gated'];
+                }
+                if (isset($item['syntax']) && $item['syntax'] === 'php') {
+                    $syntax = 'php';
+                }
             } else {
                 continue;
             }
@@ -252,6 +264,12 @@ class CleanSweep_MalwareSignatures {
             ];
             if ($family !== '') {
                 $entry['family'] = $family;
+            }
+            if ($gated !== null) {
+                $entry['gated'] = $gated;
+            }
+            if ($syntax !== null) {
+                $entry['syntax'] = $syntax;
             }
             $this->entries[$idx] = $entry;
         }
@@ -317,6 +335,45 @@ class CleanSweep_MalwareSignatures {
      */
     public function get_family($index) {
         return (string) ($this->entries[$index]['family'] ?? '');
+    }
+
+    /**
+     * Whether the matcher should skip this rule when gate needles are absent.
+     * Missing field: SEO families except cs_0374.
+     *
+     * @param int $index
+     * @return bool
+     */
+    public function is_gated($index) {
+        if (array_key_exists('gated', $this->entries[$index] ?? [])) {
+            return (bool) $this->entries[$index]['gated'];
+        }
+        if ($this->get_signature_id($index) === 'cs_0374') {
+            return false;
+        }
+        $family = $this->get_family($index);
+        return $family === 'seo_spam' || $family === 'seo_spam_inject';
+    }
+
+    /**
+     * Haystack syntax this rule needs. `php` is skipped on HTML-only DB rows.
+     *
+     * @param int $index
+     * @return string php|any
+     */
+    public function get_syntax($index) {
+        return (($this->entries[$index]['syntax'] ?? '') === 'php') ? 'php' : 'any';
+    }
+
+    /**
+     * Pack-level gate needles for a family (default seo).
+     *
+     * @param string $family
+     * @return string[]
+     */
+    public function get_needles($family = 'seo') {
+        $list = $this->needles[$family] ?? [];
+        return is_array($list) ? array_values($list) : [];
     }
 
     /**
@@ -389,7 +446,7 @@ class CleanSweep_MalwareSignatures {
             'version' => $this->version,
             'count' => $this->count(),
             'format' => strpos($this->source, 'csig-v1') === 0 ? 'csig-v1' : $this->source,
-            'schema' => ['id', 'pattern', 'category', 'severity', 'targets', 'family'],
+            'schema' => ['id', 'pattern', 'category', 'severity', 'targets', 'family', 'gated', 'syntax', 'needles'],
         ];
     }
 
