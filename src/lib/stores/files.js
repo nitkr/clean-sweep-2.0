@@ -101,12 +101,21 @@ function stripEditorLineSuffix(p) {
  * @param {string} p
  * @returns {boolean}
  */
+function looksLikeRootFileName(name) {
+  if (!name || name.includes('/') || name.includes('\\') || name.includes('..')) {
+    return false;
+  }
+  return name.startsWith('.') || /\.[A-Za-z0-9]+$/.test(name);
+}
+
 function isUsableSiteRelativePath(p) {
   if (!p) return false;
   const n = String(p).replace(/\\/g, '/').replace(/^\/+/, '');
   if (!n || n.includes('\0')) return false;
   if (/^(wp-content|wp-includes|wp-admin)(\/|$)/i.test(n)) return true;
-  if (!n.includes('/') && ROOT_BASENAMES.has(n.toLowerCase())) return true;
+  if (!n.includes('/') && (ROOT_BASENAMES.has(n.toLowerCase()) || looksLikeRootFileName(n))) {
+    return true;
+  }
   return false;
 }
 
@@ -145,11 +154,24 @@ export function toSiteRelativePath(path) {
 
   // Root-level files: match by basename (markers above already handled nested copies)
   const slash = p.lastIndexOf('/');
-  const base = (slash >= 0 ? p.slice(slash + 1) : p).toLowerCase();
+  const baseName = slash >= 0 ? p.slice(slash + 1) : p.replace(/^\/+/, '');
+  const base = baseName.toLowerCase();
   if (base && ROOT_BASENAMES.has(base)) {
     // Accept ".../wp-config-sample.php" or bare "wp-config-sample.php"
     if (slash < 0 || p.endsWith('/' + p.slice(slash + 1))) {
       return p.slice(slash + 1);
+    }
+  }
+
+  // Extra PHP/JS at the WordPress root (adminer.php, malware droppers). Scanner
+  // stores absolute paths; stripping the leading "/" used to leave
+  // media/.../dropper.php which the files API joined onto ABSPATH (404).
+  // Only collapse absolute / long stripped-FS paths, not package-relative
+  // includes/foo.php (one extra segment).
+  if (looksLikeRootFileName(baseName) && !/^(wp-content|wp-includes|wp-admin)(\/|$)/i.test(bare)) {
+    const segs = bare.split('/').filter(Boolean);
+    if (isAbsoluteFsPath(p) || segs.length >= 3) {
+      return baseName;
     }
   }
 
