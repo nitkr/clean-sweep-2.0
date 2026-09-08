@@ -1,10 +1,10 @@
 # Clean Sweep shipped watchable paths. Extra files not listed are kind A.
-# Generated 2026-09-06T06:36:44+00:00 with hashes
+# Generated 2026-09-08T15:43:19+00:00 with hashes
 9ee6638570dcb73b7f5d6d1b640f2541a2eb7c7c892fff43a43b260e6412354d  api/bootstrap.php
 d16b400ffc58deb31c64d98c731bae65e32c395a4bdd64a3a60b8e0163397e0a  api/cleanup.php
 57fbd9802e857dbd98bb0c5f8b7423d2e10967cc258552e91cc0a75d87d06d70  api/core.php
 c9fa9bb65cef2f1fd63c99ffabbd50c37eda3f5eb7f7050bc333e921e84e6003  api/cron.php
-312c8a571aeee003cc671b88a2696ad4a7fefec128376828a0a8b75cfcd5fbfb  api/files.php
+6124afcc35921a80cecd9deba09880334e59326020ba2f96675224ab0a97cd52  api/files.php
 1ee038017db1493a147757dd188fd625640b0c0ca5cd07ea59619b6948abe976  api/integrity.php
 dd5109ea52f884bc0abe4329838620f377dc9bca80ef10e1869b0973130052d3  api/malware.php
 7d4ed64c5bd3dc84a20b057f0a1df5e38636cb458166e1249a3a2a40ab8d6b1c  api/plugins.php
