@@ -95,6 +95,66 @@ $wp_root = clean_sweep_find_wp_root();
  * @param string $wp_root
  * @return string Relative path without leading slash
  */
+function clean_sweep_files_root_basenames() {
+    return [
+        'index.php',
+        'wp-activate.php',
+        'wp-blog-header.php',
+        'wp-comments-post.php',
+        'wp-config-sample.php',
+        'wp-cron.php',
+        'wp-links-opml.php',
+        'wp-load.php',
+        'wp-login.php',
+        'wp-mail.php',
+        'wp-settings.php',
+        'wp-signup.php',
+        'wp-trackback.php',
+        'xmlrpc.php',
+        'wp-config.php',
+        '.htaccess',
+        '.user.ini',
+        'php.ini',
+        'license.txt',
+        'readme.html',
+    ];
+}
+
+function clean_sweep_files_is_wp_tree_rel($rel) {
+    return (bool) preg_match('#^(wp-content|wp-includes|wp-admin)(/|$)#i', (string) $rel);
+}
+
+/**
+ * Extra droppers at the site root (adminer.php, malware .php) are not in the
+ * official basename list. If $rel is a mangled absolute path, open the file
+ * that actually exists at ABSPATH/$basename.
+ */
+function clean_sweep_files_collapse_extra_root($rel, $real_root) {
+    $rel = ltrim(str_replace('\\', '/', (string) $rel), '/');
+    if ($rel === '' || strpos($rel, '/') === false || clean_sweep_files_is_wp_tree_rel($rel)) {
+        return $rel;
+    }
+    $base = basename($rel);
+    if ($base === '' || strpos($base, '..') !== false) {
+        return $rel;
+    }
+    $root_basenames = clean_sweep_files_root_basenames();
+    if (in_array(strtolower($base), $root_basenames, true)) {
+        return $base;
+    }
+    if (!is_string($real_root) || $real_root === '') {
+        return $rel;
+    }
+    $nested = $real_root . '/' . $rel;
+    if (is_file($nested)) {
+        return $rel;
+    }
+    if (is_file($real_root . '/' . $base)) {
+        return $base;
+    }
+    return $rel;
+}
+
 function clean_sweep_normalize_site_path($path, $wp_root) {
     $path = str_replace('\\', '/', trim((string) $path));
     if ($path === '') {
@@ -134,39 +194,14 @@ function clean_sweep_normalize_site_path($path, $wp_root) {
             }
         }
 
-        // Root-level basenames (align with CleanSweep_SitePaths::official_root_php_basenames + overrides)
-        $base = strtolower(basename($path));
-        $root_basenames = [
-            'index.php',
-            'wp-activate.php',
-            'wp-blog-header.php',
-            'wp-comments-post.php',
-            'wp-config-sample.php',
-            'wp-cron.php',
-            'wp-links-opml.php',
-            'wp-load.php',
-            'wp-login.php',
-            'wp-mail.php',
-            'wp-settings.php',
-            'wp-signup.php',
-            'wp-trackback.php',
-            'xmlrpc.php',
-            'wp-config.php',
-            '.htaccess',
-            '.user.ini',
-            'php.ini',
-            'license.txt',
-            'readme.html',
-        ];
-        if ($base !== '' && in_array($base, $root_basenames, true)) {
-            // Preserve original casing from the path basename
-            return basename($path);
+        $base = basename($path);
+        if ($base !== '' && in_array(strtolower($base), clean_sweep_files_root_basenames(), true)) {
+            return $base;
         }
+        return clean_sweep_files_collapse_extra_root(ltrim($path, '/'), $real_root);
     }
 
     // Relative (or client-mangled absolute stripped of leading /).
-    // Collapse multi-segment leftovers like media/.../wp-config-sample.php
-    // when the basename is a known site-root file.
     $rel = ltrim($path, '/');
     if ($rel === '') {
         return '';
@@ -174,37 +209,7 @@ function clean_sweep_normalize_site_path($path, $wp_root) {
     if (strpos($rel, '/') === false) {
         return $rel;
     }
-    if (!preg_match('#^(wp-content|wp-includes|wp-admin)(/|$)#i', $rel)) {
-        $base = basename($rel);
-        $base_l = strtolower($base);
-        $root_basenames = [
-            'index.php',
-            'wp-activate.php',
-            'wp-blog-header.php',
-            'wp-comments-post.php',
-            'wp-config-sample.php',
-            'wp-cron.php',
-            'wp-links-opml.php',
-            'wp-load.php',
-            'wp-login.php',
-            'wp-mail.php',
-            'wp-settings.php',
-            'wp-signup.php',
-            'wp-trackback.php',
-            'xmlrpc.php',
-            'wp-config.php',
-            '.htaccess',
-            '.user.ini',
-            'php.ini',
-            'license.txt',
-            'readme.html',
-        ];
-        if ($base_l !== '' && in_array($base_l, $root_basenames, true)) {
-            return $base;
-        }
-    }
-
-    return $rel;
+    return clean_sweep_files_collapse_extra_root($rel, $real_root);
 }
 
 // ============================================================================

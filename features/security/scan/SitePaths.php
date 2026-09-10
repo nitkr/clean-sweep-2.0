@@ -267,6 +267,11 @@ final class CleanSweep_SitePaths {
         return '';
     }
 
+    /**
+     * Site UI language (WPLANG / get_locale()). Not the core zip locale.
+     * Core file checksums must use core_package_locale() — English core plus a
+     * language pack is the common install, and those files match en_US maps.
+     */
     public static function locale(): string {
         if (function_exists('get_locale')) {
             $loc = (string) get_locale();
@@ -275,6 +280,61 @@ final class CleanSweep_SitePaths {
             }
         }
         return 'en_US';
+    }
+
+    /**
+     * Locale of the installed WordPress core package, from $wp_local_package
+     * in wp-includes/version.php. Same signal WordPress uses in update_core():
+     * isset( $wp_local_package ) ? $wp_local_package : 'en_US'.
+     *
+     * Language packs and WPLANG do not rewrite core PHP; an empty or missing
+     * $wp_local_package means the en_US zip (including wp core download with
+     * no --locale).
+     */
+    public static function core_package_locale(): string {
+        $root = self::root();
+        if ($root) {
+            $from_file = self::read_package_locale($root . 'wp-includes/version.php');
+            if ($from_file !== null) {
+                return $from_file;
+            }
+        }
+        if (!empty($GLOBALS['wp_local_package']) && is_string($GLOBALS['wp_local_package'])) {
+            $g = self::normalize_package_locale($GLOBALS['wp_local_package']);
+            if ($g !== '') {
+                return $g;
+            }
+        }
+        return 'en_US';
+    }
+
+    /**
+     * @return string|null en_US or a package locale when version.php is readable; null if not
+     */
+    public static function read_package_locale(string $file): ?string {
+        if (!is_readable($file)) {
+            return null;
+        }
+        $content = (string) @file_get_contents($file);
+        if ($content === '') {
+            return null;
+        }
+        if (!preg_match('/\$wp_local_package\s*=\s*[\'"]([^\'"]*)[\'"]\s*;/', $content, $m)) {
+            return 'en_US';
+        }
+        $loc = self::normalize_package_locale($m[1]);
+        return $loc !== '' ? $loc : 'en_US';
+    }
+
+    private static function normalize_package_locale(string $loc): string {
+        $loc = trim($loc);
+        if ($loc === '') {
+            return '';
+        }
+        if (!preg_match('/^[A-Za-z0-9_]{2,32}$/', $loc)) {
+            return '';
+        }
+        return $loc;
     }
 
     /**
