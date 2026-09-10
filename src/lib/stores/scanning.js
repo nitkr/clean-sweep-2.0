@@ -145,6 +145,7 @@ function createScanningStore() {
     checksumChecked: 0,
     checksumFindings: 0,
     checksumVersion: null,
+    checksumLocale: null,
     // Phase 3.5: Current scan_id for API calls
     scanId: null,
   });
@@ -859,6 +860,7 @@ function createScanningStore() {
                 checksumChecked: status.checksum_checked ?? s.checksumChecked,
                 checksumFindings: status.checksum_findings ?? s.checksumFindings,
                 checksumVersion: status.checksum_version ?? s.checksumVersion,
+                checksumLocale: status.checksum_locale ?? s.checksumLocale,
                 environmentAdvisory: status.environment_advisory ?? s.environmentAdvisory,
                 restrictedHost: status.restricted_host ?? s.restrictedHost,
                 loopbackKickCount: 0,
@@ -1314,6 +1316,7 @@ function createScanningStore() {
         checksumChecked: isResuming ? s.checksumChecked : 0,
         checksumFindings: isResuming ? s.checksumFindings : 0,
         checksumVersion: isResuming ? s.checksumVersion : null,
+        checksumLocale: isResuming ? s.checksumLocale : null,
         likelySource: isResuming ? s.likelySource : null,
         progressPercent: 0,
         progressHighWater: isResuming ? (s.progressHighWater || 0) : 0,
@@ -1791,6 +1794,7 @@ function createScanningStore() {
         checksumChecked: status.checksum_checked ?? s.checksumChecked,
         checksumFindings: status.checksum_findings ?? s.checksumFindings,
         checksumVersion: status.checksum_version ?? s.checksumVersion,
+        checksumLocale: status.checksum_locale ?? s.checksumLocale,
         likelySource: thisScanLikelySource(status.likely_source),
         deepScope: status.scan_scope || s.deepScope || 'full',
         folderPathDisplay: status.folder_path_display ?? s.folderPathDisplay,

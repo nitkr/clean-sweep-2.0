@@ -41,7 +41,7 @@ final class CleanSweep_CoreChecksumWorker implements CleanSweep_Worker {
             ]);
         }
 
-        $locale = CleanSweep_SitePaths::locale();
+        $locale = CleanSweep_SitePaths::core_package_locale();
         $profile = $ctx->profile();
         $force = !empty($payload['force'])
             || (method_exists($profile, 'get_profile_id') && $profile->get_profile_id() === 'deep');
@@ -107,8 +107,8 @@ final class CleanSweep_CoreChecksumWorker implements CleanSweep_Worker {
         }
 
         $note = count($findings) > 0
-            ? count($findings) . " core file(s) differ from WordPress.org {$version} checksums."
-            : "WordPress core files match WordPress.org checksums for {$version}.";
+            ? count($findings) . " core file(s) differ from WordPress.org {$version} ({$locale}) checksums."
+            : "WordPress core files match WordPress.org checksums for {$version} ({$locale}).";
         if ($content_scanned > 0) {
             $note .= " Content-scanned {$content_scanned} mismatched file(s)"
                 . ($content_hits > 0 ? ", {$content_hits} signature hit(s)." : '.');
@@ -120,6 +120,7 @@ final class CleanSweep_CoreChecksumWorker implements CleanSweep_Worker {
                 'checksum_checked' => $checked,
                 'checksum_findings' => count($findings),
                 'checksum_version' => $version,
+                'checksum_locale' => $locale,
                 'checksum_reused' => false,
             ]),
         ]);
@@ -138,7 +139,7 @@ final class CleanSweep_CoreChecksumWorker implements CleanSweep_Worker {
 
         clean_sweep_log_message(
             "CleanSweep_CoreChecksumWorker: checked {$checked} files, " . count($findings)
-            . " integrity finding(s), content-scanned {$content_scanned} ({$content_hits} sig hit(s)) (WP {$version})",
+            . " integrity finding(s), content-scanned {$content_scanned} ({$content_hits} sig hit(s)) (WP {$version} {$locale})",
             'info'
         );
 
@@ -196,6 +197,7 @@ final class CleanSweep_CoreChecksumWorker implements CleanSweep_Worker {
                 'checksum_checked' => $checked,
                 'checksum_findings' => 0,
                 'checksum_version' => $version,
+                'checksum_locale' => $locale,
                 'checksum_reused' => true,
             ]),
         ]);

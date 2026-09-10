@@ -356,6 +356,7 @@ final class CleanSweep_Scanner {
             'checksum_checked' => (int)($options['checksum_checked'] ?? 0),
             'checksum_findings' => (int)($options['checksum_findings'] ?? 0),
             'checksum_version' => $options['checksum_version'] ?? null,
+            'checksum_locale' => $options['checksum_locale'] ?? null,
             'package_checksum_note' => $options['package_checksum_note'] ?? null,
             'last_file_path' => $state->last_file_path,
             'last_db_table' => $state->last_db_table,

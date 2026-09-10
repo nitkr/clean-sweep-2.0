@@ -1139,6 +1139,7 @@
             checksumChecked={$scanning.checksumChecked || 0}
             checksumFindings={$scanning.checksumFindings || 0}
             checksumVersion={$scanning.checksumVersion}
+            checksumLocale={$scanning.checksumLocale}
             hasIntegrityBaseline={!!$scanning.hasIntegrityBaseline}
             likelySource={($scanning.likelySource?.reinfection || $scanning.likelySource?.core_changed)
               ? $scanning.likelySource
