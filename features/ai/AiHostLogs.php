@@ -51,7 +51,7 @@ final class AiHostLogs {
      */
     public static function skipNote(array $server, string $abspath, callable $readable): string {
         if (!isset($server['WPMUDEV_HOSTED'])) {
-            return 'Request logs were not checked. This request did not have WPMUDEV_HOSTED set.';
+            return 'Request logs were not checked.';
         }
         $abspath = rtrim(str_replace('\\', '/', $abspath), '/');
         $dir = self::logDir($abspath);
