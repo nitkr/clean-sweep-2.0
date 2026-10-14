@@ -22,7 +22,7 @@ From this repository (**Code → Download ZIP**) or a clone:
 
 1. Put the folder in the WordPress root, next to `wp-config.php`. Name it `clean-sweep/` (or keep the extracted folder name, as long as it sits in the root).
 2. Open `https://yoursite.com/clean-sweep/` or `clean-sweep.php`. Use **`index.php`**, not the static `index.html`.
-3. Start from the **dashboard**, or open Scanner / Users / Cron from the sidebar.
+3. Start from the **dashboard**, or open Scanner, AI scan, Users, or Cron from the sidebar. AI scan is optional and needs a provider key.
 4. Keep the **Scanner** tab open during long scans so auto-resume can continue.
 5. When finished, use **Remove Clean Sweep**.
 
@@ -35,6 +35,7 @@ From this repository (**Code → Download ZIP**) or a clone:
 - WordPress 6.0 or newer
 - Write access to the WordPress install
 - Network access for WordPress.org (and WPMU DEV, if you reinstall those plugins)
+- Outbound HTTPS to SpaceXAI, OpenAI, or OpenRouter if you use **AI scan**
 - ZipArchive (or WordPress unzip) for package work
 
 Shared hosting is supported. Quick and Standard use smaller batches and checkpoints. Deep scans on restricted hosts will pause often; keep the Scanner tab open so the run can continue.

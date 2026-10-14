@@ -26,12 +26,13 @@ clean-sweep/
 ├── utils.php
 ├── ui.php                   # HTML shell for the built UI
 ├── wordpress-api.php
-├── api/                     # JSON endpoints (malware, users, cron, …)
+├── api/                     # JSON endpoints (malware, ai, users, cron, …)
 ├── assets/dist/             # Built UI (clean-sweep.js / .css)
 ├── src/                     # Svelte UI source (for rebuilding the UI)
 ├── docs/                    # This manual
 ├── core/                    # Isolated bootstrap / recovery copies
 ├── features/
+│   ├── ai/                  # AI scan queue, provider client, report
 │   ├── maintenance/         # Core, plugin, theme reinstall
 │   ├── security/            # Scanner, signatures, user/cron audits
 │   └── utilities/           # Safe ZIP extract / install
@@ -43,6 +44,8 @@ clean-sweep/
 PHP classes use the `CleanSweep_` prefix. Functions and constants use `clean_sweep_` / `CLEAN_SWEEP_`.
 
 Runtime needs the sealed signature pack at `features/security/signatures/versions/current.csig`. Signature authoring is documented in [`features/security/signatures/README.md`](../features/security/signatures/README.md).
+
+AI scan is `features/ai/` plus `api/ai.php`. The page starts a Standard malware scan with `initiated_by` set to `ai_scan`, then calls `api/ai.php` action `start` once per short step. The provider key, skip list, and report are written under `backups/ai/` while the toolkit is in use. They are not part of the zip. The Scanner page ignores runs marked `ai_scan`.
 
 ## Frontend build
 

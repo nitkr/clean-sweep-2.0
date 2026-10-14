@@ -41,7 +41,7 @@ The GitHub zip is a run tree: `assets/dist/` is already built. You do not need `
 
 1. Put the folder in the WordPress root, next to `wp-config.php` (name it `clean-sweep/` or keep the extracted name).
 2. Open `https://yoursite.com/clean-sweep/` — use **`index.php`**, not `index.html`.
-3. Start from the **dashboard**, or open Scanner / Users / Cron from the sidebar.
+3. Start from the **dashboard**, or open Scanner, AI scan, Users, or Cron from the sidebar.
 4. Keep the **Scanner** tab open during long scans so auto-resume can continue.
 5. When finished, use **Remove Clean Sweep**.
 
@@ -96,6 +96,7 @@ Every docs page has the same top links so you can jump without coming back here.
 | Tool | What it is for |
 | --- | --- |
 | **Scanner** | Files + database signatures, checksums. Quick / Standard / Deep. |
+| **AI scan** | Beta. A Standard signature pass, then a review of selected PHP and JavaScript by a provider you connect. |
 | **Vulnerabilities** | Known CVEs — context for what to replace, not a malware verdict. |
 | **Security** | Live file watch, snapshots, integrity seal. |
 | **Core / Extensions / Upload** | Reinstall core, plugins, themes, or upload a clean ZIP. |

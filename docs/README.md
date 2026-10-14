@@ -28,13 +28,13 @@ This folder is the manual. The [root README](../README.md) is the short landing 
     </td>
     <td width="50%" valign="top">
       <h3><a href="guide.md">Using Clean Sweep</a></h3>
-      <p>Dashboard cards, sidebar tools, suggested cleanup path, and what each tool is for.</p>
+      <p>Dashboard cards, sidebar tools, AI scan, suggested cleanup path, and what each tool is for.</p>
     </td>
   </tr>
   <tr>
     <td width="50%" valign="top">
       <h3><a href="safety.md">Safety</a></h3>
-      <p>Backup first, how reinstalls behave, and why you must remove Clean Sweep when the site is stable.</p>
+      <p>Backup first, what AI scan sends to your provider, how reinstalls behave, and why you must remove Clean Sweep when the site is stable.</p>
     </td>
     <td width="50%" valign="top">
       <h3><a href="troubleshooting.md">Troubleshooting</a></h3>
