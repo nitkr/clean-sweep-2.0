@@ -125,7 +125,7 @@ function createAiScan() {
       'Checking scheduled tasks',
       'Checking administrator accounts',
       'Checking other code in malware folders',
-      'Asking what malware files name',
+      'Checking files this malware includes or writes',
     ];
     const step = Number(followup?.step || 0);
     const name = names[step] || 'Running follow-up checks';
