@@ -154,7 +154,7 @@ class CleanSweep_ScanCheckpoint {
      * @param int $completed_ttl_seconds How long completed results stay "hot" (default 48h)
      * @return array|null CleanSweep_Checkpoint array with scan_id, status, profile_id, timestamps
      */
-    public static function find_latest_scan_for_ui($completed_ttl_seconds = 172800) {
+    public static function find_latest_scan_for_ui($completed_ttl_seconds = 172800, $except_initiated_by = null) {
         $checkpoint_dir = CLEAN_SWEEP_PROGRESS_DIR;
         if (!is_dir($checkpoint_dir)) {
             return null;
@@ -190,6 +190,11 @@ class CleanSweep_ScanCheckpoint {
                 } else {
                     continue;
                 }
+            }
+
+            $initiated = (string) ($checkpoint['options']['initiated_by'] ?? '');
+            if ($except_initiated_by !== null && $initiated === (string) $except_initiated_by) {
+                continue;
             }
 
             $status = (string)($checkpoint['status'] ?? '');

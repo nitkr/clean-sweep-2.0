@@ -173,6 +173,17 @@ final class CleanSweep_Checkpoint {
     }
 
     /**
+     * Latest scan for the Scanner page. Skips runs started by the AI scan page.
+     */
+    public static function findLatestForUiExceptAi(int $completed_ttl_seconds = 172800): ?CleanSweep_ScanState {
+        $raw = CleanSweep_ScanCheckpoint::find_latest_scan_for_ui($completed_ttl_seconds, 'ai_scan');
+        if ($raw === null) {
+            return null;
+        }
+        return CleanSweep_ScanState::fromArray($raw);
+    }
+
+    /**
      * Most recent completed scan that shares this profile's file-hash universe
      * (Quick is separate; Standard/Deep/custom share).
      */

@@ -104,6 +104,18 @@ class CleanSweep_FileScanner {
     /** @var array<string,true> Hits already emitted for the file being scanned */
     private $file_hit_seen = [];
 
+    /** @var float When the current file's signature match started */
+    private $file_started_at = 0.0;
+
+    /** @var bool Current file hit its wall-clock budget or the slice deadline */
+    private $file_truncated = false;
+
+    /** @var bool One backtrack-limit log line per file */
+    private $file_backtrack_logged = false;
+
+    /** @var bool One max_execution_time warning per request */
+    private $logged_time_pause = false;
+
     /**
      * Constructor.
      *
@@ -207,7 +219,10 @@ class CleanSweep_FileScanner {
             // If we've used >70% of the hard limit, pause cleanly.
             // This prevents the preg_match (or any other) loop from ever hitting the fatal.
             if ($elapsed_request > ($max * 0.70)) {
-                clean_sweep_log_message("FileScanner: Approaching PHP max_execution_time ({$max}s, used ~{$elapsed_request}s) - forcing clean pause", 'warning');
+                if (!$this->logged_time_pause) {
+                    $this->logged_time_pause = true;
+                    clean_sweep_log_message("FileScanner: Approaching PHP max_execution_time ({$max}s, used ~{$elapsed_request}s) - forcing clean pause", 'warning');
+                }
                 return true;
             }
         }
@@ -483,46 +498,77 @@ class CleanSweep_FileScanner {
                 continue;
             }
 
-            // Hash only when differential is enabled (skip check + manifest).
-            // When disabled, hashing every file then reading chunks again is pure waste.
-            $skipped_unchanged = false;
-            if ($differential_on) {
-                $hash = CleanSweep_DifferentialScanner::hash_file($file_path);
-                // Never store null hashes — they would clobber a good prior entry.
-                if ($hash !== null) {
-                    $this->file_hashes[$file_path] = $hash;
-                    if (!$this->differential->needs_scanning($file_path, $hash)) {
-                        $skipped_unchanged = true;
-                    }
-                }
-            }
-
-            if ($this->phase_start_time === 0) {
-                $this->phase_start_time = microtime(true);
+            // A fresh request should not open another file after the slice is spent.
+            // The file already counted this request is what the cursor moves past.
+            if ($file_count > 0 && $this->should_pause_for_time_limit()) {
+                $this->needs_pause = true;
+                clean_sweep_log_message("FileScanner pausing before next file for host adaptation", 'info');
+                break;
             }
 
             $this->last_processed_file = $file_path;
 
-            if (!$skipped_unchanged) {
-                $file_threats = $this->scan_file($file_path);
+            // Poison skips are not a signature pass. Leave this true so the
+            // adaptive batcher does not close a batch on a file we did not read.
+            $skipped_unchanged = true;
 
-                if (!empty($file_threats)) {
-                    $batch_threats = array_merge($batch_threats, $file_threats);
-                    $results['wp_content'] = array_merge($results['wp_content'], $file_threats);
-                    $results['file_threats_found'] += count($file_threats);
+            // Previous attempt died inside this file. Counting it moves the cursor.
+            if ($this->is_poison_file($file_path)) {
+                clean_sweep_log_message(
+                    "FileScanner: skipping file that did not finish on a previous attempt: {$file_path}",
+                    'warning'
+                );
+                $file_count++;
+                $files_in_current_batch++;
+            } else {
+                $skipped_unchanged = false;
+                $arm_poison = $this->should_arm_poison($file_path);
+                if ($arm_poison) {
+                    $this->mark_file_started($file_path);
                 }
 
-                $results['total_files_scanned']++;
-                $this->counters['files_scanned']++;
-                $results['scanned_paths'][] = $file_path;
-            } else {
-                $results['files_skipped_unchanged']++;
-            }
+                // Hash only when differential is enabled (skip check + manifest).
+                // When disabled, hashing every file then reading chunks again is pure waste.
+                if ($differential_on) {
+                    $hash = CleanSweep_DifferentialScanner::hash_file($file_path);
+                    // Never store null hashes — they would clobber a good prior entry.
+                    if ($hash !== null) {
+                        $this->file_hashes[$file_path] = $hash;
+                        if (!$this->differential->needs_scanning($file_path, $hash)) {
+                            $skipped_unchanged = true;
+                        }
+                    }
+                }
 
-            // Count every visited file (including differential skips) toward
-            // unit budgets so warm caches cannot hash forever past max_execution_time.
-            $file_count++;
-            $files_in_current_batch++;
+                if ($this->phase_start_time === 0) {
+                    $this->phase_start_time = microtime(true);
+                }
+
+                if (!$skipped_unchanged) {
+                    $file_threats = $this->scan_file($file_path);
+
+                    if (!empty($file_threats)) {
+                        $batch_threats = array_merge($batch_threats, $file_threats);
+                        $results['wp_content'] = array_merge($results['wp_content'], $file_threats);
+                        $results['file_threats_found'] += count($file_threats);
+                    }
+
+                    $results['total_files_scanned']++;
+                    $this->counters['files_scanned']++;
+                    $results['scanned_paths'][] = $file_path;
+                } else {
+                    $results['files_skipped_unchanged']++;
+                }
+
+                if ($arm_poison) {
+                    $this->mark_file_finished($file_path);
+                }
+
+                // Count every visited file (including differential skips) toward
+                // unit budgets so warm caches cannot hash forever past max_execution_time.
+                $file_count++;
+                $files_in_current_batch++;
+            }
 
             if (!$skipped_unchanged && $this->batcher && $file_count % $this->batcher->get_current_batch_size() === 0) {
                 $this->batcher->end_batch($this->batcher->get_current_batch_size());
@@ -702,12 +748,51 @@ class CleanSweep_FileScanner {
 
         // Overlap is re-scanned so the same hit can appear in two chunks.
         $this->file_hit_seen = [];
+        $this->file_started_at = microtime(true);
+        $this->file_truncated = false;
+        $this->file_backtrack_logged = false;
 
-        // Scan file in chunks
-        $this->chunk_processor->read_chunks($file_path, function($chunk, $chunk_info) use ($file_path, $file_signatures, &$threats) {
-            $file_threats = $this->match_signatures($chunk, $file_signatures, $file_path, $chunk_info);
-            $threats = array_merge($threats, $file_threats);
-        });
+        $prev_limit = ini_get('pcre.backtrack_limit');
+        $backtrack_limit = 100000;
+        if (method_exists($this->profile, 'get_file_pcre_backtrack_limit')) {
+            $configured = (int) $this->profile->get_file_pcre_backtrack_limit();
+            if ($configured > 0) {
+                $backtrack_limit = $configured;
+            }
+        }
+        ini_set('pcre.backtrack_limit', (string) $backtrack_limit);
+
+        try {
+            // Image/video bytes are not PHP source. The disguise sniff only
+            // looks at the head and tail, so the PHP pack runs on those
+            // windows. Matching the whole JPEG is what stalls a batch.
+            if ($this->profile->is_media_disguise_extension($extension)) {
+                $this->match_media_windows($file_path, $file_signatures, $threats);
+            } else {
+                $this->chunk_processor->read_chunks($file_path, function ($chunk, $chunk_info) use ($file_path, $file_signatures, &$threats) {
+                    if ($this->file_match_should_stop()) {
+                        return false;
+                    }
+                    $file_threats = $this->match_signatures($chunk, $file_signatures, $file_path, $chunk_info);
+                    $threats = array_merge($threats, $file_threats);
+                    if ($this->file_match_should_stop()) {
+                        return false;
+                    }
+                    return null;
+                });
+            }
+        } finally {
+            if ($prev_limit !== false && $prev_limit !== null) {
+                ini_set('pcre.backtrack_limit', (string) $prev_limit);
+            }
+        }
+
+        if ($this->file_truncated) {
+            clean_sweep_log_message(
+                "FileScanner: time budget exceeded, recorded and moved past {$file_path}",
+                'warning'
+            );
+        }
 
         // Record file processed
         if ($this->collector) {
@@ -715,6 +800,167 @@ class CleanSweep_FileScanner {
         }
 
         return $threats;
+    }
+
+    /**
+     * Arm crash-skip for files that can outlive the request: media disguises
+     * and anything big enough to be chunked. Small PHP files are left alone
+     * so a normal tree does not rewrite the checkpoint once per file.
+     */
+    private function should_arm_poison($file_path) {
+        $base = basename(str_replace('\\', '/', (string) $file_path));
+        $extension = strtolower(pathinfo($base, PATHINFO_EXTENSION));
+        if ($this->profile->is_media_disguise_extension($extension)) {
+            return true;
+        }
+        $size = @filesize($file_path);
+        return $size !== false && $size >= CleanSweep_ChunkProcessor::SMALL_FILE_THRESHOLD;
+    }
+
+    private function is_poison_file($file_path) {
+        if (!$this->context || !isset($this->context->state()->file_poison)) {
+            return false;
+        }
+        return in_array($file_path, $this->context->state()->file_poison, true);
+    }
+
+    private function mark_file_started($file_path) {
+        if (!$this->context) {
+            return;
+        }
+        $list = $this->context->state()->file_poison;
+        if (!is_array($list)) {
+            $list = [];
+        }
+        if (!in_array($file_path, $list, true)) {
+            $list[] = $file_path;
+            if (count($list) > 32) {
+                $list = array_slice($list, -32);
+            }
+        }
+        $this->context->mergeState([
+            'file_poison' => array_values($list),
+            'last_drain_activity_at' => time(),
+        ]);
+        if (method_exists($this->context, 'flushPending')) {
+            $this->context->flushPending();
+        }
+    }
+
+    private function mark_file_finished($file_path) {
+        if (!$this->context) {
+            return;
+        }
+        $list = $this->context->state()->file_poison;
+        if (!is_array($list) || $list === []) {
+            return;
+        }
+        $next = [];
+        foreach ($list as $path) {
+            if ($path !== $file_path) {
+                $next[] = $path;
+            }
+        }
+        if (count($next) === count($list)) {
+            return;
+        }
+        $this->context->mergeState([
+            'file_poison' => $next,
+            'last_drain_activity_at' => time(),
+        ]);
+        if (method_exists($this->context, 'flushPending')) {
+            $this->context->flushPending();
+        }
+    }
+
+    /**
+     * Stop matching this file. The caller still counts it so the cursor advances.
+     */
+    private function file_match_should_stop() {
+        $budget = 6.0;
+        if (method_exists($this->profile, 'get_file_time_budget')) {
+            $budget = (float) $this->profile->get_file_time_budget();
+        }
+        $over_file = $budget > 0
+            && $this->file_started_at > 0
+            && (microtime(true) - $this->file_started_at) >= $budget;
+        $over = $over_file
+            || $this->should_pause_for_time_limit()
+            || ($this->context && $this->context->sliceExpired());
+        if ($over) {
+            $this->file_truncated = true;
+            $this->needs_pause = true;
+        }
+        return $over;
+    }
+
+    /**
+     * Run the PHP pack on the head and tail windows only.
+     */
+    private function match_media_windows($file_path, array $signatures, array &$threats) {
+        $size = @filesize($file_path);
+        if ($size === false || $size <= 0) {
+            return;
+        }
+        $head_n = CleanSweep_PhpDisguiseSniff::HEAD_BYTES;
+        $tail_n = CleanSweep_PhpDisguiseSniff::TAIL_BYTES;
+        if ($size <= ($head_n + $tail_n)) {
+            $bytes = $this->read_file_window($file_path, 0, $size);
+            $this->match_window_bytes($bytes, $signatures, $file_path, 0, $size, $threats);
+            return;
+        }
+        $head = $this->read_file_window($file_path, 0, $head_n);
+        $this->match_window_bytes($head, $signatures, $file_path, 0, $size, $threats);
+        if ($this->file_match_should_stop()) {
+            return;
+        }
+        $tail_len = min($tail_n, $size);
+        $tail_off = $size - $tail_len;
+        $tail = $this->read_file_window($file_path, $tail_off, $tail_len);
+        $this->match_window_bytes($tail, $signatures, $file_path, $tail_off, $size, $threats);
+    }
+
+    private function match_window_bytes($bytes, array $signatures, $file_path, $offset, $file_size, array &$threats) {
+        if (!is_string($bytes) || $bytes === '') {
+            return;
+        }
+        if ($this->file_match_should_stop()) {
+            return;
+        }
+        $chunk_info = [
+            'chunk_index' => $offset > 0 ? 1 : 0,
+            'is_first' => $offset === 0,
+            'is_last' => true,
+            'start_offset' => (int) $offset,
+            'new_content_length' => strlen($bytes),
+            'total_newlines_before' => 0,
+            'file_size' => (int) $file_size,
+            'is_single_chunk' => true,
+            'previous_tail' => '',
+            'raw_chunk' => $bytes,
+        ];
+        $found = $this->match_signatures($bytes, $signatures, $file_path, $chunk_info);
+        if (!empty($found)) {
+            $threats = array_merge($threats, $found);
+        }
+    }
+
+    private function read_file_window($path, $offset, $length) {
+        $length = (int) $length;
+        if ($length <= 0) {
+            return '';
+        }
+        $handle = @fopen($path, 'rb');
+        if (!$handle) {
+            return '';
+        }
+        if ($offset > 0 && fseek($handle, (int) $offset) !== 0) {
+            fclose($handle);
+            return '';
+        }
+        $data = fread($handle, $length);
+        fclose($handle);
+        return is_string($data) ? $data : '';
     }
 
     /**
@@ -822,15 +1068,25 @@ class CleanSweep_FileScanner {
 
         $signatures = CleanSweep_SignatureMatcher::order_by_severity($signatures);
         $throttler = $this->throttler;
-        $tick = function ($n) use ($throttler) {
-            if ($throttler) {
+        $scanner = $this;
+        $tick = function ($n) use ($throttler, $scanner) {
+            if ($throttler && ($n % 25 === 0)) {
                 $throttler->micro_yield($n);
             }
-            // should_pause_for_time_limit() sets needs_pause for the outer loop
-            return ($n % 25 === 0 && $this->should_pause_for_time_limit());
+            // Every signature, not every 25th: one pattern can burn the slice.
+            return $scanner->file_match_should_stop();
+        };
+        $on_preg_error = function ($index, $pattern, $code) use ($file_path, $scanner) {
+            if ((int) $code === PREG_BACKTRACK_LIMIT_ERROR && !$scanner->file_backtrack_logged) {
+                $scanner->file_backtrack_logged = true;
+                clean_sweep_log_message(
+                    "FileScanner: backtrack limit hit in {$file_path} sig={$index}",
+                    'info'
+                );
+            }
         };
 
-        $hits = CleanSweep_SignatureMatcher::match_content($content, $signatures, $tick);
+        $hits = CleanSweep_SignatureMatcher::match_content($content, $signatures, $tick, 0, $on_preg_error);
 
         // A hit in the overlap prefix is leftmost; preg_match then never sees a
         // later copy in this chunk's unique bytes. Re-search from the unique start.
@@ -846,7 +1102,7 @@ class CleanSweep_FileScanner {
                 }
             }
             if ($rescan !== []) {
-                foreach (CleanSweep_SignatureMatcher::match_content($content, $rescan, $tick, $overlap_len) as $extra) {
+                foreach (CleanSweep_SignatureMatcher::match_content($content, $rescan, $tick, $overlap_len, $on_preg_error) as $extra) {
                     $hits[] = $extra;
                 }
             }

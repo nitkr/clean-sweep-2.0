@@ -5,6 +5,9 @@
  */
 final class CleanSweep_PackageAnnotations {
 
+    /** Header looks commercial, or the update URI is not wordpress.org. */
+    public const COMMERCIAL_NOTE = 'Name/URI suggests a commercial or non-.org build';
+
     /**
      * Known free/Pro slug collisions (annotation only).
      *
@@ -51,7 +54,7 @@ final class CleanSweep_PackageAnnotations {
         }
 
         if (self::looks_premium_headers($pkg)) {
-            $out[] = 'Name/URI suggests a commercial or non-.org build';
+            $out[] = self::COMMERCIAL_NOTE;
         }
 
         if ($type === 'plugin') {
@@ -62,6 +65,32 @@ final class CleanSweep_PackageAnnotations {
         }
 
         return array_values(array_unique($out));
+    }
+
+    /**
+     * True when the stored notes already say this is a free/Pro slug collision
+     * or a commercial build. The AI queue uses that to avoid sending every file
+     * of a Pro package that shares a free wordpress.org slug.
+     *
+     * @param array $annotations
+     */
+    public static function known_non_org_build(array $annotations): bool {
+        $collision = [];
+        foreach (self::$COLLISIONS as $row) {
+            $reason = (string) ($row['reason'] ?? '');
+            if ($reason !== '') {
+                $collision[$reason] = true;
+            }
+        }
+        foreach ($annotations as $note) {
+            if (!is_string($note) || $note === '') {
+                continue;
+            }
+            if ($note === self::COMMERCIAL_NOTE || isset($collision[$note])) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

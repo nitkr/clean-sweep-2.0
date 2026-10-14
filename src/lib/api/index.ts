@@ -18,3 +18,4 @@ export { IntegrityApiAdapter } from './integrity/adapter.js';
 export { VulnerabilitiesApiAdapter } from './vulnerabilities/adapter.js';
 export { UsersApiAdapter } from './users/adapter.js';
 export { CronApiAdapter } from './cron/adapter.js';
+export { AiApiAdapter } from './ai/adapter.js';

@@ -359,6 +359,9 @@ final class CleanSweep_Scanner {
             'checksum_locale' => $options['checksum_locale'] ?? null,
             'package_checksum_note' => $options['package_checksum_note'] ?? null,
             'last_file_path' => $state->last_file_path,
+            'reading_file' => $state->file_poison !== []
+                ? (string) $state->file_poison[count($state->file_poison) - 1]
+                : null,
             'last_db_table' => $state->last_db_table,
             'last_db_id' => $state->last_db_id,
             'last_db_key' => $state->last_db_key,
@@ -370,6 +373,7 @@ final class CleanSweep_Scanner {
             'restricted_host' => !empty($options['restricted_host']),
             'scan_scope' => $options['scan_scope'] ?? 'full',
             'fresh_scan' => !empty($options['fresh_scan']),
+            'initiated_by' => (string) ($options['initiated_by'] ?? ''),
             'folder_path' => $options['folder_path'] ?? null,
             'folder_paths' => $options['folder_paths'] ?? null,
             'folder_path_display' => $options['folder_path_display'] ?? null,
