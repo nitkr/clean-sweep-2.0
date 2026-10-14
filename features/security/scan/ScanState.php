@@ -47,6 +47,15 @@ final class CleanSweep_ScanState {
 
     // --- Cursors (last position scanned, for resume) ---
     public ?string $last_file_path = null;
+
+    /**
+     * Files whose scan did not return (the process was killed mid-file).
+     * The next attempt skips these so one file cannot stall the batch.
+     *
+     * @var string[]
+     */
+    public array $file_poison = [];
+
     public ?int $last_db_id = null;
     public ?string $last_db_table = null;
     /** @var string|null meta_key / option_name of last finished DB row */
@@ -122,6 +131,15 @@ final class CleanSweep_ScanState {
         $s->files_skipped_unchanged = (int)($raw['files_skipped_unchanged'] ?? 0);
         $s->total_files_estimate = (int)($raw['total_files_estimate'] ?? $file_state['total_files'] ?? 0);
         $s->last_file_path = $raw['last_file_path'] ?? $file_state['last_file_path'] ?? null;
+        $poison = $raw['file_poison'] ?? [];
+        $s->file_poison = [];
+        if (is_array($poison)) {
+            foreach ($poison as $path) {
+                if (is_string($path) && $path !== '') {
+                    $s->file_poison[] = $path;
+                }
+            }
+        }
 
         $s->db_rows_scanned = (int)($raw['db_rows_scanned'] ?? 0);
         $s->last_db_id = $raw['last_db_id'] ?? null;
@@ -175,6 +193,7 @@ final class CleanSweep_ScanState {
         $out['files_skipped_unchanged'] = $this->files_skipped_unchanged;
         $out['total_files_estimate'] = $this->total_files_estimate;
         if ($this->last_file_path !== null) $out['last_file_path'] = $this->last_file_path;
+        if ($this->file_poison !== []) $out['file_poison'] = array_values($this->file_poison);
 
         $out['db_rows_scanned'] = $this->db_rows_scanned;
         if ($this->last_db_id !== null) $out['last_db_id'] = $this->last_db_id;

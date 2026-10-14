@@ -199,6 +199,7 @@ final class CleanSweep_PackageChecksums {
         $skipped = 0;
         $extra_php = 0;
         $official_ok = [];
+        $unmapped_php = [];
         $bad_paths = []; // list of [full, rel]
         $top_k = []; // list of [score, full, rel]
 
@@ -261,6 +262,7 @@ final class CleanSweep_PackageChecksums {
                         continue;
                     }
                     $extra_php++;
+                    $unmapped_php[] = $rel;
                     $size = (int) @filesize($full);
                     $score = self::cheap_score($rel, $size);
                     self::top_k_push($top_k, $score, $full, $rel, self::B_TOPK);
@@ -335,6 +337,7 @@ final class CleanSweep_PackageChecksums {
                 'checked' => $checked,
                 'findings' => $findings,
                 'official_ok' => array_keys($official_ok),
+                'unmapped_php' => $unmapped_php,
                 'note' => sprintf('bulk divergence from wordpress.org (%d mapped mismatches)', $covered_bad),
                 'metrics' => $metrics,
             ], $pkg, $dir_n);
@@ -416,6 +419,7 @@ final class CleanSweep_PackageChecksums {
             'checked' => $checked,
             'findings' => $findings,
             'official_ok' => array_keys($official_ok),
+            'unmapped_php' => $unmapped_php,
             'note' => null,
             'metrics' => $metrics,
         ], $pkg, $dir_n);
@@ -451,6 +455,14 @@ final class CleanSweep_PackageChecksums {
         if (!isset($result['official_ok']) || !is_array($result['official_ok'])) {
             $result['official_ok'] = [];
         }
+        $unmapped = [];
+        foreach (($result['unmapped_php'] ?? []) as $rel) {
+            if (!is_string($rel) || $rel === '') {
+                continue;
+            }
+            $unmapped[] = ltrim(str_replace('\\', '/', $rel), '/');
+        }
+        $result['unmapped_php'] = array_values(array_unique($unmapped));
         return $result;
     }
 

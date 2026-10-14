@@ -720,6 +720,25 @@ class CleanSweep_ScanProfile {
     }
 
     /**
+     * PCRE backtrack cap while matching one file chunk. Stops one pattern
+     * on binary/image bytes from running until PHP kills the request.
+     */
+    public function get_file_pcre_backtrack_limit() {
+        return 100000;
+    }
+
+    /**
+     * Wall-clock seconds for signature-matching one file. When this elapses
+     * the file is recorded and the batch moves on.
+     */
+    public function get_file_time_budget() {
+        if ($this->profile_id === self::DEEP) {
+            return $this->is_restricted_host() ? 4.0 : 8.0;
+        }
+        return $this->is_restricted_host() ? 3.0 : 6.0;
+    }
+
+    /**
      * Max network sites to queue (0 = no cap). Quick is current + main only.
      *
      * @return int

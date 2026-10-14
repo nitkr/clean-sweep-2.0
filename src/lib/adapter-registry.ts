@@ -17,7 +17,8 @@ import {
   IntegrityApiAdapter,
   VulnerabilitiesApiAdapter,
   UsersApiAdapter,
-  CronApiAdapter
+  CronApiAdapter,
+  AiApiAdapter
 } from './api/index.js';
 
 /**
@@ -39,6 +40,7 @@ class AdapterRegistry {
   private _vulnerabilities: VulnerabilitiesApiAdapter | null = null;
   private _users: UsersApiAdapter | null = null;
   private _cron: CronApiAdapter | null = null;
+  private _ai: AiApiAdapter | null = null;
 
   private constructor() {
     // Use default HTTP adapter
@@ -69,6 +71,7 @@ class AdapterRegistry {
     this._vulnerabilities = null;
     this._users = null;
     this._cron = null;
+    this._ai = null;
   }
 
   /**
@@ -173,6 +176,13 @@ class AdapterRegistry {
       this._users = new UsersApiAdapter(this._adapter);
     }
     return this._users;
+  }
+
+  get ai(): AiApiAdapter {
+    if (!this._ai) {
+      this._ai = new AiApiAdapter(this._adapter);
+    }
+    return this._ai;
   }
 
   get cron(): CronApiAdapter {

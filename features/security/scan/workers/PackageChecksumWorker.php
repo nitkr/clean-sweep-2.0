@@ -91,6 +91,7 @@ final class CleanSweep_PackageChecksumWorker implements CleanSweep_Worker {
                 'note' => $result['note'],
                 'dir' => $result['dir'] ?? rtrim(str_replace('\\', '/', (string) ($pkg['dir'] ?? '')), '/') . '/',
                 'official_ok' => $result['official_ok'] ?? [],
+                'unmapped_php' => $result['unmapped_php'] ?? [],
                 'metrics' => $result['metrics'] ?? null,
                 'annotations' => $result['annotations'] ?? null,
                 'baseline_used' => !empty($result['baseline_used']),

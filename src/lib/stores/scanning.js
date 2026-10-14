@@ -1742,6 +1742,18 @@ function createScanningStore() {
         }
 
         let stResp = await adapters.malware.getStatus(scanId);
+        if (stResp?.success && stResp.data?.initiated_by === 'ai_scan') {
+          if (fromPointer) clearScanPointer();
+          const latest = await adapters.malware.getLatestScan(COMPLETED_TTL_SECONDS);
+          if (latest?.success && latest.data?.scan?.scan_id && latest.data.scan.initiated_by !== 'ai_scan') {
+            scanId = latest.data.scan.scan_id;
+            profileId = latest.data.scan.profile_id || profileId;
+            stResp = await adapters.malware.getStatus(scanId);
+          } else {
+            update(s => ({ ...s, rehydrateAttempted: true, rehydrating: false }));
+            return { restored: false };
+          }
+        }
         if (!stResp?.success || !stResp.data || stResp.data.status === 'not_found') {
           if (fromPointer) {
             clearScanPointer();

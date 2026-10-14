@@ -52,6 +52,10 @@ export const API_CONFIG = {
       progress: 'api/malware.php'
     },
 
+    ai: {
+      base: 'api/ai.php'
+    },
+
     // Vulnerabilities (separate from malware)
     vulnerabilities: {
       base: 'api/vulnerabilities.php',

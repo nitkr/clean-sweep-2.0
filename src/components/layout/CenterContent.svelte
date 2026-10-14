@@ -2,6 +2,7 @@
   import { app } from '../../lib/stores/app.js';
   import { files, toSiteRelativePath, threatToSiteRelativePath } from '../../lib/stores/files.js';
   import { scanning } from '../../lib/stores/scanning.js';
+  import { aiScan } from '../../lib/stores/aiScan.js';
   import { adapters } from '../../lib/adapter-registry.ts';
   import ConfirmDialog from '../common/ConfirmDialog.svelte';
 
@@ -19,6 +20,7 @@
   import CronTab from '../tabs/CronTab.svelte';
   import UploadTab from '../tabs/UploadTab.svelte';
   import CleanupTab from '../tabs/CleanupTab.svelte';
+  import AiScanTab from '../tabs/AiScanTab.svelte';
 
   // Single-pane code viewer (current file only — no original/diff)
   let showEditor = $state(false);
@@ -34,6 +36,10 @@
   let editorError = $state(null);
   /** @type {'file' | 'database' | null} */
   let editorMode = $state(null);
+
+  function showsScanEditor(tab) {
+    return tab === 'scanner' || tab === 'security' || tab === 'ai-scan' || tab === 'ai-setup';
+  }
 
   // Guards so $effect never re-loads / re-writes the same content in a loop
   let lastThreatKey = $state('');
@@ -293,10 +299,9 @@
 
   // Scanner: when a threat is selected, open editor and load the file once
   $effect(() => {
-    const onScanner =
-      $app.activeTab === 'scanner' || $app.activeTab === 'security';
+    const scanEditor = showsScanEditor($app.activeTab);
     const threat = $scanning.selectedThreat;
-    if (!onScanner || !threat) return;
+    if (!scanEditor || !threat) return;
 
     const key = threatKey(threat);
     showEditor = true;
@@ -436,9 +441,8 @@
 
   // Hide editor when leaving Scanner without an explorer file
   $effect(() => {
-    const onScanner =
-      $app.activeTab === 'scanner' || $app.activeTab === 'security';
-    if (!$files.selectedFile && !$scanning.selectedThreat && !onScanner) {
+    const scanEditor = showsScanEditor($app.activeTab);
+    if (!$files.selectedFile && !$scanning.selectedThreat && !scanEditor) {
       showEditor = false;
       selectedFile = null;
     }
@@ -530,6 +534,8 @@
         <ExtensionsTab />
       {:else if $app.activeTab === 'scanner'}
         <SecurityTab />
+      {:else if $app.activeTab === 'ai-scan' || $app.activeTab === 'ai-setup'}
+        <AiScanTab />
       {:else if $app.activeTab === 'security'}
         <IntegrityTab />
       {:else if $app.activeTab === 'users'}
@@ -609,6 +615,12 @@
           {/if}
         </div>
       </div>
+
+      {#if isThreatView && $aiScan.running && !$scanning.scanning}
+        <div class="px-4 py-1.5 border-b border-line bg-amber-500/10 text-[11px] text-amber-950 dark:text-amber-100">
+          AI scan still running
+        </div>
+      {/if}
 
       {#if isThreatView && ($scanning.scanning || $scanning.previewPartial)}
         <div class="px-4 py-1.5 border-b border-line bg-emerald-500/10 text-[11px] flex items-center justify-between gap-3 flex-wrap">

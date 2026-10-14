@@ -34,6 +34,8 @@ class CleanSweep_ChunkProcessor {
      * Read file in chunks with overlap for multi-line pattern support.
      *
      * @param string $file_path Path to file
+     * Callback may return false to stop. Other return values are collected.
+     *
      * @param callable $callback Function(chunk_content, chunk_info) called for each chunk
      * @param array $options Processing options
      *
@@ -76,7 +78,10 @@ class CleanSweep_ChunkProcessor {
                     'previous_tail' => '',
                     'raw_chunk' => $full_content
                 ];
-                $results[] = $callback($full_content, $chunk_info);
+                $result = $callback($full_content, $chunk_info);
+                if ($result !== null && $result !== false) {
+                    $results[] = $result;
+                }
             }
             return $results;
         }
@@ -114,8 +119,12 @@ class CleanSweep_ChunkProcessor {
                 'raw_chunk' => $raw_chunk
             ];
 
-            // Call callback with chunk
+            // Call callback with chunk. false stops the file so a time budget
+            // can move the batch past this file instead of reading it all.
             $result = $callback($chunk_to_scan, $chunk_info);
+            if ($result === false) {
+                break;
+            }
             if ($result !== null) {
                 $results[] = $result;
             }
