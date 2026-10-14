@@ -1,5 +1,5 @@
 # Clean Sweep shipped watchable paths. Extra files not listed are kind A.
-# Generated 2026-10-14T14:48:27+00:00 with hashes
+# Generated 2026-10-14T16:01:16+00:00 with hashes
 92d992fb3c5c011a58828ce6ec17ae6d3e2e1c3a9a4848e46f45bea9bd97c88a  api/ai.php
 9ee6638570dcb73b7f5d6d1b640f2541a2eb7c7c892fff43a43b260e6412354d  api/bootstrap.php
 d16b400ffc58deb31c64d98c731bae65e32c395a4bdd64a3a60b8e0163397e0a  api/cleanup.php
@@ -15,7 +15,7 @@ bdcaae5657eb7579615f07b6b05a5e6b1552f7b74207d0f2387b1423bab5903f  api/users.php
 3f64f29ed37dbedf94af013c0383033ea64612e66c214c1e4de8facd61d2b44f  api/vulnerabilities.php
 56d6c1f5cc4f2c33cafc76cd251cfbccd0f1fa25e1a87dd4bc970f28341749ef  bin/generate-visit-manifest.php
 5afcc9a91df58eb286ced4bf2f71f863651500e55874280e52c2942b3da338b3  bin/run-scan.php
-d93fab2a67de6d6c89ed336c79fd7320591a5c0b53649795c42e38a02d62baa7  bin/test-ai-scan.php
+a5508611a540cdb57edb2aede4c34d7ee053e5cbef95a9b261f5312e43c48733  bin/test-ai-scan.php
 a911015e953229c5ca86031b0a1ad78998c5bf787b353ed52ccc709736341cf7  bin/test-backup-vault-scope.php
 9a560101c48845b1742317ec1f9358f31a2a67162e40b8d5e1acfc0aa0ee9bf9  bin/test-census-slice.php
 8d0d2e097cfa19fffdc848e58b3f496e3ea05398a82c2d2bad250f0c4844d700  bin/test-core-package-locale.php
@@ -46,7 +46,7 @@ f9ea6224e1d918e476fc01578ea1042e846e23c50d8901fa3e7ac31d3c050d55  features/ai/Ai
 32a1114bc5293c306af5e124429fcf887dc523580ff1584123e8790e0cd831e2  features/ai/AiHostLogs.php
 4c712ee40389f052d877ddb3a161a25e3371c46849c281eb2ccc89a925d3f625  features/ai/AiLatch.php
 411bf7fa2822c089cd5990b47ab9380abe915b94727bf9fe2bca680ed8bb9f9b  features/ai/AiPaths.php
-0a0a98cea070cf7fc27c23aceb9100935ed4b30c359370d23616c0b87899bcee  features/ai/AiPipeline.php
+858ce68fb280645317b2b3cc2ae4828eb3e3da115739b7c4b0302faec18ecfa8  features/ai/AiPipeline.php
 3bcd9879442bb15363180b9881bd75c0a001842280f73e601a90bcfdb5ad06c3  features/ai/AiPolicy.php
 9a7a43e1f77efe95eb7c18862bb7d095061f5f44448042329c577cade2b4536f  features/ai/AiPrompt.php
 42794045247751cb1308d318568ae43d59d6079b7317ccbfd99bd612e2f03785  features/ai/AiQueue.php

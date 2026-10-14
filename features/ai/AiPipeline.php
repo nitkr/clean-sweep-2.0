@@ -49,7 +49,41 @@ final class AiPipeline {
             'log_count' => $scanId === '' ? 0 : $log->count($scanId),
             'logs' => (string) ($state['logs'] ?? ''),
             'files_sent_after' => (int) ($state['files_sent_after'] ?? 0),
+            'followup' => $this->followupProgress($state),
         ];
+    }
+
+    /**
+     * What the follow-up pass is doing right now.
+     * index is how many items of this check are already finished.
+     * path is the malware file the next question asks about.
+     *
+     * @param array $state
+     * @return array{step:int,index:int,total:int,path:string}
+     */
+    private function followupProgress(array $state): array {
+        $empty = ['step' => 0, 'index' => 0, 'total' => 0, 'path' => ''];
+        if ((string) ($state['phase'] ?? '') !== 'followup') {
+            return $empty;
+        }
+        $step = (int) ($state['followup'] ?? 0);
+        if ($step < 5) {
+            return ['step' => max(0, $step), 'index' => max(0, $step), 'total' => 6, 'path' => ''];
+        }
+        $scanId = (string) ($state['scan_id'] ?? '');
+        $sources = is_array($state['spread_sources'] ?? null)
+            ? $state['spread_sources']
+            : ($scanId !== '' ? $this->spreadSources($scanId) : []);
+        $total = count($sources);
+        $index = (int) ($state['spread_at'] ?? 0);
+        if ($index < 0) {
+            $index = 0;
+        }
+        if ($total > 0 && $index > $total) {
+            $index = $total;
+        }
+        $path = ($total > 0 && $index < $total) ? (string) $sources[$index] : '';
+        return ['step' => 5, 'index' => $index, 'total' => $total, 'path' => $path];
     }
 
     /**

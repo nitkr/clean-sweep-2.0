@@ -135,19 +135,6 @@
     }
   }
 
-  function phaseLine() {
-    const phase = $aiScan.phase;
-    const done = $aiScan.done;
-    const total = $aiScan.total;
-    if (phase === 'signature') return `Signature scan, ${done} files checked`;
-    if (phase === 'queue') return 'Choosing files for AI';
-    if (phase === 'review') return `AI review, ${done} of ${total} files`;
-    if (phase === 'logs') return 'Reading request logs';
-    if (phase === 'followup') return 'Running follow-up checks';
-    if (phase === 'report') return 'Writing the report';
-    return 'Working';
-  }
-
   function stopLine() {
     const error = String($aiScan.error || '').trim();
     if (error) return error;
@@ -228,7 +215,8 @@
       stepMark = '';
       return;
     }
-    const mark = `${$aiScan.phase}|${$aiScan.done}|${$aiScan.notice || ''}`;
+    const follow = $aiScan.followup || {};
+    const mark = `${$aiScan.phase}|${$aiScan.done}|${$aiScan.notice || ''}|${follow.step || 0}|${follow.index || 0}|${follow.path || ''}`;
     if (mark !== stepMark) {
       stepMark = mark;
       stepSince = Date.now();
@@ -253,10 +241,20 @@
     $aiScan.signature.idleSince > 0 ? Math.max(0, clock - $aiScan.signature.idleSince) : 0
   );
   let providerWait = $derived(
-    $aiScan.running && $aiScan.phase === 'review' && stepSince > 0
+    $aiScan.running && stepSince > 0 && (
+      $aiScan.phase === 'review' || ($aiScan.phase === 'followup' && Number($aiScan.followup?.step) >= 5)
+    )
       ? Math.max(0, Math.floor((clock - stepSince) / 1000))
       : 0
   );
+  let followupTotal = $derived(Number($aiScan.followup?.total) || 0);
+  let followupNow = $derived.by(() => {
+    const total = followupTotal;
+    const index = Number($aiScan.followup?.index) || 0;
+    if (total < 1) return 0;
+    return Math.min(total, index < total ? index + 1 : index);
+  });
+  let followupPercent = $derived(followupTotal > 0 ? Math.min(100, (followupNow / followupTotal) * 100) : 0);
   let usageLine = $derived(usageText($aiScan.usage));
   let reviewPercent = $derived(
     $aiScan.total > 0 ? Math.min(100, ($aiScan.done / $aiScan.total) * 100) : 0
@@ -526,15 +524,15 @@
   {/if}
 
   {#if $aiScan.running}
-    <div class="rounded-lg border px-3 py-3 text-sm space-y-3 {($aiScan.phase === 'signature' && signatureIdle >= 90000) || ($aiScan.phase === 'review' && providerWait >= 20) ? 'border-amber-500/60 bg-amber-500/5' : 'border-line'}">
+    <div class="rounded-lg border px-3 py-3 text-sm space-y-3 {($aiScan.phase === 'signature' && signatureIdle >= 90000) || providerWait >= 20 ? 'border-amber-500/60 bg-amber-500/5' : 'border-line'}">
       <div class="flex items-start justify-between gap-3">
-        <p class="min-w-0 break-words">{$aiScan.phase === 'signature' ? signatureLine : phaseLine()}</p>
+        <p class="min-w-0 break-words">{$aiScan.phase === 'signature' ? signatureLine : aiScan.phaseLabel($aiScan.phase, $aiScan.done, $aiScan.total, $aiScan.followup)}</p>
         <button type="button" class="{lineButton} shrink-0 px-2.5 py-1 text-sm" onclick={() => aiScan.cancel()}>Cancel</button>
       </div>
       {#if $aiScan.notice}
         <p class="text-xs text-muted">{$aiScan.notice}</p>
       {/if}
-      {#if $aiScan.phase === 'review' && providerWait > 2}
+      {#if providerWait > 2}
         <p class="text-xs {providerWait >= 20 ? 'text-amber-800 dark:text-amber-200' : 'text-muted'}">Waiting on the provider, {providerWait}s</p>
       {/if}
       {#if usageLine}
@@ -568,6 +566,13 @@
         </div>
         <div class="h-1.5 overflow-hidden rounded bg-app" role="progressbar" aria-valuenow={$aiScan.done} aria-valuemin="0" aria-valuemax={$aiScan.total}>
           <div class="h-full bg-primary" style="width: {reviewPercent}%"></div>
+        </div>
+      {:else if $aiScan.phase === 'followup' && followupTotal > 0}
+        {#if $aiScan.followup.path}
+          <p class="text-[11px] font-mono text-ink break-all">{$aiScan.followup.path}</p>
+        {/if}
+        <div class="h-1.5 overflow-hidden rounded bg-app" role="progressbar" aria-valuenow={followupNow} aria-valuemin="0" aria-valuemax={followupTotal}>
+          <div class="h-full bg-primary" style="width: {followupPercent}%"></div>
         </div>
       {/if}
     </div>

@@ -49,6 +49,7 @@ const initial = {
   usage: null,
   waiting: 0,
   waitingPaths: [],
+  followup: { step: 0, index: 0, total: 0, path: '' },
   running: false,
   log: [],
   report: null,
@@ -105,16 +106,42 @@ function createAiScan() {
       usage: data.usage && typeof data.usage === 'object' ? data.usage : null,
       waiting: Number(data.waiting || 0),
       waitingPaths: Array.isArray(data.waiting_paths) ? data.waiting_paths : [],
+      followup: data.followup && typeof data.followup === 'object'
+        ? {
+          step: Number(data.followup.step || 0),
+          index: Number(data.followup.index || 0),
+          total: Number(data.followup.total || 0),
+          path: String(data.followup.path || ''),
+        }
+        : { step: 0, index: 0, total: 0, path: '' },
     }));
     if (data.scan_id) scanId = data.scan_id;
   }
 
-  function phaseLabel(phase, done, total) {
+  function followupLine(followup) {
+    const names = [
+      'Checking WordPress drop-in files',
+      'Checking .htaccess and PHP settings',
+      'Checking scheduled tasks',
+      'Checking administrator accounts',
+      'Checking other code in malware folders',
+      'Asking what malware files name',
+    ];
+    const step = Number(followup?.step || 0);
+    const name = names[step] || 'Running follow-up checks';
+    const total = Number(followup?.total || 0);
+    const index = Number(followup?.index || 0);
+    if (total < 1) return name;
+    const current = Math.min(total, index < total ? index + 1 : index);
+    return `${name}, ${current} of ${total}`;
+  }
+
+  function phaseLabel(phase, done, total, followup) {
     if (phase === 'signature') return `Signature scan, ${done} files checked`;
     if (phase === 'queue') return 'Choosing files for AI';
     if (phase === 'review') return `AI review, ${done} of ${total} files`;
     if (phase === 'logs') return 'Reading request logs';
-    if (phase === 'followup') return 'Running follow-up checks';
+    if (phase === 'followup') return followupLine(followup);
     if (phase === 'report') return 'Writing the report';
     return 'Working';
   }
