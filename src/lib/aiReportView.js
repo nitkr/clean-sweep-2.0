@@ -211,6 +211,18 @@ export function logsNote(summary) {
 }
 
 /**
+ * The sentence under the dangerous-file count.
+ * An empty folder list says nothing. Unreviewed code in those folders is named.
+ */
+export function folderReviewSentence(folders) {
+  if (!Array.isArray(folders) || folders.length === 0) return '';
+  let waiting = 0;
+  for (const folder of folders) waiting += Number(folder?.unreviewed) || 0;
+  if (waiting > 0) return 'Some code files in those folders were not reviewed.';
+  return 'The other code files in the same folder were reviewed.';
+}
+
+/**
  * One line per dangerous file that the request logs recorded.
  * The time is the earliest kept request.
  */

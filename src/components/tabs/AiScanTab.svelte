@@ -1,7 +1,7 @@
 <script>
   import { onMount, tick } from 'svelte';
   import { aiScan } from '../../lib/stores/aiScan.js';
-  import { groupsOf, infectionTimeLabel, logsNote, nestLogGroup, outcomeNote, placeOf, requestSummary, signatureProgressLine, splitFindings, spreadSummary, tokenFacts } from '../../lib/aiReportView.js';
+  import { folderReviewSentence, groupsOf, infectionTimeLabel, logsNote, nestLogGroup, outcomeNote, placeOf, requestSummary, signatureProgressLine, splitFindings, spreadSummary, tokenFacts } from '../../lib/aiReportView.js';
   import { saveAiReportPdf } from '../../lib/aiReportPdf.js';
 
   let prefix = $state('');
@@ -927,9 +927,7 @@
             {:else}
               {findings.dangerous.length === 1 ? '1 dangerous file.' : `${findings.dangerous.length} dangerous files.`}
               Each sentence says what that code is supposed to do.
-              {#if Array.isArray(report.folders)}
-                The other code files in the same folder were reviewed.
-              {/if}
+              {folderReviewSentence(report.folders)}
             {/if}
           </p>
           {#if findings.dangerous.length}
