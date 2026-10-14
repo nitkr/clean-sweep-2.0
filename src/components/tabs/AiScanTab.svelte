@@ -1,7 +1,7 @@
 <script>
   import { onMount, tick } from 'svelte';
   import { aiScan } from '../../lib/stores/aiScan.js';
-  import { groupsOf, infectionTimeLabel, logsNote, nestLogGroup, outcomeNote, placeOf, requestSummary, signatureProgressLine, splitFindings, spreadSummary, tokenFacts } from '../../lib/aiReportView.js';
+  import { folderReviewSentence, groupsOf, infectionTimeLabel, logsNote, nestLogGroup, outcomeNote, placeOf, requestSummary, signatureProgressLine, splitFindings, spreadSummary, tokenFacts } from '../../lib/aiReportView.js';
   import { saveAiReportPdf } from '../../lib/aiReportPdf.js';
 
   let prefix = $state('');
@@ -135,22 +135,29 @@
     }
   }
 
-  function phaseLine() {
-    const phase = $aiScan.phase;
-    const done = $aiScan.done;
-    const total = $aiScan.total;
-    if (phase === 'signature') return `Signature scan, ${done} files checked`;
-    if (phase === 'queue') return 'Choosing files for AI';
-    if (phase === 'review') return `AI review, ${done} of ${total} files`;
-    if (phase === 'logs') return 'Reading request logs';
-    if (phase === 'followup') return 'Running follow-up checks';
-    if (phase === 'report') return 'Writing the report';
-    return 'Working';
-  }
-
   function stopLine() {
     const error = String($aiScan.error || '').trim();
-    return error || 'The AI review stopped.';
+    if (error) return error;
+    if ($aiScan.aiStatus === 'paused') return 'The AI review paused. The provider did not answer in time.';
+    return 'The AI review stopped.';
+  }
+
+  function money(amount) {
+    const n = Number(amount);
+    if (!Number.isFinite(n) || n < 0) return '';
+    const digits = n >= 0.01 || n === 0 ? 2 : 4;
+    return `$${n.toFixed(digits)}`;
+  }
+
+  function usageText(usage) {
+    if (!usage) return '';
+    const parts = [];
+    if (usage.model) parts.push(usage.model);
+    const requests = Number(usage.requests || 0);
+    if (requests > 0) parts.push(`${requests.toLocaleString()} ${requests === 1 ? 'request' : 'requests'}`);
+    const price = money(usage.cost);
+    if (price) parts.push(price);
+    return parts.join(' · ');
   }
 
   async function addPrefix() {
@@ -195,10 +202,25 @@
   }
 
   let clock = $state(Date.now());
+  let stepSince = $state(0);
+  let stepMark = '';
   $effect(() => {
-    if (!$aiScan.running || $aiScan.phase !== 'signature') return;
+    if (!$aiScan.running) return;
     const timer = setInterval(() => { clock = Date.now(); }, 1000);
     return () => clearInterval(timer);
+  });
+  $effect(() => {
+    if (!$aiScan.running) {
+      stepSince = 0;
+      stepMark = '';
+      return;
+    }
+    const follow = $aiScan.followup || {};
+    const mark = `${$aiScan.phase}|${$aiScan.done}|${$aiScan.notice || ''}|${follow.step || 0}|${follow.index || 0}|${follow.path || ''}`;
+    if (mark !== stepMark) {
+      stepMark = mark;
+      stepSince = Date.now();
+    }
   });
 
   let revealedKey = '';
@@ -217,6 +239,40 @@
 
   let signatureIdle = $derived(
     $aiScan.signature.idleSince > 0 ? Math.max(0, clock - $aiScan.signature.idleSince) : 0
+  );
+  let providerWait = $derived(
+    $aiScan.running && stepSince > 0 && (
+      $aiScan.phase === 'review' || ($aiScan.phase === 'followup' && Number($aiScan.followup?.step) >= 5)
+    )
+      ? Math.max(0, Math.floor((clock - stepSince) / 1000))
+      : 0
+  );
+  let followupTotal = $derived(Number($aiScan.followup?.total) || 0);
+  let followupNow = $derived.by(() => {
+    const total = followupTotal;
+    const index = Number($aiScan.followup?.index) || 0;
+    if (total < 1) return 0;
+    return Math.min(total, index < total ? index + 1 : index);
+  });
+  let followupPercent = $derived(followupTotal > 0 ? Math.min(100, (followupNow / followupTotal) * 100) : 0);
+  let usageLine = $derived(usageText($aiScan.usage));
+  let reviewPercent = $derived(
+    $aiScan.total > 0 ? Math.min(100, ($aiScan.done / $aiScan.total) * 100) : 0
+  );
+  const continuablePhases = ['queue', 'review', 'logs', 'followup', 'report'];
+  let canContinue = $derived(
+    !$aiScan.running
+    && (
+      $aiScan.aiStatus === 'paused'
+      || (
+        $aiScan.aiStatus === 'error'
+        && continuablePhases.includes($aiScan.phase)
+        && $aiScan.done < $aiScan.total
+      )
+    )
+  );
+  let waitingMore = $derived(
+    Math.max(0, Number($aiScan.waiting || 0) - ($aiScan.waitingPaths || []).length)
   );
   let signatureLine = $derived(signatureProgressLine($aiScan.signature, signatureIdle));
   let report = $derived($aiScan.report);
@@ -374,8 +430,11 @@
         <button type="button" class="{actionButton} self-start" onclick={openSetup}>Change</button>
       {/if}
     </div>
-    {#if !$aiScan.running && $aiScan.aiStatus === 'error'}
+    {#if !$aiScan.running && ($aiScan.aiStatus === 'error' || $aiScan.aiStatus === 'paused')}
       <p class="text-sm text-amber-800 dark:text-amber-200">{stopLine()}</p>
+      {#if $aiScan.detail}
+        <p class="text-xs text-muted">{$aiScan.detail}</p>
+      {/if}
     {:else if $aiScan.error}
       <p class="text-sm text-amber-800 dark:text-amber-200">{$aiScan.error}</p>
     {/if}
@@ -435,15 +494,50 @@
   {/if}
 
   {#if !$aiScan.running}
-    <button type="button" class="{primaryButton} px-4 py-2 text-sm" disabled={!$aiScan.tested} onclick={() => aiScan.start()}>Start</button>
+    <div class="space-y-2">
+      <div class="flex flex-wrap items-center gap-2">
+        {#if canContinue}
+          <button type="button" class="{primaryButton} px-4 py-2 text-sm" disabled={!$aiScan.tested} onclick={() => aiScan.resume()}>Continue this scan</button>
+          <button type="button" class="{lineButton} px-4 py-2 text-sm" disabled={!$aiScan.tested} onclick={() => aiScan.start()}>Start over</button>
+        {:else}
+          <button type="button" class="{primaryButton} px-4 py-2 text-sm" disabled={!$aiScan.tested} onclick={() => aiScan.start()}>Start</button>
+        {/if}
+      </div>
+      {#if canContinue}
+        <p class="text-xs text-muted">Start over drops the judged files and runs the signature pass again.</p>
+      {/if}
+    </div>
+  {/if}
+
+  {#if canContinue && ($aiScan.waitingPaths || []).length}
+    <section class="rounded-lg border border-line bg-panel p-4 space-y-2 text-sm">
+      <h2 class="text-sm font-semibold">Not judged yet</h2>
+      <ul class="space-y-1">
+        {#each $aiScan.waitingPaths as path (path)}
+          <li class="break-all font-mono text-xs text-ink">{path}</li>
+        {/each}
+      </ul>
+      {#if waitingMore > 0}
+        <p class="text-xs text-muted">and {waitingMore} more</p>
+      {/if}
+    </section>
   {/if}
 
   {#if $aiScan.running}
-    <div class="rounded-lg border px-3 py-3 text-sm space-y-3 {$aiScan.phase === 'signature' && signatureIdle >= 90000 ? 'border-amber-500/60 bg-amber-500/5' : 'border-line'}">
+    <div class="rounded-lg border px-3 py-3 text-sm space-y-3 {($aiScan.phase === 'signature' && signatureIdle >= 90000) || providerWait >= 20 ? 'border-amber-500/60 bg-amber-500/5' : 'border-line'}">
       <div class="flex items-start justify-between gap-3">
-        <p class="min-w-0 break-words">{$aiScan.phase === 'signature' ? signatureLine : phaseLine()}</p>
+        <p class="min-w-0 break-words">{$aiScan.phase === 'signature' ? signatureLine : aiScan.phaseLabel($aiScan.phase, $aiScan.done, $aiScan.total, $aiScan.followup)}</p>
         <button type="button" class="{lineButton} shrink-0 px-2.5 py-1 text-sm" onclick={() => aiScan.cancel()}>Cancel</button>
       </div>
+      {#if $aiScan.notice}
+        <p class="text-xs text-muted">{$aiScan.notice}</p>
+      {/if}
+      {#if providerWait > 2}
+        <p class="text-xs {providerWait >= 20 ? 'text-amber-800 dark:text-amber-200' : 'text-muted'}">Waiting on the provider, {providerWait}s</p>
+      {/if}
+      {#if usageLine}
+        <p class="text-xs text-muted">{usageLine}</p>
+      {/if}
       {#if $aiScan.phase === 'signature'}
         <div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
           <div class="rounded-lg border border-line bg-panel p-3 text-center">
@@ -458,6 +552,27 @@
             <div class="text-lg font-bold text-ink">{$aiScan.signature.matches.toLocaleString()}</div>
             <div class="text-[11px] text-muted">Signature matches</div>
           </div>
+        </div>
+      {:else if $aiScan.phase === 'review' && $aiScan.total > 0}
+        <div class="grid grid-cols-2 gap-2">
+          <div class="rounded-lg border border-line bg-panel p-3 text-center">
+            <div class="text-lg font-bold text-ink">{$aiScan.done.toLocaleString()}</div>
+            <div class="text-[11px] text-muted">Files judged</div>
+          </div>
+          <div class="rounded-lg border border-line bg-panel p-3 text-center">
+            <div class="text-lg font-bold text-ink">{Math.max(0, $aiScan.total - $aiScan.done).toLocaleString()}</div>
+            <div class="text-[11px] text-muted">Still waiting</div>
+          </div>
+        </div>
+        <div class="h-1.5 overflow-hidden rounded bg-app" role="progressbar" aria-valuenow={$aiScan.done} aria-valuemin="0" aria-valuemax={$aiScan.total}>
+          <div class="h-full bg-primary" style="width: {reviewPercent}%"></div>
+        </div>
+      {:else if $aiScan.phase === 'followup' && followupTotal > 0}
+        {#if $aiScan.followup.path}
+          <p class="text-[11px] font-mono text-ink break-all">{$aiScan.followup.path}</p>
+        {/if}
+        <div class="h-1.5 overflow-hidden rounded bg-app" role="progressbar" aria-valuenow={followupNow} aria-valuemin="0" aria-valuemax={followupTotal}>
+          <div class="h-full bg-primary" style="width: {followupPercent}%"></div>
         </div>
       {/if}
     </div>
@@ -502,13 +617,13 @@
     </section>
   {/if}
 
-  {#if report && !$aiScan.running && ($aiScan.aiStatus === 'completed' || $aiScan.aiStatus === 'error')}
+  {#if report && !$aiScan.running && ($aiScan.aiStatus === 'completed' || $aiScan.aiStatus === 'error' || $aiScan.aiStatus === 'paused')}
     <section class="space-y-4">
       <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <h2 class="text-sm font-semibold text-ink">Scan results</h2>
         <button type="button" class={actionButton} onclick={downloadPdf}>Download PDF</button>
       </div>
-      {#if $aiScan.aiStatus === 'error'}
+      {#if $aiScan.aiStatus === 'error' && !canContinue}
         <p class="text-sm text-amber-800 dark:text-amber-200">{stopLine()}</p>
       {/if}
 
@@ -817,9 +932,7 @@
             {:else}
               {findings.dangerous.length === 1 ? '1 dangerous file.' : `${findings.dangerous.length} dangerous files.`}
               Each sentence says what that code is supposed to do.
-              {#if Array.isArray(report.folders)}
-                The other code files in the same folder were reviewed.
-              {/if}
+              {folderReviewSentence(report.folders)}
             {/if}
           </p>
           {#if findings.dangerous.length}

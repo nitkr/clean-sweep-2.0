@@ -4,7 +4,7 @@
  * No provider name, no model name, and no token section.
  */
 
-import { infectionTimeLabel, logsNote, requestSummary, splitFindings, spreadSummary } from './aiReportView.js';
+import { folderReviewSentence, infectionTimeLabel, logsNote, requestSummary, splitFindings, spreadSummary } from './aiReportView.js';
 
 const PAGE_W = 595.28;
 const PAGE_H = 841.89;
@@ -317,16 +317,49 @@ function layoutReport(report) {
     y -= 22;
   }
 
-  function drawCard(lines, fill, border, padX = 12) {
-    const height = linesHeight(lines, 12, 10);
-    const fitsFresh = height < PAGE_H - 70 - BOTTOM;
-    if (y - height < BOTTOM && fitsFresh) openPage(false);
+  function paintSlice(slice, fill, border, padX) {
+    const height = linesHeight(slice, 12, 10);
     const top = y;
     const bottom = y - height;
     fillRound(MARGIN, bottom, CONTENT_W, height, 8, fill);
     strokeRound(MARGIN, bottom, CONTENT_W, height, 8, border, 1);
-    paintLines(lines, MARGIN + padX, top - 10);
+    paintLines(slice, MARGIN + padX, top - 10);
     y = bottom - 8;
+  }
+
+  function takeSlice(source, roomForBody) {
+    const slice = [];
+    let body = 0;
+    for (const line of source) {
+      const next = line.before + line.leading;
+      if (slice.length && body + next > roomForBody) break;
+      if (!slice.length && next > roomForBody) break;
+      slice.push(line);
+      body += next;
+    }
+    return slice;
+  }
+
+  function drawCard(lines, fill, border, padX = 12) {
+    const whole = linesHeight(lines, 12, 10);
+    const fitsFresh = whole < PAGE_H - 70 - BOTTOM;
+    if (y - whole < BOTTOM && fitsFresh) openPage(false);
+    let rest = lines.slice();
+    if (!rest.length) {
+      paintSlice(rest, fill, border, padX);
+      return;
+    }
+    while (rest.length) {
+      let slice = takeSlice(rest, y - BOTTOM - 22);
+      if (!slice.length) {
+        openPage(false);
+        slice = takeSlice(rest, y - BOTTOM - 22);
+        if (!slice.length) slice = [rest[0]];
+      }
+      paintSlice(slice, fill, border, padX);
+      rest = rest.slice(slice.length);
+      if (rest.length) openPage(false);
+    }
   }
 
   if (findings.dangerous.length) {
@@ -368,9 +401,9 @@ function layoutReport(report) {
     });
   } else {
     const lead = findings.dangerous.length === 1 ? '1 dangerous file.' : `${findings.dangerous.length} dangerous files.`;
-    const folderNote = Array.isArray(source.folders) ? ' The other code files in the same folder were reviewed.' : '';
+    const folderNote = folderReviewSentence(source.folders);
     summaryParts.push({
-      text: `${lead} Each sentence says what that code is supposed to do.${folderNote}`,
+      text: `${lead} Each sentence says what that code is supposed to do.${folderNote ? ` ${folderNote}` : ''}`,
       font: 'F1', size: 10, color: INK, leading: 13, before: 4,
     });
     for (const row of (source.does?.length ? source.does : findings.dangerous)) {

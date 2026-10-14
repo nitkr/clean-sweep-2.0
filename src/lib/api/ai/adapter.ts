@@ -22,6 +22,7 @@ export class AiApiAdapter {
   test() { return this.post('test'); }
   begin(scanId: string) { return this.post('begin', { scan_id: scanId }); }
   start(scanId?: string) { return this.post('start', scanId ? { scan_id: scanId } : {}); }
+  resume() { return this.post('resume'); }
   status() { return this.post('status'); }
   cancel() { return this.post('cancel'); }
   getLog(offset = 0, limit = 200) { return this.post('get_log', { offset, limit }); }

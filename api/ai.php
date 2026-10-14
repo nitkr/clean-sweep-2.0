@@ -109,6 +109,10 @@ switch ($action) {
         CleanSweep_ApiResponse::sendSuccess($pipeline->status());
         break;
 
+    case 'resume':
+        CleanSweep_ApiResponse::sendSuccess($pipeline->resume());
+        break;
+
     case 'start':
         $scanId = trim((string) ($_POST['scan_id'] ?? ''));
         $status = $pipeline->status();

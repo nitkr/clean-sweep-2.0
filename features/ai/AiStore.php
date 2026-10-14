@@ -42,6 +42,34 @@ final class AiStore {
         return is_array($data) ? $data : $default;
     }
 
+    /**
+     * One scan step at a time. A second request sees a busy status
+     * instead of starting another provider call.
+     *
+     * @return resource|null
+     */
+    public function acquireLock(string $name) {
+        $this->ensure();
+        $fh = @fopen($this->path($name . '.lock'), 'c');
+        if ($fh === false) {
+            return null;
+        }
+        if (!flock($fh, LOCK_EX | LOCK_NB)) {
+            fclose($fh);
+            return null;
+        }
+        return $fh;
+    }
+
+    /** @param resource|null $fh */
+    public function releaseLock($fh): void {
+        if (!is_resource($fh)) {
+            return;
+        }
+        flock($fh, LOCK_UN);
+        fclose($fh);
+    }
+
     public function writeJson(string $name, array $data): void {
         $this->ensure();
         $file = $this->path($name);
