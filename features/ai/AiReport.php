@@ -184,7 +184,16 @@ final class AiReport {
             $parts[] = $dangerous . ' dangerous files.';
         }
         if ($dangerous > 0) {
-            $parts[] = 'Each sentence says what that code is supposed to do. The other code files in the same folder were reviewed.';
+            $parts[] = 'Each sentence says what that code is supposed to do.';
+            $waiting = 0;
+            foreach ($folders as $folder) {
+                $waiting += (int) ($folder['unreviewed'] ?? 0);
+            }
+            if ($folders !== [] && $waiting === 0) {
+                $parts[] = 'The other code files in the same folder were reviewed.';
+            } elseif ($waiting > 0) {
+                $parts[] = 'Some code files in those folders were not reviewed.';
+            }
             foreach ($does as $row) {
                 $sentence = trim((string) ($row['summary'] ?? ''));
                 if ($sentence === '') {
@@ -467,10 +476,11 @@ final class AiReport {
         $dir = (string) ($note['dir'] ?? '.');
         $label = $dir === '.' ? 'the site root' : $dir;
         $reviewed = (int) $note['ordinary'] + (int) $note['undecided'] + (int) $note['also_dangerous'];
+        $unreviewed = (int) ($note['unreviewed'] ?? 0);
         $parts = [];
-        if ($reviewed === 0) {
+        if ($reviewed === 0 && $unreviewed === 0) {
             $parts[] = 'Folder ' . $label . ' had no other code files.';
-        } else {
+        } elseif ($reviewed > 0) {
             $bits = [];
             if ((int) $note['also_dangerous'] > 0) {
                 $bits[] = (int) $note['also_dangerous'] . ' also dangerous';
@@ -490,7 +500,6 @@ final class AiReport {
                 ? '1 other file is not code and was not sent.'
                 : $notCode . ' other files are not code and were not sent.';
         }
-        $unreviewed = (int) $note['unreviewed'];
         if ($unreviewed > 0) {
             $parts[] = $unreviewed === 1
                 ? '1 code file in that folder was not reviewed.'

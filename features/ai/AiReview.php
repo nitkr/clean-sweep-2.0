@@ -7,6 +7,7 @@ final class AiReview {
     public const BATCH_FILES = 6;
     public const BATCH_BYTES = 24576;
     public const NOT_ENCODED_SUMMARY = 'This file was not sent. Its bytes could not be encoded, so the model did not see it.';
+    public const NOT_ANSWERED_SUMMARY = 'The provider did not answer in time, so this file was not judged.';
 
     private AiStore $store;
     private string $root;
@@ -183,10 +184,15 @@ final class AiReview {
             $reply = call_user_func($this->complete, implode("\n\n", $sendParts), 1024);
             if (!is_array($reply) || empty($reply['ok'])) {
                 $reply = is_array($reply) ? $reply : [];
+                $paths = [];
+                foreach ($sendNumbers as $num) {
+                    $paths[] = (string) $prepared[$num]['path'];
+                }
                 $failed = [
                     'done' => false,
                     'reviewed' => 0,
                     'error' => AiChatClient::reviewStop($reply),
+                    'paths' => $paths,
                 ];
                 if (AiChatClient::isTransportTimeout($reply)) {
                     $failed['timeout'] = true;
@@ -229,6 +235,37 @@ final class AiReview {
             }
         }
         return ['done' => $this->remaining($scanId, $verdicts) === 0, 'reviewed' => count($prepared) + count($unencoded)];
+    }
+
+    /**
+     * The provider never answered for these paths. They stay in the queue
+     * result as not decided, and they are not cached.
+     *
+     * @param string[] $paths
+     */
+    public function skipUnanswered(string $scanId, array $paths): int {
+        $verdicts = new AiVerdictStore($this->store);
+        $log = new AiReadLog($this->store);
+        $done = $verdicts->forScan($scanId);
+        $stored = 0;
+        foreach ($paths as $path) {
+            $path = (string) $path;
+            if ($path === '' || $this->alreadyJudged($done, ['subject' => 'file', 'path' => $path])) {
+                continue;
+            }
+            $log->append($scanId, $path, 'Not judged — provider timed out', 'unsure');
+            $verdicts->append([
+                'scan_id' => $scanId,
+                'subject' => 'file',
+                'path' => $path,
+                'verdict' => 'unsure',
+                'summary' => self::NOT_ANSWERED_SUMMARY,
+                'file_time_basis' => 'unknown',
+            ]);
+            $done[] = ['subject' => 'file', 'path' => $path];
+            $stored++;
+        }
+        return $stored;
     }
 
     /**

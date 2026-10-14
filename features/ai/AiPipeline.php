@@ -26,13 +26,25 @@ final class AiPipeline {
         $state = $this->state();
         $scanId = (string) ($state['scan_id'] ?? '');
         $log = new AiReadLog($this->store);
+        $aiStatus = (string) ($state['ai_status'] ?? 'idle');
+        $done = (int) ($state['done'] ?? 0);
+        $total = (int) ($state['total'] ?? 0);
+        $waitingPaths = [];
+        if (in_array($aiStatus, ['paused', 'error'], true) && $scanId !== '') {
+            $waitingPaths = array_slice($this->waitingPaths($scanId), 0, 80);
+        }
         return [
             'scan_id' => $scanId,
             'phase' => (string) ($state['phase'] ?? 'idle'),
-            'ai_status' => (string) ($state['ai_status'] ?? 'idle'),
-            'done' => (int) ($state['done'] ?? 0),
-            'total' => (int) ($state['total'] ?? 0),
+            'ai_status' => $aiStatus,
+            'done' => $done,
+            'total' => $total,
             'error' => (string) ($state['error'] ?? ''),
+            'notice' => (string) ($state['review_note'] ?? ''),
+            'detail' => (string) ($state['detail'] ?? ''),
+            'waiting' => max(0, $total - $done),
+            'waiting_paths' => $waitingPaths,
+            'usage' => $this->usageSummary($state),
             'policy' => is_array($state['policy'] ?? null) ? $state['policy'] : [],
             'log_count' => $scanId === '' ? 0 : $log->count($scanId),
             'logs' => (string) ($state['logs'] ?? ''),
@@ -96,15 +108,52 @@ final class AiPipeline {
      * @param callable|null $complete function(string $user, int $maxTokens): array
      */
     public function step(?callable $malwareStatus = null, ?callable $complete = null): array {
+        $lock = $this->store->acquireLock('step');
+        if ($lock === null) {
+            $status = $this->status();
+            $status['busy'] = true;
+            return $status;
+        }
+        try {
+            return $this->stepBody($malwareStatus, $complete);
+        } finally {
+            $this->store->releaseLock($lock);
+        }
+    }
+
+    /**
+     * Continue a review that paused, or an earlier review that stopped
+     * while files were still waiting. Judged files stay judged.
+     */
+    public function resume(): array {
         $state = $this->state();
-        if (in_array((string) ($state['ai_status'] ?? ''), ['cancelled', 'error'], true)) {
+        $status = (string) ($state['ai_status'] ?? '');
+        $phase = (string) ($state['phase'] ?? '');
+        if (!in_array($status, ['paused', 'error'], true)) {
+            return $this->status();
+        }
+        if (!in_array($phase, ['queue', 'review', 'logs', 'followup', 'report'], true)) {
+            return $this->status();
+        }
+        $state['ai_status'] = 'running';
+        $state['error'] = '';
+        $state['detail'] = '';
+        $state['review_note'] = '';
+        $state['review_timeout_tries'] = 0;
+        $state['review_fail_streak'] = 0;
+        $this->writeState($state);
+        return $this->status();
+    }
+
+    private function stepBody(?callable $malwareStatus = null, ?callable $complete = null): array {
+        $state = $this->state();
+        if (in_array((string) ($state['ai_status'] ?? ''), ['cancelled', 'error', 'paused'], true)) {
             return $this->status();
         }
         if (($state['scan_id'] ?? '') === '' || ($state['ai_status'] ?? '') === 'idle') {
             $state['ai_status'] = 'error';
             $state['error'] = 'Start the signature pass first.';
-            $this->writeState($state);
-            return $this->status();
+            return $this->putStep($state);
         }
         $scanId = (string) $state['scan_id'];
         $phase = (string) ($state['phase'] ?? 'signature');
@@ -114,20 +163,17 @@ final class AiPipeline {
             if (in_array($st, ['failed', 'cancelled'], true)) {
                 $state['ai_status'] = 'error';
                 $state['error'] = 'The signature pass did not finish.';
-                $this->writeState($state);
-                return $this->status();
+                return $this->putStep($state);
             }
             $state['done'] = (int) ($mal['counters']['files_scanned'] ?? 0);
             $state['total'] = (int) ($mal['counters']['files_scanned'] ?? 0);
             if ($st !== 'completed') {
-                $this->writeState($state);
-                return $this->status();
+                return $this->putStep($state);
             }
             $state['phase'] = 'queue';
             $state['done'] = 0;
             $state['total'] = 0;
-            $this->writeState($state);
-            return $this->status();
+            return $this->putStep($state);
         }
         if ($phase === 'queue') {
             $root = $this->siteRoot();
@@ -135,8 +181,7 @@ final class AiPipeline {
             if ($threats === null) {
                 $state['ai_status'] = 'error';
                 $state['error'] = 'The signature results could not be read.';
-                $this->writeState($state);
-                return $this->status();
+                return $this->putStep($state);
             }
             $loaded = AiChecksumSource::load(AiChecksumSource::pathForStore($this->store->dir()));
             if (($state['checksums'] ?? '') !== 'read') {
@@ -172,8 +217,7 @@ final class AiPipeline {
                 }
                 $state['phase'] = 'review';
             }
-            $this->writeState($state);
-            return $this->status();
+            return $this->putStep($state);
         }
         if ($phase === 'review') {
             $this->attachLogsToState($state);
@@ -197,31 +241,75 @@ final class AiPipeline {
             $state['done'] = count((new AiVerdictStore($this->store))->forScan($scanId));
             $state['total'] = $this->queueCount($scanId);
             if (!empty($result['error'])) {
-                if (!empty($result['timeout']) && (int) ($state['review_timeout_tries'] ?? 0) < 1) {
-                    $state['review_timeout_tries'] = 1;
-                    $this->writeState($state);
-                    return $this->status();
+                $paths = [];
+                foreach (is_array($result['paths'] ?? null) ? $result['paths'] : [] as $path) {
+                    $path = (string) $path;
+                    if ($path !== '') {
+                        $paths[$path] = $path;
+                    }
+                }
+                $paths = array_values($paths);
+                if (!empty($result['timeout']) && $paths !== []) {
+                    if ((int) ($state['review_timeout_tries'] ?? 0) < 1) {
+                        $state['review_timeout_tries'] = 1;
+                        $state['review_note'] = 'The provider did not answer in time. Asking this batch again.';
+                        $state['detail'] = '';
+                        $state['error'] = '';
+                        return $this->putStep($state);
+                    }
+                    $review->skipUnanswered($scanId, $paths);
+                    $state['review_timeout_tries'] = 0;
+                    $state['review_fail_streak'] = (int) ($state['review_fail_streak'] ?? 0) + 1;
+                    $state['done'] = count((new AiVerdictStore($this->store))->forScan($scanId));
+                    $state['total'] = $this->queueCount($scanId);
+                    $left = max(0, (int) $state['total'] - (int) $state['done']);
+                    if ((int) $state['review_fail_streak'] >= 2 && $left > 0) {
+                        $state['ai_status'] = 'paused';
+                        $state['review_note'] = '';
+                        $state['error'] = $this->withJudgedCounts(
+                            'The AI review paused. The provider did not answer in time.',
+                            (int) $state['done'],
+                            (int) $state['total']
+                        );
+                        $state['detail'] = 'Continue keeps this scan and asks for the files still waiting.';
+                        $this->writeReport($state);
+                        return $this->putStep($state);
+                    }
+                    $named = count($paths) === 1 ? '1 file was' : count($paths) . ' files were';
+                    $state['review_note'] = 'The provider did not answer. ' . $named . ' left not decided. The review is continuing.';
+                    $state['detail'] = '';
+                    $state['error'] = '';
+                    if ($left === 0) {
+                        $this->openFollowUp($state);
+                        $state['review_note'] = '';
+                    }
+                    return $this->putStep($state);
                 }
                 $state['review_timeout_tries'] = 0;
+                $state['review_note'] = '';
                 $state['ai_status'] = 'error';
                 $state['error'] = $this->withJudgedCounts(
                     (string) $result['error'],
                     (int) $state['done'],
                     (int) $state['total']
                 );
+                $state['detail'] = '';
                 $this->writeReport($state);
-                $this->writeState($state);
-                return $this->status();
+                return $this->putStep($state);
             }
             $state['review_timeout_tries'] = 0;
+            $state['review_fail_streak'] = 0;
+            $state['review_note'] = '';
+            $state['detail'] = '';
+            $state['error'] = '';
             if (!empty($result['done'])) {
-                $logs = (string) ($state['logs'] ?? '');
-                $state['phase'] = ($logs === 'pending' || $logs === '') ? 'logs' : 'followup';
+                $this->openFollowUp($state);
             }
-            $this->writeState($state);
-            return $this->status();
+            return $this->putStep($state);
         }
         if ($phase === 'logs') {
+            $state['review_fail_streak'] = 0;
+            $state['review_timeout_tries'] = 0;
             $policy = $this->policyFromState($state);
             $state['log_lines'] = [];
             $state['first_request'] = [];
@@ -256,18 +344,18 @@ final class AiPipeline {
             if (!isset($state['followup'])) {
                 $state['followup'] = 0;
             }
-            $this->writeState($state);
-            return $this->status();
+            return $this->putStep($state);
         }
         if ($phase === 'followup') {
+            $state['review_fail_streak'] = 0;
+            $state['review_timeout_tries'] = 0;
             $complete = $this->countingComplete($complete ?: $this->defaultComplete(), $state);
             $this->runFollowUp($state, $complete);
             $this->keepUsage($state);
             if (($state['ai_status'] ?? '') === 'error') {
                 $this->writeReport($state);
             }
-            $this->writeState($state);
-            return $this->status();
+            return $this->putStep($state);
         }
         if ($phase === 'report') {
             if ($complete === null) {
@@ -276,8 +364,7 @@ final class AiPipeline {
             $this->writeReport($state);
             $state['phase'] = 'report';
             $state['ai_status'] = 'completed';
-            $this->writeState($state);
-            return $this->status();
+            return $this->putStep($state);
         }
         return $this->status();
     }
@@ -346,7 +433,7 @@ final class AiPipeline {
             $paths[] = $rel;
         }
         $this->store->writeJson('keeps.json', ['paths' => $paths]);
-        if (in_array((string) ($state['ai_status'] ?? ''), ['completed', 'error'], true)) {
+        if (in_array((string) ($state['ai_status'] ?? ''), ['completed', 'error', 'paused'], true)) {
             $this->writeReport($state);
         }
         return ['ok' => true];
@@ -355,7 +442,7 @@ final class AiPipeline {
     public function report(): ?array {
         $state = $this->state();
         $scanId = (string) ($state['scan_id'] ?? '');
-        if ($scanId === '' || !in_array((string) ($state['ai_status'] ?? ''), ['completed', 'error'], true)) {
+        if ($scanId === '' || !in_array((string) ($state['ai_status'] ?? ''), ['completed', 'error', 'paused'], true)) {
             return null;
         }
         $file = 'report-' . preg_replace('/[^A-Za-z0-9._-]/', '_', $scanId) . '.json';
@@ -447,12 +534,80 @@ final class AiPipeline {
     }
 
     private function withJudgedCounts(string $message, int $done, int $total): string {
+        $message = rtrim($message);
+        if ($message !== '' && !preg_match('/[.!?]$/', $message)) {
+            $message .= '.';
+        }
         $waiting = max(0, $total - $done);
         if ($total < 1 || $waiting < 1) {
             return $message;
         }
         $left = $waiting === 1 ? '1 was not judged.' : $waiting . ' were not judged.';
         return $message . ' ' . $done . ' of ' . $total . ' files were judged. ' . $left;
+    }
+
+    /**
+     * Queued files that still have no verdict.
+     *
+     * @return string[]
+     */
+    private function waitingPaths(string $scanId): array {
+        if ($scanId === '') {
+            return [];
+        }
+        $judged = [];
+        foreach ((new AiVerdictStore($this->store))->forScan($scanId) as $row) {
+            $path = (string) ($row['path'] ?? '');
+            if ($path !== '' && ($row['subject'] ?? 'file') !== 'database') {
+                $judged[$path] = true;
+            }
+        }
+        $out = [];
+        foreach ($this->store->readJsonl('queue.jsonl') as $row) {
+            if (($row['scan_id'] ?? '') !== $scanId) {
+                continue;
+            }
+            if (($row['subject'] ?? 'file') === 'database') {
+                continue;
+            }
+            $path = (string) ($row['path'] ?? '');
+            if ($path === '' || isset($judged[$path]) || isset($out[$path])) {
+                continue;
+            }
+            $out[$path] = true;
+        }
+        return array_keys($out);
+    }
+
+    /**
+     * A short usage line for the running page. The full block stays on the report.
+     *
+     * @param array $state
+     * @return array{model:string,requests:int,input:?int,cost:?float}|null
+     */
+    private function usageSummary(array $state): ?array {
+        if (!is_array($state['usage'] ?? null)) {
+            return null;
+        }
+        $usage = $state['usage'];
+        $requests = (int) ($usage['requests'] ?? 0);
+        if ($requests < 1 && ($usage['model'] ?? '') === '') {
+            return null;
+        }
+        $cost = null;
+        if (isset($usage['cost']) && is_numeric($usage['cost']) && (float) $usage['cost'] >= 0) {
+            $cost = round((float) $usage['cost'], 4);
+        }
+        $input = null;
+        if (isset($usage['input']) && is_numeric($usage['input'])) {
+            $input = (int) $usage['input'];
+        }
+        return [
+            'model' => (string) ($usage['model'] ?? ''),
+            'requests' => $requests,
+            'input' => $input,
+            'cost' => $cost,
+        ];
     }
 
     private function followStop(string $file, string $reason, int $remaining): string {
@@ -793,8 +948,31 @@ final class AiPipeline {
         if (is_array($state['usage'] ?? null)) {
             $report['usage'] = AiUsage::forReport($state['usage']);
         }
+        $report['waiting'] = $this->waitingPaths($scanId);
         $safe = preg_replace('/[^A-Za-z0-9._-]/', '_', $scanId);
         $this->store->writeJson('report-' . $safe . '.json', $report);
+    }
+
+    private function openFollowUp(array &$state): void {
+        $logs = (string) ($state['logs'] ?? '');
+        $state['phase'] = ($logs === 'pending' || $logs === '') ? 'logs' : 'followup';
+        $state['review_fail_streak'] = 0;
+        $state['review_timeout_tries'] = 0;
+    }
+
+    /**
+     * Save a step unless the operator cancelled it, or a new scan replaced it,
+     * while the provider call was still in flight.
+     */
+    private function putStep(array $state): array {
+        $current = $this->state();
+        $currentId = (string) ($current['scan_id'] ?? '');
+        $stepId = (string) ($state['scan_id'] ?? '');
+        $replaced = $currentId !== '' && $stepId !== '' && $currentId !== $stepId;
+        if ((string) ($current['ai_status'] ?? '') !== 'cancelled' && !$replaced) {
+            $this->writeState($state);
+        }
+        return $this->status();
     }
 
     /** @param array<string,string> $first */

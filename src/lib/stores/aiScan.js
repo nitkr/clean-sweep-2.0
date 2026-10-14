@@ -44,6 +44,11 @@ const initial = {
   logCount: 0,
   logs: '',
   filesSentAfter: 0,
+  notice: '',
+  detail: '',
+  usage: null,
+  waiting: 0,
+  waitingPaths: [],
   running: false,
   log: [],
   report: null,
@@ -94,7 +99,12 @@ function createAiScan() {
       logCount: data.log_count || 0,
       logs: data.logs || '',
       filesSentAfter: data.files_sent_after || 0,
-      error: data.error || s.error,
+      error: data.error || '',
+      notice: data.notice || '',
+      detail: data.detail || '',
+      usage: data.usage && typeof data.usage === 'object' ? data.usage : null,
+      waiting: Number(data.waiting || 0),
+      waitingPaths: Array.isArray(data.waiting_paths) ? data.waiting_paths : [],
     }));
     if (data.scan_id) scanId = data.scan_id;
   }
@@ -122,7 +132,7 @@ function createAiScan() {
           stopLoop = false;
           update((s) => ({ ...s, running: true }));
           this.loop();
-        } else if (st.data.ai_status === 'completed' || st.data.ai_status === 'error') {
+        } else if (st.data.ai_status === 'completed' || st.data.ai_status === 'error' || st.data.ai_status === 'paused') {
           await this.loadReport();
           await this.refreshLog();
         }
@@ -224,6 +234,21 @@ function createAiScan() {
       applyStatus(begun.data);
       this.loop();
     },
+    async resume() {
+      stopLoop = false;
+      update((s) => ({ ...s, running: true, error: '' }));
+      const resp = await adapters.ai.resume();
+      if (!resp?.success) {
+        update((s) => ({ ...s, running: false, error: resp?.error || 'Could not continue this scan.' }));
+        return;
+      }
+      applyStatus(resp.data || {});
+      if (resp.data?.ai_status !== 'running') {
+        update((s) => ({ ...s, running: false }));
+        return;
+      }
+      this.loop();
+    },
     async loop() {
       const token = ++loopToken;
       let lastStamp = '';
@@ -302,9 +327,17 @@ function createAiScan() {
               update((s) => ({ ...s, running: false, error: step?.error || 'The AI pass stopped.' }));
               return;
             }
+            if (step.data?.busy) {
+              await wait(1000);
+              continue;
+            }
             applyStatus(step.data);
-            if (['error', 'cancelled'].includes(step.data?.ai_status)) {
+            if (['error', 'cancelled', 'paused'].includes(step.data?.ai_status)) {
               update((s) => ({ ...s, running: false }));
+              if (step.data.ai_status === 'paused' || step.data.ai_status === 'error') {
+                await this.loadReport();
+              }
+              await this.refreshLog();
               return;
             }
             if ((step.data?.phase || '') !== 'signature') {
@@ -321,10 +354,14 @@ function createAiScan() {
           update((s) => ({ ...s, running: false, error: step?.error || 'The AI pass stopped.' }));
           return;
         }
+        if (step.data?.busy) {
+          await wait(1000);
+          continue;
+        }
         applyStatus(step.data);
-        if (['completed', 'error', 'cancelled'].includes(step.data?.ai_status)) {
+        if (['completed', 'error', 'cancelled', 'paused'].includes(step.data?.ai_status)) {
           update((s) => ({ ...s, running: false }));
-          if (step.data.ai_status === 'completed' || step.data.ai_status === 'error') {
+          if (step.data.ai_status === 'completed' || step.data.ai_status === 'error' || step.data.ai_status === 'paused') {
             await this.loadReport();
           }
           await this.refreshLog();

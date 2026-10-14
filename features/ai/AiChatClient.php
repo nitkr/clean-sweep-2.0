@@ -19,14 +19,42 @@ final class AiChatClient {
 
     public static function timeoutForHost(): int {
         $budget = 35;
+        $phpLimit = 0;
         if (class_exists('CleanSweep_HostDetector')) {
             try {
-                $budget = (new CleanSweep_HostDetector())->recommendedTimeBudget();
+                $host = new CleanSweep_HostDetector();
+                $budget = $host->recommendedTimeBudget();
+                $phpLimit = (int) $host->max_execution_time;
             } catch (Throwable $e) {
                 $budget = 35;
             }
         }
-        return $budget < 20 ? 15 : 30;
+        if ($phpLimit <= 0) {
+            $phpLimit = (int) ini_get('max_execution_time');
+        }
+        // A short host still ends the call before PHP or the gateway does.
+        if ($budget < 20 || ($phpLimit > 0 && $phpLimit <= 45)) {
+            return $budget < 20 ? 15 : 30;
+        }
+        // Reasoning models often stay silent longer than 30s. Leave headroom
+        // under PHP's limit. An unlimited limit still caps the wait.
+        $room = $phpLimit > 0 ? $phpLimit - 20 : 90;
+        return max(30, min(75, $room));
+    }
+
+    /**
+     * Curl stopped the transfer. A partial body is still a failed call.
+     * A timeout is recognized even when some bytes arrived.
+     */
+    public static function curlAbandoned(string $raw, string $err): bool {
+        if ($err === '') {
+            return false;
+        }
+        if ($raw === '') {
+            return true;
+        }
+        $message = strtolower($err);
+        return strpos($message, 'timed out') !== false || strpos($message, 'timeout was reached') !== false;
     }
 
     /**
@@ -104,7 +132,7 @@ final class AiChatClient {
             $http = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
             $err = curl_error($ch);
             curl_close($ch);
-            if ($raw === '' && $err !== '') {
+            if (self::curlAbandoned($raw, $err)) {
                 return ['ok' => false, 'content' => '', 'http' => $http, 'error' => $err];
             }
         } else {
@@ -457,7 +485,13 @@ final class AiChatClient {
      * @param array{error?:string,http?:int,empty?:bool} $reply
      */
     public static function isTransportTimeout(array $reply): bool {
-        if ((int) ($reply['http'] ?? 0) !== 0 || self::isEmptyAnswer($reply)) {
+        if (self::isEmptyAnswer($reply)) {
+            return false;
+        }
+        $http = (int) ($reply['http'] ?? 0);
+        // A provider HTTP error is retried on its own rules. A curl timeout can
+        // still carry a status when headers arrived and the body never did.
+        if ($http >= 400 && $http <= 599) {
             return false;
         }
         $message = strtolower(trim((string) ($reply['error'] ?? '')));
