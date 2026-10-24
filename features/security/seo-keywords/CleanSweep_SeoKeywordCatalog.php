@@ -8,7 +8,7 @@
 
 class CleanSweep_SeoKeywordCatalog {
 
-    const NEEDLE_CAP = 50;
+    const NEEDLE_CAP = 70;
 
     /** @var array<string,string[]>|null */
     private static $loaded = null;
@@ -28,6 +28,12 @@ class CleanSweep_SeoKeywordCatalog {
             'seo-kw-brands-id.php',
             'seo-kw-brands-tr.php',
             'seo-kw-brands-ja.php',
+            'seo-kw-brands-zh.php',
+            'seo-kw-brands-ko.php',
+            'seo-kw-brands-vi.php',
+            'seo-kw-brands-ru.php',
+            'seo-kw-brands-th.php',
+            'seo-kw-brands-ar.php',
         ];
 
         $core = [];
@@ -139,26 +145,18 @@ class CleanSweep_SeoKeywordCatalog {
 
     /**
      * Whole-word gate regex from a token list (pack needles or live catalog).
-     * Latin uses alnum lookaround; CJK is a literal (\\b is ASCII-only).
+     * Latin uses alnum lookaround. Han, Kana, Hangul, and Thai are literals.
+     * Cyrillic and Arabic get a same-script byte boundary so азино does not
+     * match inside казино. Never /u: invalid UTF-8 would skip every gated rule.
      *
      * @param string[] $tokens
      * @return string
      */
     public static function needle_regex_for(array $tokens) {
-        list($latin, $cjk) = self::split_script($tokens);
-        $parts = [];
-        if ($latin !== []) {
-            $parts[] = '(?<![A-Za-z0-9])(?:' . self::alternation($latin) . ')(?![A-Za-z0-9])';
-        }
-        if ($cjk !== []) {
-            $parts[] = '(?:' . self::alternation($cjk) . ')';
-        }
+        $parts = self::bounded_branches(self::expand_forms($tokens), false);
         if ($parts === []) {
             throw new RuntimeException('SEO keyword alternation is empty');
         }
-        // /i only: /u on invalid UTF-8 haystacks makes preg_match fail and the
-        // gate then skips every catalog SEO rule, including Latin hide/href.
-        // CJK tokens are UTF-8 literals and match without /u.
         return '/' . implode('|', $parts) . '/i';
     }
 
@@ -167,18 +165,27 @@ class CleanSweep_SeoKeywordCatalog {
     }
 
     /**
-     * Keyword group for cs_0264–0267: \\b on Latin, literal CJK.
+     * Keyword group for cs_0264–0267: \\b on Latin. Other scripts use the
+     * same branches as the gate, without /u.
      *
      * @return string
      */
     public static function keyword_group() {
-        list($latin, $cjk) = self::split_script(self::gate_needles());
+        $latin = [];
+        $other = [];
+        foreach (self::expand_forms(self::gate_needles()) as $t) {
+            if (self::script_kind($t) === 'latin') {
+                $latin[] = $t;
+            } else {
+                $other[] = $t;
+            }
+        }
         $parts = [];
         if ($latin !== []) {
             $parts[] = '\\b(?:' . self::alternation($latin) . ')\\b';
         }
-        if ($cjk !== []) {
-            $parts[] = '(?:' . self::alternation($cjk) . ')';
+        foreach (self::bounded_branches($other, false) as $branch) {
+            $parts[] = $branch;
         }
         if ($parts === []) {
             throw new RuntimeException('SEO keyword alternation is empty');
@@ -228,7 +235,7 @@ class CleanSweep_SeoKeywordCatalog {
         foreach (self::needles() as $t) {
             $tokens[] = str_replace(' ', '-', $t);
         }
-        return self::alternation(self::unique_ci($tokens));
+        return self::alternation(self::expand_forms($tokens));
     }
 
     /**
@@ -259,11 +266,19 @@ class CleanSweep_SeoKeywordCatalog {
      * @return string
      */
     public static function two_brand_pattern() {
-        $alt = self::brand_alternation();
-        $edge = '(?<![A-Za-z0-9])';
-        $end = '(?![A-Za-z0-9])';
+        $tokens = [];
+        foreach (self::needles() as $t) {
+            $tokens[] = $t;
+            if (strpos($t, ' ') !== false) {
+                $tokens[] = str_replace(' ', '-', $t);
+                $tokens[] = str_replace(' ', '_', $t);
+            }
+        }
+        $tokens = self::expand_forms($tokens);
+        $first = self::brand_piece($tokens, true);
+        $second = self::brand_piece($tokens, false);
         $gap = '(?:(?!\\b(?:vs\\.?|versus|compared|comparison|review)\\b)[\\s\\S]){0,200}?';
-        return '/' . $edge . '(' . $alt . ')' . $end . $gap . $edge . '(?!\\1)' . '(?:' . $alt . ')' . $end . '/i';
+        return '/' . $first . $gap . '(?!\\1)' . $second . '/i';
     }
 
     /**
@@ -315,28 +330,110 @@ class CleanSweep_SeoKeywordCatalog {
     }
 
     /**
+     * latin: ASCII alnum boundary. literal: Han, Kana, Hangul, Thai (no /u).
+     * cyrillic and arabic: one-character UTF-8 boundary, still without /u.
+     *
      * @param string $token
-     * @return bool
+     * @return string
      */
-    private static function is_cjk($token) {
-        return (bool) preg_match('/[\\x{3040}-\\x{30FF}\\x{4E00}-\\x{9FFF}]/u', (string) $token);
+    private static function script_kind($token) {
+        if (!preg_match('/[^\x00-\x7F]/', (string) $token)) {
+            return 'latin';
+        }
+        if (preg_match('/[\x{0400}-\x{04FF}]/u', (string) $token)) {
+            return 'cyrillic';
+        }
+        if (preg_match('/[\x{0600}-\x{06FF}]/u', (string) $token)) {
+            return 'arabic';
+        }
+        return 'literal';
+    }
+
+    /**
+     * Cyrillic has no /i fold unless /u is set, and /u is forbidden on haystacks.
+     *
+     * @param string[] $tokens
+     * @return string[]
+     */
+    private static function expand_forms(array $tokens) {
+        $out = [];
+        $seen = [];
+        foreach (self::unique_ci($tokens) as $t) {
+            $forms = [$t];
+            if (self::script_kind($t) === 'cyrillic' && function_exists('mb_strtoupper')) {
+                $upper = mb_strtoupper($t, 'UTF-8');
+                if ($upper !== $t) {
+                    $forms[] = $upper;
+                }
+            }
+            foreach ($forms as $form) {
+                if (isset($seen[$form])) {
+                    continue;
+                }
+                $seen[$form] = true;
+                $out[] = $form;
+            }
+        }
+        return $out;
     }
 
     /**
      * @param string[] $tokens
-     * @return array{0:string[],1:string[]}
+     * @param bool $capture
+     * @return string
      */
-    private static function split_script(array $tokens) {
-        $latin = [];
-        $cjk = [];
-        foreach ($tokens as $t) {
-            if (self::is_cjk($t)) {
-                $cjk[] = $t;
-            } else {
-                $latin[] = $t;
-            }
+    private static function brand_piece(array $tokens, $capture) {
+        $branches = self::bounded_branches($tokens, $capture);
+        if ($branches === []) {
+            throw new RuntimeException('SEO brand alternation is empty');
         }
-        return [$latin, $cjk];
+        if (count($branches) === 1) {
+            return $branches[0];
+        }
+        // Branch reset keeps the token text in group 1 for (?!\1).
+        return $capture
+            ? '(?|' . implode('|', $branches) . ')'
+            : '(?:' . implode('|', $branches) . ')';
+    }
+
+    /**
+     * @param string[] $tokens
+     * @param bool $capture
+     * @return string[]
+     */
+    private static function bounded_branches(array $tokens, $capture) {
+        $by = [
+            'latin' => [],
+            'literal' => [],
+            'cyrillic' => [],
+            'arabic' => [],
+        ];
+        foreach ($tokens as $t) {
+            $kind = self::script_kind($t);
+            if (!isset($by[$kind])) {
+                $kind = 'literal';
+            }
+            $by[$kind][] = preg_quote((string) $t, '/');
+        }
+        $branches = [];
+        $add = function ($pre, $post, array $quoted) use (&$branches, $capture) {
+            if ($quoted === []) {
+                return;
+            }
+            $alt = implode('|', $quoted);
+            $inner = $capture ? '(' . $alt . ')' : '(?:' . $alt . ')';
+            $branches[] = $pre . $inner . $post;
+        };
+        $edge = '(?<![A-Za-z0-9])';
+        $end = '(?![A-Za-z0-9])';
+        $add($edge, $end, $by['latin']);
+        // Han/Kana/Hangul/Thai: ASCII edge only, so a glued suffix still matches.
+        $add($edge, $end, $by['literal']);
+        // U+0400–U+04FF is UTF-8 D0 80 .. D3 BF.
+        $add($edge . '(?<![\xD0-\xD3][\x80-\xBF])', '(?![\xD0-\xD3][\x80-\xBF])' . $end, $by['cyrillic']);
+        // U+0600–U+06FF is UTF-8 D8 80 .. DB BF.
+        $add($edge . '(?<![\xD8-\xDB][\x80-\xBF])', '(?![\xD8-\xDB][\x80-\xBF])' . $end, $by['arabic']);
+        return $branches;
     }
 
     private static function unique_ci(array $tokens) {

@@ -7,5 +7,11 @@ return [
         'marsbahis',
         'galabet',
         'matbet',
+        'asyabahis',
+        'belugabahis',
+        'portobahis',
+        'betzula',
+        'betsat',
+        'casibom',
     ],
 ];
