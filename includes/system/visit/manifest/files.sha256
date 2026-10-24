@@ -1,5 +1,5 @@
 # Clean Sweep shipped watchable paths. Extra files not listed are kind A.
-# Generated 2026-10-14T16:30:34+00:00 with hashes
+# Generated 2026-10-24T07:08:44+00:00 with hashes
 92d992fb3c5c011a58828ce6ec17ae6d3e2e1c3a9a4848e46f45bea9bd97c88a  api/ai.php
 9ee6638570dcb73b7f5d6d1b640f2541a2eb7c7c892fff43a43b260e6412354d  api/bootstrap.php
 d16b400ffc58deb31c64d98c731bae65e32c395a4bdd64a3a60b8e0163397e0a  api/cleanup.php
@@ -118,11 +118,17 @@ f64ea8111a30bdfc839a9bfcf9e3b866363c320599bb062e39a586b3fd66bc36  features/secur
 78595056c113a0a34dcc3e0831d265239d6ce466a97363ebbe89cff72f98580f  features/security/scan/workers/IntegrityWorker.php
 b7a67a5b82bbf5275af7e1ee78689bab39c64f3993c0c0456b4592f196bcfe0c  features/security/scan/workers/PackageChecksumWorker.php
 e5586552d524d478947ca68a3482f2f4771fe95d9c04f2d788b4822333062286  features/security/scan/workers/RootConfigWorker.php
-92a76e79878974435bf3c261603a52cd1bc0ff6f4caac37767f1f3b378e30440  features/security/seo-keywords/CleanSweep_SeoKeywordCatalog.php
-c5f00b58631c6778beb3f99456252f70eafed0fdd483344af0f11caf9cacce1d  features/security/seo-keywords/seo-kw-brands-global.php
+50cdab7a16a5cc03ec8d376b13ecb7f75c60f1bdfa7c4cdcd274e4e930630b2f  features/security/seo-keywords/CleanSweep_SeoKeywordCatalog.php
+ec8849fb00d537b4e8474c4bc4952d89dca4122cb4b5e52adb6d49591fe379bc  features/security/seo-keywords/seo-kw-brands-ar.php
+d0187091cf3b25a92e2e088a4d25f40f29e96d80721345943564e1a52b1ca7a7  features/security/seo-keywords/seo-kw-brands-global.php
 b066a141a626f411ff0fcb964d96fa6a4fa63c3f125e156832d21853a67a204b  features/security/seo-keywords/seo-kw-brands-id.php
 1ea265e67d091b352d1c26c28b3a47949b85b2b5270d9e328024bb679559e60e  features/security/seo-keywords/seo-kw-brands-ja.php
-ade46252a96f78ffeee6842fc5c31889807be11c9db685cf629973cd3dcc7f74  features/security/seo-keywords/seo-kw-brands-tr.php
+823610e3013255492bb6f8c2d802dc98d359012b8f6517b413f40eb2915113ef  features/security/seo-keywords/seo-kw-brands-ko.php
+a4ea3569fbedaa4f1ae4c84e46bb2c74d493c2065604193dd8dcc07445111240  features/security/seo-keywords/seo-kw-brands-ru.php
+a77af91dbf16ec43390170b5d589a6a8b52deb3a9090c6fa5b4cebfe57d05bf3  features/security/seo-keywords/seo-kw-brands-th.php
+35dadea17fa155d7b17bf77dbfc7b488463936e3e6a67bb04c9642ce55c11845  features/security/seo-keywords/seo-kw-brands-tr.php
+53264334e39effb8d6d42b3ce6290811d182ae0b7919f60ec4a48dec25550f41  features/security/seo-keywords/seo-kw-brands-vi.php
+e26007bb68a28b8ffeb4cb846147ef550246b33626dab22f6046d0471169f024  features/security/seo-keywords/seo-kw-brands-zh.php
 dcdd474801d2f91e057f225080f6897078871ebf1915d6b9ee16fc41b18d0765  features/security/seo-keywords/seo-kw-core.php
 3feab0c6ea91a247b51c327fe81ef7410d8f65015b07218f2b18804a2f2bdc54  features/security/signatures.php
 6572eb1242442ad9f23fb1fd4fe6ace79d9dfffc5c12d28720ac6ccd5a2d4bc2  features/security/signatures/SignatureCrypto.php
