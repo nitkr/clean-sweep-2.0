@@ -1,5 +1,5 @@
 # Clean Sweep shipped watchable paths. Extra files not listed are kind A.
-# Generated 2026-10-25T05:57:59+00:00 with hashes
+# Generated 2026-10-25T09:42:01+00:00 with hashes
 92d992fb3c5c011a58828ce6ec17ae6d3e2e1c3a9a4848e46f45bea9bd97c88a  api/ai.php
 9ee6638570dcb73b7f5d6d1b640f2541a2eb7c7c892fff43a43b260e6412354d  api/bootstrap.php
 d16b400ffc58deb31c64d98c731bae65e32c395a4bdd64a3a60b8e0163397e0a  api/cleanup.php
@@ -24,7 +24,7 @@ f6b3cbcc0284fc454478b9c3763a8038ac28f1433e5be68504e07ea9d70facca  bin/test-db-ro
 05267ce2f7a4b09ca5732b4ee814ab0f085f60fc94a1ebb34fc7a3b1e53de493  bin/test-drain-slice.php
 3458570a85fe530cb2a351412d94983c1ac7bee50e36631c8dbd2df245fe39e0  bin/test-file-threat-carry.php
 0bdce795b24a164f8560269bdfb092b5aef1c45e40a01f8188817284418210f0  bin/test-php-media-disguise.php
-bd3c97a25c1dc1335cddf350db07d3402f7fcdc93c05f7cc7dd9ac3b797a3f48  bin/test-plugin-identity.php
+2c2c9d6b2b4c35a512f7d887ddf0b77a279712a363a2a54a56ce970f54881582  bin/test-plugin-identity.php
 9c76b8bc4b1c7ad1dded8b926b2bd78c5b6d36084f0c0b1128be80dda5ca4a9f  bin/test-scan-js-scope.php
 900cac29a396fa5c85ce1fd82e9caecf034138aeaa75f6bce2372e203b0fbcc6  bin/test-upload-fixtures.php
 a5a532c63c9939b2499531ce577b54ab0ef3ce44f02cd72851641382ba039894  bin/test-wpmudev-multisite-active.php
@@ -64,8 +64,8 @@ b38715a591fe06f6dca1f9754a84cddab61ebf54aeb5ee30d1c82e463451a399  features/ai/Ai
 2896f55902648bf2dde5ebd7eea1758eea52ab9ba25e1f020da812b2766b78c5  features/ai/load.php
 50a8197c73f6d66a34cebd490cac1e84dc91cc672aac3e443f446fa69300ca14  features/maintenance/core-reinstall.php
 4dddbbe4dce68bcfc794b9c334be091c97d886a9a4aeea3fb49b4d98c003e044  features/maintenance/lib/BackupManager.php
-7b01e39e821327d0bd9b7e1c593b59e165eb2de4fa31f6e546ee8b8f913ff0b7  features/maintenance/lib/PackageIdentity.php
-e41862ffff6609c437272ebd4eb6bc6f606bd2448a90ced309e427238d8f89aa  features/maintenance/lib/PluginAnalyzer.php
+16597a8ab1757fc54137427f5e9754098cd9306c8c0a0b3f65c5f9ae86df084c  features/maintenance/lib/PackageIdentity.php
+859d634afce4057f1bbe5322fd685b87c61aaaa7ae25bfffb6d4f8bfff6a2d36  features/maintenance/lib/PluginAnalyzer.php
 fd8eba1fb4f0cf8afe1ec91753e2e5514790514e0acf7cb4956b6f05a0f85ff9  features/maintenance/lib/PluginReinstallationManager.php
 300563e7279dd34f67347065aad27fc033f55643099868a44b13ef0d95f14c34  features/maintenance/lib/PluginReinstaller.php
 c0d5041d0050fafdfc76733e699e68c1d7260daca52effa46287218f330e542a  features/maintenance/lib/SuspiciousItemAnalyzer.php

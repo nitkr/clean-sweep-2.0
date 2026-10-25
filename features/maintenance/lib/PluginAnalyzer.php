@@ -275,6 +275,9 @@ class CleanSweep_PluginAnalyzer {
         $closed_named = is_array($wp_org_info)
             && !empty($wp_org_info['closed'])
             && trim((string) ($wp_org_info['name'] ?? '')) !== '';
+        $closed_name_match = $closed_named
+            && class_exists('CleanSweep_PackageIdentity', false)
+            && CleanSweep_PackageIdentity::is_closed_name_match($wp_org_info, (string) ($plugin_data['Name'] ?? ''));
         if ($has_listing || $closed_named) {
             $identity_ctx['org_info'] = $wp_org_info;
             $id = $this->identity_verdict($identity_ctx);
@@ -296,10 +299,14 @@ class CleanSweep_PluginAnalyzer {
             }
         }
 
-        $identity_ctx['org_info'] = [];
-        $id = $this->identity_verdict($identity_ctx);
-        if ($id) {
-            return $id;
+        // A matching closed listing stays non-repository. Clearing the
+        // directory payload would score it again as an unknown plugin.
+        if (!$closed_name_match) {
+            $identity_ctx['org_info'] = [];
+            $id = $this->identity_verdict($identity_ctx);
+            if ($id) {
+                return $id;
+            }
         }
 
         // Non-repository plugin
