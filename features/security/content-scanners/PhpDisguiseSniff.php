@@ -92,6 +92,7 @@ class CleanSweep_PhpDisguiseSniff {
      * @param string $ext
      * @param string $head
      * @return bool True when the claimed type has known magic and $head does not match.
+     *              jpg/jpeg/png/gif/webp/bmp/ico accept any of those image headers.
      */
     public static function magic_mismatch($ext, $head) {
         $ext = strtolower((string) $ext);
@@ -103,17 +104,12 @@ class CleanSweep_PhpDisguiseSniff {
         switch ($ext) {
             case 'jpg':
             case 'jpeg':
-                return strncmp($head, "\xFF\xD8", 2) !== 0;
             case 'png':
-                return strncmp($head, "\x89PNG\r\n\x1a\n", 8) !== 0;
             case 'gif':
-                return strncmp($head, 'GIF87a', 6) !== 0 && strncmp($head, 'GIF89a', 6) !== 0;
             case 'webp':
-                return strncmp($head, 'RIFF', 4) !== 0 || substr($head, 8, 4) !== 'WEBP';
             case 'bmp':
-                return strncmp($head, 'BM', 2) !== 0;
             case 'ico':
-                return strncmp($head, "\x00\x00\x01\x00", 4) !== 0 && strncmp($head, "\x00\x00\x02\x00", 4) !== 0;
+                return !self::is_known_image_head($head);
             case 'tif':
             case 'tiff':
                 return strncmp($head, "II*\x00", 4) !== 0 && strncmp($head, "MM\x00*", 4) !== 0;
@@ -143,6 +139,35 @@ class CleanSweep_PhpDisguiseSniff {
             default:
                 return false;
         }
+    }
+
+    /**
+     * JPEG, PNG, GIF, WebP, BMP, or ICO. A different image type under one of
+     * those extensions is still an image. SVG is not included.
+     *
+     * @param string $head
+     * @return bool
+     */
+    private static function is_known_image_head($head) {
+        if (strncmp($head, "\xFF\xD8", 2) === 0) {
+            return true;
+        }
+        if (strncmp($head, "\x89PNG\r\n\x1a\n", 8) === 0) {
+            return true;
+        }
+        if (strncmp($head, 'GIF87a', 6) === 0 || strncmp($head, 'GIF89a', 6) === 0) {
+            return true;
+        }
+        if (strncmp($head, 'RIFF', 4) === 0 && substr($head, 8, 4) === 'WEBP') {
+            return true;
+        }
+        if (strncmp($head, 'BM', 2) === 0) {
+            return true;
+        }
+        if (strncmp($head, "\x00\x00\x01\x00", 4) === 0 || strncmp($head, "\x00\x00\x02\x00", 4) === 0) {
+            return true;
+        }
+        return false;
     }
 
     private static function read_window($path, $offset, $length) {
