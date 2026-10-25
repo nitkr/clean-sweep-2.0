@@ -68,6 +68,30 @@ function clean_sweep_wporg_author_display($author) {
 }
 
 /**
+ * Closed WordPress.org plugin (HTTP 404, error closed). Name and slug only.
+ * closed_date is not a version. "Plugin not found." is not closed.
+ *
+ * @param mixed $code
+ * @param mixed $body
+ * @param string $slug
+ * @return array{name:string,slug:string,closed:bool}|null
+ */
+function clean_sweep_wporg_closed_plugin_info($code, $body, $slug) {
+    if ((int) $code !== 404 || !is_array($body)) {
+        return null;
+    }
+    if (($body['error'] ?? '') !== 'closed' || empty($body['name'])) {
+        return null;
+    }
+    $listed_slug = (string) ($body['slug'] ?? '');
+    return [
+        'name' => (string) $body['name'],
+        'slug' => $listed_slug !== '' ? $listed_slug : (string) $slug,
+        'closed' => true,
+    ];
+}
+
+/**
  * Fetch additional plugin information from WordPress.org API
  */
 function clean_sweep_fetch_plugin_info($slug) {
@@ -78,7 +102,8 @@ function clean_sweep_fetch_plugin_info($slug) {
 
     // Cache WordPress.org lookups — analyze_plugins used to hit the network
     // once per plugin on every run (slow log: curl_exec in bootstrap → plugins).
-    $cache_key = 'cs_wporg_plugin_v2_' . $slug;
+    // v3 drops the v2 negative cache, which stored [] for closed 404s.
+    $cache_key = 'cs_wporg_plugin_v3_' . $slug;
     if (function_exists('get_transient')) {
         $cached = get_transient($cache_key);
         if (is_array($cached)) {
@@ -96,7 +121,24 @@ function clean_sweep_fetch_plugin_info($slug) {
             'redirection' => 2,
         ]);
 
-        if (is_wp_error($response) || wp_remote_retrieve_response_code($response) !== 200) {
+        if (is_wp_error($response)) {
+            if (function_exists('set_transient')) {
+                set_transient($cache_key, [], 15 * MINUTE_IN_SECONDS);
+            }
+            return [];
+        }
+
+        $code = (int) wp_remote_retrieve_response_code($response);
+        $data = json_decode((string) wp_remote_retrieve_body($response), true);
+        $closed = clean_sweep_wporg_closed_plugin_info($code, $data, $slug);
+        if (is_array($closed)) {
+            if (function_exists('set_transient')) {
+                set_transient($cache_key, $closed, 12 * HOUR_IN_SECONDS);
+            }
+            return $closed;
+        }
+
+        if ($code !== 200) {
             // Negative-cache brief miss so one slow plugin doesn't retry every request
             if (function_exists('set_transient')) {
                 set_transient($cache_key, [], 15 * MINUTE_IN_SECONDS);
@@ -104,8 +146,7 @@ function clean_sweep_fetch_plugin_info($slug) {
             return [];
         }
 
-        $data = @json_decode(wp_remote_retrieve_body($response), true);
-        if (!$data) {
+        if (!$data || !is_array($data)) {
             return [];
         }
 

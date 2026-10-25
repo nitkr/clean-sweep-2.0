@@ -65,7 +65,10 @@ final class CleanSweep_PackageIdentity {
         $author_uri = (string) ($ctx['author_uri'] ?? '');
         $dir = (string) ($ctx['dir'] ?? '');
         $org = is_array($ctx['org_info'] ?? null) ? $ctx['org_info'] : [];
-        $org_on_directory = !empty($org['version']);
+        // A closed listing has a name and no version. That name still identifies
+        // the slug. A missing version is not an unpublished release.
+        $org_on_directory = !empty($org['version'])
+            || (!empty($org['closed']) && trim((string) ($org['name'] ?? '')) !== '');
 
         $tree = self::tree_stats($dir, $ctx['single_file'] ?? null);
         $empty = [

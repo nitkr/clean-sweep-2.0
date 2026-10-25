@@ -722,7 +722,8 @@ final class CleanSweep_PackageChecksums {
             'theme_uri' => $theme_uri,
             'dir' => $dir,
             'single_file' => $pkg['single_file'] ?? null,
-            'org_info' => (!empty($org) && !empty($org['version'])) ? $org : [],
+            'org_info' => (is_array($org) && (!empty($org['version'])
+                || (!empty($org['closed']) && trim((string) ($org['name'] ?? '')) !== ''))) ? $org : [],
             'checksum_status' => $type === 'theme' ? 'n/a' : 'unavailable',
             'checksum_outcome' => $type === 'theme' ? 'n/a' : 'unverifiable',
         ]);
