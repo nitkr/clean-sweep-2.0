@@ -564,32 +564,36 @@ class CleanSweep_PluginReinstaller {
                 ]);
             }
 
-            $act = function_exists('clean_sweep_plugin_activation_state')
-                ? clean_sweep_plugin_activation_state($plugin_file)
-                : [
-                    'blog' => function_exists('is_plugin_active') && is_plugin_active($plugin_file),
-                    'network' => is_multisite() && function_exists('is_plugin_active_for_network')
-                        && is_plugin_active_for_network($plugin_file),
-                ];
-            $is_active_blog = !empty($act['blog']);
-            $is_active_network = !empty($act['network']);
-            $should_reactivate = $is_active_blog || $is_active_network;
-
-            if ($is_active_network) {
-                if (is_multisite() && function_exists('deactivate_plugins')) {
-                    deactivate_plugins($plugin_file, true, true);
-                } elseif (function_exists('clean_sweep_set_network_plugin_active')) {
-                    clean_sweep_set_network_plugin_active($plugin_file, false);
-                }
-            } elseif ($is_active_blog && function_exists('deactivate_plugins')) {
-                deactivate_plugins($plugin_file, true, false);
+            $activation_state = function_exists('clean_sweep_suspend_plugin_for_replace')
+                ? clean_sweep_suspend_plugin_for_replace($plugin_file)
+                : ['plugin' => $plugin_file, 'blog' => false, 'network' => false];
+            if (!empty($activation_state['plugin'])) {
+                $plugin_file = $activation_state['plugin'];
             }
+            $should_reactivate = !empty($activation_state['blog']) || !empty($activation_state['network']);
 
-            if (!WPMUDEV_Dashboard::$upgrader->delete_plugin($pid, true)) {
+            if (function_exists('clean_sweep_begin_wpmudev_file_mods')) {
+                clean_sweep_begin_wpmudev_file_mods();
+            }
+            try {
+                $deleted = WPMUDEV_Dashboard::$upgrader->delete_plugin($pid, true);
+            } finally {
+                if (function_exists('clean_sweep_end_wpmudev_file_mods')) {
+                    clean_sweep_end_wpmudev_file_mods();
+                }
+            }
+            if (!$deleted) {
+                $delete_status = function_exists('clean_sweep_wpmudev_delete_failure_status')
+                    ? clean_sweep_wpmudev_delete_failure_status()
+                    : 'Delete failed';
+                $plugin_main = rtrim(WP_PLUGIN_DIR, '/') . '/' . ltrim($plugin_file, '/');
+                if (is_file($plugin_main) && function_exists('clean_sweep_resume_plugin_after_replace')) {
+                    clean_sweep_resume_plugin_after_replace($activation_state);
+                }
                 $results['failed'][] = [
                     'name' => $plugin_name,
                     'slug' => $plugin_file,
-                    'status' => 'Delete failed'
+                    'status' => $delete_status
                 ];
                 continue;
             }
@@ -634,21 +638,9 @@ class CleanSweep_PluginReinstaller {
                 ];
 
                 if ($should_reactivate) {
-                    if ($is_active_network) {
-                        if (is_multisite()) {
-                            $reactivation_result = activate_plugin($plugin_file, '', true, true);
-                        } elseif (function_exists('clean_sweep_set_network_plugin_active')) {
-                            $reactivation_result = clean_sweep_set_network_plugin_active($plugin_file, true)
-                                ? true
-                                : new WP_Error('network_activate', 'Could not write network-active plugin list');
-                        } else {
-                            $reactivation_result = activate_plugin($plugin_file, '', false, true);
-                        }
-                    } else {
-                        $reactivation_result = activate_plugin($plugin_file, '', false, true);
-                    }
-
-                    if (is_wp_error($reactivation_result)) {
+                    $reactivation_result = function_exists('clean_sweep_resume_plugin_after_replace')
+                        && clean_sweep_resume_plugin_after_replace($activation_state);
+                    if (!$reactivation_result) {
                         $entry['status'] .= ' - Reactivation failed';
                     } else {
                         $entry['status'] .= ' - Reactivated';
@@ -960,50 +952,6 @@ class CleanSweep_PluginReinstaller {
             'info'
         );
 
-        $act = function_exists('clean_sweep_plugin_activation_state')
-            ? clean_sweep_plugin_activation_state($plugin_file)
-            : [
-                'blog' => function_exists('is_plugin_active') && is_plugin_active($plugin_file),
-                'network' => is_multisite() && function_exists('is_plugin_active_for_network')
-                    && is_plugin_active_for_network($plugin_file),
-            ];
-        $is_active_blog = !empty($act['blog']);
-        $is_active_network = !empty($act['network']);
-        // Also treat slug-only active list entries as active when possible
-        if (!$is_active_blog && !$is_active_network) {
-            $slug = $this->extract_slug_from_plugin_file($plugin_file);
-            if ($slug && $slug !== $plugin_file) {
-                $active = function_exists('clean_sweep_get_blog_active_plugins')
-                    ? clean_sweep_get_blog_active_plugins()
-                    : (array) get_option('active_plugins', []);
-                $network = function_exists('clean_sweep_get_network_active_plugins')
-                    ? clean_sweep_get_network_active_plugins()
-                    : [];
-                foreach (array_merge($active, $network) as $active_file) {
-                    if (strpos((string) $active_file, $slug . '/') === 0 || (string) $active_file === $slug) {
-                        $plugin_file = (string) $active_file;
-                        if (in_array($plugin_file, $network, true)) {
-                            $is_active_network = true;
-                        } else {
-                            $is_active_blog = true;
-                        }
-                        break;
-                    }
-                }
-            }
-        }
-        $should_reactivate = $is_active_blog || $is_active_network;
-
-        if ($is_active_network) {
-            if (is_multisite() && function_exists('deactivate_plugins')) {
-                deactivate_plugins($plugin_file, true, true);
-            } elseif (function_exists('clean_sweep_set_network_plugin_active')) {
-                clean_sweep_set_network_plugin_active($plugin_file, false);
-            }
-        } elseif ($is_active_blog && function_exists('deactivate_plugins')) {
-            deactivate_plugins($plugin_file, true, false);
-        }
-
         if (!isset(WPMUDEV_Dashboard::$upgrader) || !method_exists(WPMUDEV_Dashboard::$upgrader, 'delete_plugin')) {
             return [
                 'success' => false,
@@ -1015,14 +963,37 @@ class CleanSweep_PluginReinstaller {
             ];
         }
 
-        $delete_result = WPMUDEV_Dashboard::$upgrader->delete_plugin($pid, true);
+        $activation_state = function_exists('clean_sweep_suspend_plugin_for_replace')
+            ? clean_sweep_suspend_plugin_for_replace($plugin_file)
+            : ['plugin' => $plugin_file, 'blog' => false, 'network' => false];
+        if (!empty($activation_state['plugin'])) {
+            $plugin_file = $activation_state['plugin'];
+        }
+        $should_reactivate = !empty($activation_state['blog']) || !empty($activation_state['network']);
+
+        if (function_exists('clean_sweep_begin_wpmudev_file_mods')) {
+            clean_sweep_begin_wpmudev_file_mods();
+        }
+        try {
+            $delete_result = WPMUDEV_Dashboard::$upgrader->delete_plugin($pid, true);
+        } finally {
+            if (function_exists('clean_sweep_end_wpmudev_file_mods')) {
+                clean_sweep_end_wpmudev_file_mods();
+            }
+        }
         if (!$delete_result) {
+            $plugin_main = rtrim(WP_PLUGIN_DIR, '/') . '/' . ltrim($plugin_file, '/');
+            if (is_file($plugin_main) && function_exists('clean_sweep_resume_plugin_after_replace')) {
+                clean_sweep_resume_plugin_after_replace($activation_state);
+            }
             return [
                 'success' => false,
                 'entry' => [
                     'name' => $plugin_name,
                     'slug' => $plugin_file,
-                    'status' => 'Delete failed'
+                    'status' => function_exists('clean_sweep_wpmudev_delete_failure_status')
+                        ? clean_sweep_wpmudev_delete_failure_status()
+                        : 'Delete failed'
                 ]
             ];
         }
@@ -1086,6 +1057,9 @@ class CleanSweep_PluginReinstaller {
         @unlink($temp_file);
 
         if (is_wp_error($result)) {
+            if ($should_reactivate) {
+                clean_sweep_log_message("Left {$plugin_name} inactive because the old copy was removed and the new copy did not extract", 'warning');
+            }
             return [
                 'success' => false,
                 'entry' => [
@@ -1104,6 +1078,7 @@ class CleanSweep_PluginReinstaller {
                 $refreshed = (array) WPMUDEV_Dashboard::$site->get_cached_projects();
                 if (!empty($refreshed[$pid]['filename'])) {
                     $plugin_file = str_replace('\\', '/', (string) $refreshed[$pid]['filename']);
+                    $activation_state['plugin'] = $plugin_file;
                 }
             } catch (Throwable $e) {
                 // non-fatal
@@ -1116,22 +1091,10 @@ class CleanSweep_PluginReinstaller {
             'status' => 'Re-installed successfully (WPMU DEV)'
         ];
 
-        if ($should_reactivate && function_exists('activate_plugin')) {
-            if ($is_active_network) {
-                if (is_multisite()) {
-                    $reactivation_result = activate_plugin($plugin_file, '', true, true);
-                } elseif (function_exists('clean_sweep_set_network_plugin_active')) {
-                    $reactivation_result = clean_sweep_set_network_plugin_active($plugin_file, true)
-                        ? true
-                        : new WP_Error('network_activate', 'Could not write network-active plugin list');
-                } else {
-                    $reactivation_result = activate_plugin($plugin_file, '', false, true);
-                }
-            } else {
-                $reactivation_result = activate_plugin($plugin_file, '', false, true);
-            }
-
-            if (is_wp_error($reactivation_result)) {
+        if ($should_reactivate) {
+            $reactivation_result = function_exists('clean_sweep_resume_plugin_after_replace')
+                && clean_sweep_resume_plugin_after_replace($activation_state);
+            if (!$reactivation_result) {
                 $entry['status'] .= ' - Reactivation failed';
             } else {
                 $entry['status'] .= ' - Reactivated';

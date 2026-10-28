@@ -231,6 +231,7 @@
   {/if}
   
   <!-- WPMU DEV Selection Controls -->
+  {#if $plugins.wpmuDevPlugins.length > 0}
   <div class="flex items-center justify-between mb-4">
     <div class="flex items-center gap-2">
       <button 
@@ -247,6 +248,7 @@
       </button>
     </div>
   </div>
+  {/if}
   
   <!-- WPMU DEV Plugins Table -->
   {#if $plugins.wpmuDevPlugins.length > 0}

@@ -55,8 +55,11 @@ function clean_sweep_plugin_is_active_in_lists(string $plugin, array $blog, arra
  *
  * @return string[]
  */
-function clean_sweep_get_blog_active_plugins(): array {
+function clean_sweep_get_blog_active_plugins(bool $refresh = false): array {
     static $cache = null;
+    if ($refresh) {
+        $cache = null;
+    }
     if ($cache !== null) {
         return $cache;
     }
@@ -75,8 +78,11 @@ function clean_sweep_get_blog_active_plugins(): array {
  *
  * @return string[]
  */
-function clean_sweep_get_network_active_plugins(): array {
+function clean_sweep_get_network_active_plugins(bool $refresh = false): array {
     static $cache = null;
+    if ($refresh) {
+        $cache = null;
+    }
     if ($cache !== null) {
         return $cache;
     }
@@ -142,19 +148,208 @@ function clean_sweep_set_network_plugin_active($plugin, $active) {
     }
     $stored = maybe_serialize($list);
     if ($raw === null) {
-        return $wpdb->insert($table, [
+        $updated = $wpdb->insert($table, [
             'site_id' => 1,
             'meta_key' => 'active_sitewide_plugins',
             'meta_value' => $stored,
         ], ['%d', '%s', '%s']) !== false;
+    } else {
+        $updated = $wpdb->update(
+            $table,
+            ['meta_value' => $stored],
+            ['meta_key' => 'active_sitewide_plugins'],
+            ['%s'],
+            ['%s']
+        ) !== false;
     }
-    return $wpdb->update(
-        $table,
-        ['meta_value' => $stored],
-        ['meta_key' => 'active_sitewide_plugins'],
-        ['%s'],
-        ['%s']
-    ) !== false;
+    clean_sweep_flush_plugin_active_runtime_cache();
+    return $updated;
+}
+
+/**
+ * Drop cached active-plugin lists so the next read sees the database write.
+ * Progress polls are separate requests; they load plugins from active_plugins.
+ */
+function clean_sweep_flush_plugin_active_runtime_cache(): void {
+    clean_sweep_get_blog_active_plugins(true);
+    clean_sweep_get_network_active_plugins(true);
+    if (!function_exists('wp_cache_delete')) {
+        return;
+    }
+    wp_cache_delete('active_plugins', 'options');
+    wp_cache_delete('alloptions', 'options');
+    wp_cache_delete('active_sitewide_plugins', 'site-options');
+    wp_cache_delete('1:active_sitewide_plugins', 'site-options');
+    $network_id = function_exists('get_current_network_id') ? (int) get_current_network_id() : 1;
+    if ($network_id > 0) {
+        wp_cache_delete($network_id . ':active_sitewide_plugins', 'site-options');
+    }
+}
+
+/**
+ * Add or remove a plugin from the blog active_plugins option.
+ * Uses update_option() so a persistent object cache does not keep the old list.
+ */
+function clean_sweep_set_blog_plugin_active(string $plugin, bool $active): bool {
+    global $wpdb;
+    if (!$wpdb || $plugin === '') {
+        return false;
+    }
+
+    $option_value = $wpdb->get_var("SELECT option_value FROM {$wpdb->options} WHERE option_name = 'active_plugins' LIMIT 1");
+    $list = maybe_unserialize($option_value);
+    if (!is_array($list)) {
+        $list = [];
+    }
+    $list = array_values(array_filter($list, static function ($item) {
+        return is_string($item) && $item !== '';
+    }));
+
+    $has = in_array($plugin, $list, true);
+    if ($active && !$has) {
+        $list[] = $plugin;
+    } elseif (!$active && $has) {
+        $list = array_values(array_filter($list, static function ($item) use ($plugin) {
+            return $item !== $plugin;
+        }));
+    } else {
+        clean_sweep_flush_plugin_active_runtime_cache();
+        return true;
+    }
+
+    $ok = function_exists('update_option')
+        ? update_option('active_plugins', $list)
+        : ($wpdb->update(
+            $wpdb->options,
+            ['option_value' => maybe_serialize($list)],
+            ['option_name' => 'active_plugins'],
+            ['%s'],
+            ['%s']
+        ) !== false);
+    clean_sweep_flush_plugin_active_runtime_cache();
+    return (bool) $ok;
+}
+
+/**
+ * Resolve the active-list key for a plugin file, including a same-directory match.
+ *
+ * @return array{plugin: string, blog: bool, network: bool}
+ */
+function clean_sweep_plugin_replace_state(string $plugin_file): array {
+    $plugin_file = str_replace('\\', '/', $plugin_file);
+    $state = clean_sweep_plugin_activation_state($plugin_file);
+    $state['plugin'] = $plugin_file;
+    if ($state['blog'] || $state['network']) {
+        return $state;
+    }
+
+    $slug = dirname($plugin_file);
+    if ($slug === '.' || $slug === '') {
+        return $state;
+    }
+
+    foreach (clean_sweep_get_blog_active_plugins() as $active_file) {
+        if (strpos((string) $active_file, $slug . '/') === 0) {
+            $state['plugin'] = (string) $active_file;
+            $state['blog'] = true;
+            break;
+        }
+    }
+    foreach (clean_sweep_get_network_active_plugins() as $active_file) {
+        if ((string) $active_file === $state['plugin'] || strpos((string) $active_file, $slug . '/') === 0) {
+            $state['plugin'] = (string) $active_file;
+            $state['network'] = true;
+            break;
+        }
+    }
+    return $state;
+}
+
+/**
+ * Remove a plugin from the live active lists before its directory is deleted.
+ * Other requests boot WordPress and include whatever is still active.
+ *
+ * @return array{plugin: string, blog: bool, network: bool}
+ */
+function clean_sweep_suspend_plugin_for_replace(string $plugin_file): array {
+    $state = clean_sweep_plugin_replace_state($plugin_file);
+    $plugin = $state['plugin'];
+    if ($state['blog'] && !clean_sweep_set_blog_plugin_active($plugin, false)) {
+        clean_sweep_log_message("Could not remove {$plugin} from active_plugins before replace", 'warning');
+    }
+    if ($state['network'] && !clean_sweep_set_network_plugin_active($plugin, false)) {
+        clean_sweep_log_message("Could not remove {$plugin} from active_sitewide_plugins before replace", 'warning');
+    }
+    if ($state['blog'] || $state['network']) {
+        clean_sweep_log_message("Paused {$plugin} in the active plugin list before replacing its files", 'info');
+    }
+    return $state;
+}
+
+/**
+ * Put a plugin back on the lists it was removed from. Does not run activation hooks.
+ *
+ * @param array{plugin?: string, blog?: bool, network?: bool} $state
+ */
+function clean_sweep_resume_plugin_after_replace(array $state): bool {
+    $plugin = isset($state['plugin']) ? (string) $state['plugin'] : '';
+    if ($plugin === '' || (empty($state['blog']) && empty($state['network']))) {
+        return true;
+    }
+    $ok = true;
+    if (!empty($state['blog']) && !clean_sweep_set_blog_plugin_active($plugin, true)) {
+        $ok = false;
+    }
+    if (!empty($state['network']) && !clean_sweep_set_network_plugin_active($plugin, true)) {
+        $ok = false;
+    }
+    clean_sweep_log_message(
+        $ok
+            ? "Restored {$plugin} to the active plugin list"
+            : "Could not restore {$plugin} to the active plugin list",
+        $ok ? 'info' : 'warning'
+    );
+    return $ok;
+}
+
+/**
+ * Dashboard 5.0.3 refuses install, update, and delete while DISALLOW_FILE_MODS is set.
+ * Allow only that check, and only while a WPMU DEV reinstall is calling the upgrader.
+ */
+function clean_sweep_allow_wpmudev_file_mods_for_reinstall($allow, $context) {
+    if ($context === 'wpmudev_dashboard_can_modify_files') {
+        return true;
+    }
+    return $allow;
+}
+
+function clean_sweep_begin_wpmudev_file_mods(): void {
+    add_filter('file_mod_allowed', 'clean_sweep_allow_wpmudev_file_mods_for_reinstall', 10, 2);
+}
+
+function clean_sweep_end_wpmudev_file_mods(): void {
+    remove_filter('file_mod_allowed', 'clean_sweep_allow_wpmudev_file_mods_for_reinstall', 10);
+}
+
+/**
+ * Status text for a failed Dashboard delete, including the upgrader error code.
+ */
+function clean_sweep_wpmudev_delete_failure_status(): string {
+    $status = 'Delete failed';
+    if (!isset(WPMUDEV_Dashboard::$upgrader) || !method_exists(WPMUDEV_Dashboard::$upgrader, 'get_error')) {
+        return $status;
+    }
+    $error = WPMUDEV_Dashboard::$upgrader->get_error();
+    if (!is_array($error)) {
+        return $status;
+    }
+    $code = trim((string) ($error['code'] ?? ''));
+    $message = trim((string) ($error['message'] ?? ''));
+    $detail = trim($code . ' ' . $message);
+    if ($detail === '') {
+        return $status;
+    }
+    return 'Delete failed (' . $detail . ')';
 }
 
 /**
