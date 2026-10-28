@@ -268,31 +268,45 @@ class CleanSweep_PluginAnalyzer {
             'checksum_outcome' => is_array($checksum_row) ? ($checksum_row['outcome'] ?? null) : null,
         ];
 
-        // Check if this is a WordPress.org plugin
+        // Check if this is a WordPress.org plugin. A closed listing has a name
+        // and no version, so it can be impersonated but cannot be reinstalled.
         $wp_org_info = clean_sweep_fetch_plugin_info($slug);
-        if (!empty($wp_org_info) && isset($wp_org_info['version'])) {
+        $has_listing = is_array($wp_org_info) && isset($wp_org_info['version']);
+        $closed_named = is_array($wp_org_info)
+            && !empty($wp_org_info['closed'])
+            && trim((string) ($wp_org_info['name'] ?? '')) !== '';
+        $closed_name_match = $closed_named
+            && class_exists('CleanSweep_PackageIdentity', false)
+            && CleanSweep_PackageIdentity::is_closed_name_match($wp_org_info, (string) ($plugin_data['Name'] ?? ''));
+        if ($has_listing || $closed_named) {
             $identity_ctx['org_info'] = $wp_org_info;
             $id = $this->identity_verdict($identity_ctx);
             if ($id) {
                 return $id;
             }
-            $data = [
-                'name' => $plugin_data['Name'],
-                'version' => $plugin_data['Version'],
-                'slug' => $slug,
-                'plugin_file' => $plugin_file,
-                'last_updated' => $wp_org_info['last_updated'] ?? null,
-                'plugin_url' => $wp_org_info['homepage'] ?? "https://wordpress.org/plugins/{$slug}/",
-            ];
+            if ($has_listing) {
+                $data = [
+                    'name' => $plugin_data['Name'],
+                    'version' => $plugin_data['Version'],
+                    'slug' => $slug,
+                    'plugin_file' => $plugin_file,
+                    'last_updated' => $wp_org_info['last_updated'] ?? null,
+                    'plugin_url' => $wp_org_info['homepage'] ?? "https://wordpress.org/plugins/{$slug}/",
+                ];
 
-            clean_sweep_log_message("Scheduled {$plugin_data['Name']} for WordPress.org reinstallation", 'info');
-            return ['type' => 'wordpress_org', 'data' => $data];
+                clean_sweep_log_message("Scheduled {$plugin_data['Name']} for WordPress.org reinstallation", 'info');
+                return ['type' => 'wordpress_org', 'data' => $data];
+            }
         }
 
-        $identity_ctx['org_info'] = [];
-        $id = $this->identity_verdict($identity_ctx);
-        if ($id) {
-            return $id;
+        // A matching closed listing stays non-repository. Clearing the
+        // directory payload would score it again as an unknown plugin.
+        if (!$closed_name_match) {
+            $identity_ctx['org_info'] = [];
+            $id = $this->identity_verdict($identity_ctx);
+            if ($id) {
+                return $id;
+            }
         }
 
         // Non-repository plugin
