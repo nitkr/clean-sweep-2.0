@@ -478,6 +478,23 @@ function clean_sweep_install_uploaded_package($zip_path, $kind, $opts = []) {
         $upgrader = new Plugin_Upgrader($skin);
     }
 
+    // Overwrite deletes the existing directory while progress polls still boot WordPress.
+    $activation_state = ['plugin' => '', 'blog' => false, 'network' => false];
+    if ($kind === 'plugin') {
+        if (!function_exists('clean_sweep_suspend_plugin_for_replace')) {
+            $utils = dirname(__DIR__) . '/maintenance/lib/WpmuDevUtils.php';
+            if (is_readable($utils)) {
+                require_once $utils;
+            }
+        }
+        if (function_exists('clean_sweep_suspend_plugin_for_replace')) {
+            $guess = $preview_slug !== ''
+                ? $preview_slug . '/' . $preview_slug . '.php'
+                : $filename;
+            $activation_state = clean_sweep_suspend_plugin_for_replace($guess);
+        }
+    }
+
     $result = $upgrader->install($zip_path);
 
     if (function_exists('remove_filter')) {
@@ -487,6 +504,7 @@ function clean_sweep_install_uploaded_package($zip_path, $kind, $opts = []) {
     if (is_object($result) && method_exists($result, 'get_error_message')) {
         $error_msg = (string) $result->get_error_message();
         clean_sweep_install_log('Package install failed for ' . $filename . ': ' . $error_msg, 'error');
+        clean_sweep_install_finish_plugin_activation($activation_state);
         return [
             'success' => false,
             'code' => 'INSTALL_ERROR',
@@ -496,6 +514,7 @@ function clean_sweep_install_uploaded_package($zip_path, $kind, $opts = []) {
     }
     if ($result !== true) {
         clean_sweep_install_log('Package install result unclear for ' . $filename, 'warning');
+        clean_sweep_install_finish_plugin_activation($activation_state);
         return [
             'success' => false,
             'code' => 'INSTALL_ERROR',
@@ -514,6 +533,7 @@ function clean_sweep_install_uploaded_package($zip_path, $kind, $opts = []) {
     if ($dest_abs !== '' && function_exists('clean_sweep_upload_dest_toolkit_collision')) {
         $hit = clean_sweep_upload_dest_toolkit_collision($dest_abs, '');
         if (!empty($hit['hit'])) {
+            clean_sweep_install_finish_plugin_activation($activation_state);
             return [
                 'success' => false,
                 'code' => 'DEST_TOOLKIT',
@@ -524,6 +544,7 @@ function clean_sweep_install_uploaded_package($zip_path, $kind, $opts = []) {
         }
         $hit_name = clean_sweep_upload_dest_toolkit_collision($root['abs'], $dest_name);
         if (!empty($hit_name['hit'])) {
+            clean_sweep_install_finish_plugin_activation($activation_state);
             return [
                 'success' => false,
                 'code' => 'DEST_TOOLKIT',
@@ -639,6 +660,9 @@ function clean_sweep_install_uploaded_package($zip_path, $kind, $opts = []) {
 
     $notify($msg);
 
+    $resume_file = is_string($plugin_file) && $plugin_file !== '' ? $plugin_file : '';
+    clean_sweep_install_finish_plugin_activation($activation_state, $resume_file);
+
     return [
         'success' => true,
         'code' => '',
@@ -657,6 +681,38 @@ function clean_sweep_install_uploaded_package($zip_path, $kind, $opts = []) {
         'warnings' => $warnings,
         'files_extracted_count' => 0,
     ];
+}
+
+/**
+ * Put an overwritten plugin back on the active list when its main file is present.
+ * Progress polls include every plugin still listed as active.
+ *
+ * @param array{plugin?:string,blog?:bool,network?:bool} $state
+ */
+function clean_sweep_install_finish_plugin_activation(array $state, string $plugin_file = ''): void {
+    if ($plugin_file !== '') {
+        $state['plugin'] = str_replace('\\', '/', $plugin_file);
+    }
+    if (empty($state['blog']) && empty($state['network'])) {
+        return;
+    }
+    if (!function_exists('clean_sweep_resume_plugin_after_replace')) {
+        return;
+    }
+    $plugin = (string) ($state['plugin'] ?? '');
+    $dir = defined('WP_PLUGIN_DIR') ? rtrim((string) WP_PLUGIN_DIR, '/') : '';
+    if ($dir === '' || $plugin === '') {
+        return;
+    }
+    $main = $dir . '/' . ltrim($plugin, '/');
+    if (is_file($main)) {
+        clean_sweep_resume_plugin_after_replace($state);
+        return;
+    }
+    clean_sweep_install_log(
+        'Left ' . $plugin . ' inactive because its files were removed and the upload did not finish',
+        'warning'
+    );
 }
 
 /**

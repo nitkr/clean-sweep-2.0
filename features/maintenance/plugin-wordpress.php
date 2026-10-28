@@ -73,8 +73,25 @@ function clean_sweep_reinstall_plugin($plugin_slug) {
         return false;
     }
 
+    // Take the plugin off the active lists before deleting files. Progress polls
+    // boot WordPress and include every plugin still in those lists.
+    $activation_state = function_exists('clean_sweep_suspend_plugin_for_replace')
+        ? clean_sweep_suspend_plugin_for_replace($plugin_file)
+        : ['plugin' => $plugin_file, 'blog' => false, 'network' => false];
+    if ((!empty($activation_state['blog']) || !empty($activation_state['network']))
+        && function_exists('clean_sweep_plugin_activation_state')
+    ) {
+        $still_active = clean_sweep_plugin_activation_state($activation_state['plugin']);
+        if (!empty($still_active['blog']) || !empty($still_active['network'])) {
+            clean_sweep_log_message("Refusing to remove {$plugin_slug} because it is still listed as active", 'error');
+            unlink($temp_file);
+            return false;
+        }
+    }
+
     // Remove existing plugin directory
     $plugin_dir = ORIGINAL_WP_PLUGIN_DIR . '/' . $plugin_slug;
+    $removed_existing = false;
     if (is_dir($plugin_dir)) {
         clean_sweep_log_message("Removing existing plugin directory: $plugin_dir");
 
@@ -88,8 +105,12 @@ function clean_sweep_reinstall_plugin($plugin_slug) {
         if (!$wp_filesystem->rmdir($plugin_dir, true)) {
             clean_sweep_log_message("Failed to remove existing plugin directory", 'error');
             unlink($temp_file);
+            if (function_exists('clean_sweep_resume_plugin_after_replace')) {
+                clean_sweep_resume_plugin_after_replace($activation_state);
+            }
             return false;
         }
+        $removed_existing = true;
     }
 
     // Extract the downloaded zip using our secure standalone function
@@ -97,6 +118,11 @@ function clean_sweep_reinstall_plugin($plugin_slug) {
     if (is_wp_error($result)) {
         clean_sweep_log_message("Failed to extract plugin $plugin_slug: " . $result->get_error_message(), 'error');
         unlink($temp_file);
+        if ($removed_existing) {
+            clean_sweep_log_message("Left {$plugin_slug} inactive because the old copy was removed and the new copy did not extract", 'warning');
+        } elseif (function_exists('clean_sweep_resume_plugin_after_replace')) {
+            clean_sweep_resume_plugin_after_replace($activation_state);
+        }
         return false;
     }
 
@@ -105,6 +131,12 @@ function clean_sweep_reinstall_plugin($plugin_slug) {
 
     // Ensure the plugins directory index.php exists (security file)
     clean_sweep_ensure_plugins_index();
+
+    if (function_exists('clean_sweep_resume_plugin_after_replace')
+        && !clean_sweep_resume_plugin_after_replace($activation_state)
+    ) {
+        clean_sweep_log_message("Re-installed {$plugin_slug}, but it could not be restored to the active plugin list", 'warning');
+    }
 
     clean_sweep_log_message("Successfully re-installed plugin: $plugin_slug", 'success');
     return true;
