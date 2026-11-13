@@ -1290,6 +1290,13 @@ final class CleanSweep_Scanner {
         }
 
         $row_total = 0;
+        // One catalog lookup before row segments. WordPress creates no triggers.
+        $this->queue->enqueue(CleanSweep_ScanWorkUnit::create(
+            $scan_id,
+            CleanSweep_ScanWorkUnit::TYPE_DB_SCHEMA,
+            [],
+            148
+        ));
         $globals = CleanSweep_DbScanPlanner::enqueue_global_tables(
             $this->queue,
             $scan_id,
@@ -1347,7 +1354,7 @@ final class CleanSweep_Scanner {
         }
 
         clean_sweep_log_message(
-            "CleanSweep_Scanner: queued DB globals={$globals} blog_segments={$blog_segments} rows~{$row_total} multisite=" .
+            "CleanSweep_Scanner: queued DB schema check globals={$globals} blog_segments={$blog_segments} rows~{$row_total} multisite=" .
             ($is_ms ? 'yes' : 'no') . " discovery=" . ($wants_discovery ? 'yes' : 'no'),
             'info'
         );

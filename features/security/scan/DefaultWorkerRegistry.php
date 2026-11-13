@@ -12,6 +12,7 @@ require_once __DIR__ . '/workers/PackageChecksumWorker.php';
 require_once __DIR__ . '/workers/FileDiscoveryWorker.php';
 require_once __DIR__ . '/workers/FileBatchWorker.php';
 require_once __DIR__ . '/workers/DbSegmentWorker.php';
+require_once __DIR__ . '/workers/DbSchemaWorker.php';
 require_once __DIR__ . '/workers/DbSiteDiscoveryWorker.php';
 require_once __DIR__ . '/workers/IntegrityWorker.php';
 require_once __DIR__ . '/workers/CensusWorker.php';
@@ -27,6 +28,7 @@ final class CleanSweep_DefaultWorkerRegistry {
             new CleanSweep_FileDiscoveryWorker(),
             new CleanSweep_FileBatchWorker(),
             new CleanSweep_DbSegmentWorker(),
+            new CleanSweep_DbSchemaWorker(),
             new CleanSweep_DbSiteDiscoveryWorker(),
             new CleanSweep_IntegrityWorker(),
             new CleanSweep_CensusWorker(),
