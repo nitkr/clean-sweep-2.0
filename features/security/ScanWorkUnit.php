@@ -21,6 +21,7 @@ class CleanSweep_ScanWorkUnit {
     /** Work unit type constants */
     const TYPE_FILE_BATCH = 'file_batch';
     const TYPE_DB_TABLE_SEGMENT = 'db_table_segment';
+    const TYPE_DB_SCHEMA = 'db_schema';
     const TYPE_FILE_DISCOVERY = 'file_discovery';
     const TYPE_DB_SITE_DISCOVERY = 'db_site_discovery';
     const TYPE_ROOT_CONFIG = 'root_config';
