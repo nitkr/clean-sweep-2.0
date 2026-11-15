@@ -2,9 +2,10 @@
 /**
  * Cheap PHP-in-media disguise checks.
  *
- * Does not add image/video extensions to the signature pack. Standard peeks
- * the head for a PHP opener; Deep also peeks the tail (appended polyglot)
- * and flags extension/magic mismatch when the file is not PHP.
+ * Does not add image, audio, video, font, or PDF extensions to the
+ * signature pack. Standard peeks the head for a PHP opener; Deep also
+ * peeks the tail (appended polyglot) and flags extension/magic mismatch
+ * when the file is not that format and is not PHP.
  */
 
 class CleanSweep_PhpDisguiseSniff {
@@ -93,6 +94,8 @@ class CleanSweep_PhpDisguiseSniff {
      * @param string $head
      * @return bool True when the claimed type has known magic and $head does not match.
      *              jpg/jpeg/png/gif/webp/bmp/ico accept any of those image headers.
+     *              Alias extensions share the container check (wma/asf, m4a/ftyp,
+     *              mkv/EBML, opus/OggS). PDF looks for %PDF- in the first 1024 bytes.
      */
     public static function magic_mismatch($ext, $head) {
         $ext = strtolower((string) $ext);
@@ -104,6 +107,9 @@ class CleanSweep_PhpDisguiseSniff {
         switch ($ext) {
             case 'jpg':
             case 'jpeg':
+            case 'jpe':
+            case 'jfif':
+            case 'jif':
             case 'png':
             case 'gif':
             case 'webp':
@@ -118,17 +124,50 @@ class CleanSweep_PhpDisguiseSniff {
                 return strncasecmp($trim, '<svg', 4) !== 0 && strncasecmp($trim, '<?xml', 5) !== 0;
             case 'mp4':
             case 'm4v':
+            case 'm4a':
+            case 'm4b':
+            case 'm4p':
+            case 'm4r':
             case 'mov':
+            case '3gp':
+            case '3g2':
+            case 'f4v':
+            case 'f4a':
+            case 'heic':
+            case 'heif':
+            case 'avif':
                 return substr($head, 4, 4) !== 'ftyp';
             case 'webm':
+            case 'mkv':
+            case 'mka':
+            case 'mk3d':
                 return strncmp($head, "\x1A\x45\xDF\xA3", 4) !== 0;
             case 'ogv':
             case 'ogg':
             case 'oga':
+            case 'opus':
+            case 'ogx':
+            case 'spx':
                 return strncmp($head, 'OggS', 4) !== 0;
             case 'wmv':
             case 'asf':
+            case 'wma':
+            case 'wm':
                 return strncmp($head, "\x30\x26\xB2\x75\x8E\x66\xCF\x11", 8) !== 0;
+            case 'flac':
+                // Native FLAC, or a FLAC with an ID3 tag in front.
+                return strncmp($head, 'fLaC', 4) !== 0 && strncmp($head, 'ID3', 3) !== 0;
+            case 'flv':
+                return strncmp($head, "FLV\x01", 4) !== 0;
+            case 'aif':
+            case 'aiff':
+                return strncmp($head, 'FORM', 4) !== 0
+                    || (substr($head, 8, 4) !== 'AIFF' && substr($head, 8, 4) !== 'AIFC');
+            case 'woff':
+            case 'woff2':
+                return strncmp($head, 'wOFF', 4) !== 0 && strncmp($head, 'wOF2', 4) !== 0;
+            case 'pdf':
+                return strpos(substr($head, 0, 1024), '%PDF-') === false;
             case 'avi':
                 return strncmp($head, 'RIFF', 4) !== 0 || substr($head, 8, 3) !== 'AVI';
             case 'wav':
