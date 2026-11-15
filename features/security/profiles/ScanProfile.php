@@ -341,7 +341,7 @@ class CleanSweep_ScanProfile {
             return true;
         }
 
-        // Media/video names are not signature targets. Standard/Deep peek for a
+        // Media names are not signature targets. Standard/Deep peek for a
         // PHP opener (Deep also flags magic mismatch) before queueing.
         if ($this->should_sniff_media_disguise() && $this->is_media_disguise_extension($ext)) {
             require_once dirname(__DIR__) . '/content-scanners/PhpDisguiseSniff.php';
@@ -352,7 +352,8 @@ class CleanSweep_ScanProfile {
     }
 
     /**
-     * Image/video extensions commonly used to hide PHP. Not scan_file_types.
+     * Image, audio, video, font, and PDF extensions used to hide PHP.
+     * Not scan_file_types. A matching header is not a finding.
      *
      * @param string $ext
      * @return bool
@@ -361,9 +362,18 @@ class CleanSweep_ScanProfile {
         static $media = [
             'jpg' => true, 'jpeg' => true, 'png' => true, 'gif' => true, 'webp' => true,
             'svg' => true, 'ico' => true, 'bmp' => true, 'tif' => true, 'tiff' => true,
+            'jpe' => true, 'jfif' => true, 'jif' => true,
+            'heic' => true, 'heif' => true, 'avif' => true,
             'mp4' => true, 'm4v' => true, 'mp3' => true, 'wav' => true, 'avi' => true,
             'mov' => true, 'ogv' => true, 'ogg' => true, 'oga' => true, 'wmv' => true,
             'asf' => true, 'webm' => true,
+            'wma' => true, 'wm' => true,
+            'm4a' => true, 'm4b' => true, 'm4p' => true, 'm4r' => true,
+            '3gp' => true, '3g2' => true, 'f4v' => true, 'f4a' => true,
+            'mkv' => true, 'mka' => true, 'mk3d' => true,
+            'opus' => true, 'ogx' => true, 'spx' => true,
+            'flac' => true, 'flv' => true, 'aif' => true, 'aiff' => true,
+            'woff' => true, 'woff2' => true, 'pdf' => true,
         ];
         return isset($media[strtolower((string) $ext)]);
     }
