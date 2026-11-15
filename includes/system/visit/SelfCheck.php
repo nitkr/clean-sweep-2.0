@@ -26,7 +26,10 @@ final class CleanSweep_SelfCheck {
         'assets/dist/',
         // Local/CI signature corpus (includes intentional malware samples) — not shipped payload
         'features/security/signatures/fixtures/',
-        // Build-time signature source and private keys — never ship to customers
+        // Build-time signature source and private keys — never ship to customers.
+        // Root signatures_build.php is a local plain-text view of the same
+        // authoring file. It is gitignored and must stay off the shipped hash.
+        'signatures_build.php',
         'features/security/signatures_build.php',
         'features/security/signatures/build/',
         'features/security/signatures/keys/private/',
