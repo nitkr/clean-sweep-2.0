@@ -9,6 +9,8 @@ final class CleanSweep_DbSchemaPersistence {
 
     private const STATEMENT_CAP = 65536;
     private const BODY_FETCH_CAP = 30;
+    /** Editor read. Longer than the scan preview so the open object is not cut at 800 characters. */
+    public const EDITOR_CAP = 262144;
 
     /**
      * Quote a schema or object name for SHOW statements.
@@ -272,6 +274,66 @@ final class CleanSweep_DbSchemaPersistence {
     }
 
     /**
+     * Column value used by a schema finding. Table cells never use these names.
+     */
+    public static function schema_kind(string $column): string {
+        $kind = strtolower(trim($column));
+        if (!in_array($kind, ['trigger', 'event', 'procedure', 'function'], true)) {
+            return '';
+        }
+        return $kind;
+    }
+
+    /**
+     * SHOW CREATE for one object. Empty when the kind or name cannot be quoted safely.
+     */
+    public static function show_create_sql(string $kind, string $name): string {
+        $kind = self::schema_kind($kind);
+        $name = trim($name);
+        if ($kind === '' || $name === '' || strlen($name) > 128 || strpbrk($name, "\0\r\n") !== false) {
+            return '';
+        }
+        return 'SHOW CREATE ' . strtoupper($kind) . ' ' . self::quote_identifier($name);
+    }
+
+    /**
+     * Full object script for the threat editor.
+     *
+     * @param object $wpdb
+     * @return array{ok: bool, content: string, error: string}
+     */
+    public function read_editor_statement($wpdb, string $kind, string $name): array {
+        $missing = ['ok' => false, 'content' => '', 'error' => 'Schema object not found'];
+        $sql = self::show_create_sql($kind, $name);
+        if ($sql === '' || !is_object($wpdb) || !method_exists($wpdb, 'get_row')) {
+            return $missing;
+        }
+        $suppress = method_exists($wpdb, 'suppress_errors') ? $wpdb->suppress_errors(true) : null;
+        try {
+            if (property_exists($wpdb, 'last_error')) {
+                $wpdb->last_error = '';
+            }
+            $row = $wpdb->get_row($sql);
+            $error = isset($wpdb->last_error) ? trim((string) $wpdb->last_error) : '';
+            if ($error !== '') {
+                return ['ok' => false, 'content' => '', 'error' => self::clip($error, 200)];
+            }
+            if (!is_object($row)) {
+                return $missing;
+            }
+            $body = self::clip(self::field($row, self::create_fields()), self::EDITOR_CAP);
+            if ($body === '') {
+                return $missing;
+            }
+            return ['ok' => true, 'content' => $body, 'error' => ''];
+        } finally {
+            if ($suppress !== null && method_exists($wpdb, 'suppress_errors')) {
+                $wpdb->suppress_errors($suppress);
+            }
+        }
+    }
+
+    /**
      * @param object $wpdb
      */
     private function create_body($wpdb, string $kind, string $name): string {
@@ -287,13 +349,21 @@ final class CleanSweep_DbSchemaPersistence {
         if ($error !== '' || !is_object($row)) {
             return '';
         }
-        return self::clip(self::field($row, [
+        return self::clip(self::field($row, self::create_fields()), self::STATEMENT_CAP);
+    }
+
+    /**
+     * @return array<int,string>
+     */
+    private static function create_fields(): array {
+        return [
+            'SQL Original Statement',
             'Create Event',
             'Create Procedure',
             'Create Function',
             'Create Trigger',
             'Statement',
-        ]), self::STATEMENT_CAP);
+        ];
     }
 
     private static function writes_table(string $sql, string $suffix): bool {
