@@ -100,6 +100,11 @@
       if (first && first !== s) out.push(first);
       if (s.length > 32) out.push(s.slice(0, 80));
     }
+    // Schema previews are the statement itself. The summary line is not inside SHOW CREATE.
+    const pattern = String(threat?.pattern || '');
+    if (pattern.startsWith('MYSQL_') && pattern !== 'MYSQL_SCHEMA_UNREAD' && threat?.content_preview) {
+      out.push(String(threat.content_preview));
+    }
     return [...new Set(out)].filter((n) => n && n.length >= 3).sort((a, b) => b.length - a.length);
   }
 
@@ -321,7 +326,8 @@
       }
       const dbContent = $scanning.selectedDbContent?.content;
       if (dbContent != null && dbContent !== '') {
-        const contentKey = `db|${key}|${String(dbContent).length}`;
+        const textForKey = String(dbContent);
+        const contentKey = `db|${key}|${textForKey.length}|${textForKey.slice(0, 24)}|${textForKey.slice(-24)}`;
         if (contentKey !== lastAppliedContentKey) {
           const text = String(dbContent);
           currentCode = text.split('\n');

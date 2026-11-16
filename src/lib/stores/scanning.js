@@ -21,6 +21,29 @@ import {
   COMPLETED_TTL_SECONDS,
 } from '../scanSession.js';
 
+/** Schema findings reuse table/row_id/column. They are not a table cell. */
+function isSchemaPersistenceThreat(threat) {
+  const pattern = String(threat?.pattern || '');
+  return pattern === 'MYSQL_TRIGGER'
+    || pattern === 'MYSQL_EVENT'
+    || pattern === 'MYSQL_PROCEDURE'
+    || pattern === 'MYSQL_FUNCTION'
+    || pattern === 'MYSQL_SCHEMA_UNREAD';
+}
+
+function storedSchemaText(threat) {
+  return String(threat?.matched_content || threat?.content_preview || threat?.description || '');
+}
+
+function sameSelectedThreat(current, threat) {
+  if (!current || !threat) return false;
+  if (current.id && threat.id) return current.id === threat.id;
+  return current.table === threat.table
+    && String(current.row_id) === String(threat.row_id)
+    && current.column === threat.column
+    && current.pattern === threat.pattern;
+}
+
 /** This-scan attribution only. Visit leftovers without reinfection must not show. */
 function thisScanLikelySource(raw) {
   if (!raw || typeof raw !== 'object') return null;
@@ -1584,11 +1607,20 @@ function createScanningStore() {
      * Handles both file threats and database threats
      */
     selectThreat: (threat) => {
+      const schema = !!(threat && threat.source === 'database' && isSchemaPersistenceThreat(threat));
+      const stored = schema ? storedSchemaText(threat) : '';
       update(s => ({
         ...s,
         selectedThreat: threat,
-        // Clear previous DB payload; refilled when a DB threat loads
-        selectedDbContent: null,
+        // Clear previous DB payload; refilled when a DB threat loads.
+        // Schema objects show the stored statement immediately, then the live script replaces it.
+        selectedDbContent: schema && stored ? {
+          table: threat.table,
+          row_id: threat.row_id,
+          column: threat.column,
+          content: stored,
+          edit_link: '',
+        } : null,
       }));
 
       if (!threat) {
@@ -1597,26 +1629,56 @@ function createScanningStore() {
 
       // If threat has a file, load it in the file viewer
       if (threat.source === 'database') {
-        // Database threat - load content via getDbContent API
+        // Unread catalog has no object to open. The stored note is the content.
+        if (threat.pattern === 'MYSQL_SCHEMA_UNREAD') {
+          return;
+        }
+        // Database threat - load content via getDbContent API.
+        // Schema objects use the same call; the API runs SHOW CREATE for those kinds.
         if (threat.table && threat.row_id && threat.column) {
+          const applySchemaFallback = () => {
+            const text = stored || '// This database object could not be loaded.';
+            update(s => {
+              if (!sameSelectedThreat(s.selectedThreat, threat)) return s;
+              if (s.selectedDbContent?.content === text) return s;
+              return {
+                ...s,
+                selectedDbContent: {
+                  table: threat.table,
+                  row_id: threat.row_id,
+                  column: threat.column,
+                  content: text,
+                  edit_link: '',
+                },
+              };
+            });
+          };
           adapters.malware.getDbContent(threat.table, threat.row_id, threat.column)
             .then(response => {
-              if (response.success && response.data) {
-                // Store database content for display
-                update(s => ({
+              const live = response?.success && response.data
+                ? String(response.data.content || '')
+                : '';
+              if (!live) {
+                if (schema) applySchemaFallback();
+                return;
+              }
+              update(s => {
+                if (!sameSelectedThreat(s.selectedThreat, threat)) return s;
+                return {
                   ...s,
                   selectedDbContent: {
                     table: threat.table,
                     row_id: threat.row_id,
                     column: threat.column,
-                    content: response.data.content,
-                    edit_link: response.data.edit_link
-                  }
-                }));
-              }
+                    content: live,
+                    edit_link: response.data.edit_link || '',
+                  },
+                };
+              });
             })
             .catch(err => {
               debug.error('SCANNING', 'Failed to load DB content', err.message);
+              if (schema) applySchemaFallback();
             });
         }
       } else if (threat.file || threat.path) {

@@ -1776,6 +1776,24 @@ function clean_sweep_upload_assert_backup_request(array $inspect, bool $create_b
     return ['ok' => true, 'eligible' => true, 'slug' => $slug];
 }
 
+/**
+ * Plugin and theme installs require one top-level directory.
+ * A flat archive is installed under a generated folder name and does not
+ * replace the existing package directory.
+ *
+ * @return array{ok:bool,code?:string,message?:string}
+ */
+function clean_sweep_upload_assert_package_folder(array $inspect): array {
+    if (!empty($inspect['backup_eligible'])) {
+        return ['ok' => true];
+    }
+    return [
+        'ok' => false,
+        'code' => 'NO_TOP_LEVEL_DIRECTORY',
+        'message' => 'This ZIP has no single top-level folder, so it cannot be installed as a plugin or theme.',
+    ];
+}
+
 function clean_sweep_upload_package_backup_abs(string $upload_id, string $slug): string {
     $root = defined('CLEAN_SWEEP_ROOT') ? rtrim(str_replace('\\', '/', (string) CLEAN_SWEEP_ROOT), '/') : '';
     $id = preg_replace('/[^a-z0-9_]/', '', strtolower($upload_id));
@@ -1815,6 +1833,17 @@ function clean_sweep_upload_run_extract(string $zip_path, array $resolved, array
     $is_package = ($dest_id === 'plugins' || $dest_id === 'themes');
     $backup_rel = '';
     $create_backup = !empty($opts['create_backup']);
+
+    if ($is_package) {
+        $folder = clean_sweep_upload_assert_package_folder($inspect);
+        if (empty($folder['ok'])) {
+            return [
+                'success' => false,
+                'code' => $folder['code'] ?? 'NO_TOP_LEVEL_DIRECTORY',
+                'message' => $folder['message'] ?? 'This ZIP has no single top-level folder, so it cannot be installed as a plugin or theme.',
+            ];
+        }
+    }
 
     if ($is_package && $create_backup) {
         $bak = clean_sweep_upload_assert_backup_request($inspect, true);
