@@ -234,6 +234,20 @@ function backupBlockedReason(state) {
   return '';
 }
 
+/** Package installs need one top-level directory. Other extract paths do not. */
+function packageFolderBlockReason(state) {
+  const blocked = (state.uploadQueue || []).filter((row) => {
+    if (!row?.inspect || row.inspect.backup_eligible !== false) return false;
+    return resolveItemRoute(row, state).package;
+  });
+  if (blocked.length === 0) return '';
+  if (blocked.length === 1) {
+    const name = blocked[0].file?.name || blocked[0].name || 'This ZIP';
+    return `${name} has no single top-level folder, so it cannot be installed as a plugin or theme.`;
+  }
+  return 'These ZIPs have no single top-level folder, so they cannot be installed as plugins or themes.';
+}
+
 function createUploadStore() {
   const { subscribe, set, update } = writable(initialState());
 
@@ -270,6 +284,7 @@ function createUploadStore() {
     isRootRel,
     backupEligibleBatch,
     backupBlockedReason,
+    packageFolderBlockReason,
 
     /**
      * Handle file drop
@@ -762,6 +777,12 @@ function createUploadStore() {
           message: 'This batch mixes packages with other ZIPs. Upload plugins/themes separately from path extracts.',
           code: 'DEST_MISMATCH',
         });
+        return;
+      }
+
+      const folderBlock = packageFolderBlockReason(state);
+      if (folderBlock) {
+        errors.add({ message: folderBlock, code: 'NO_TOP_LEVEL_DIRECTORY' });
         return;
       }
 

@@ -54,10 +54,12 @@
   );
   let backupEligible = $derived(backupOn && upload.backupEligibleBatch($upload));
   let backupBlocked = $derived(backupOn ? upload.backupBlockedReason($upload) : '');
+  let folderBlock = $derived(upload.packageFolderBlockReason($upload));
   let canConfirm = $derived(
     (isPackage || destValid)
       && !busy
       && !kindBannerBlocking
+      && !folderBlock
       && (isPackage || !atRoot || confirmRoot)
   );
   let showSuccessActions = $derived(!!(uploadResult || batchResult));
@@ -676,8 +678,12 @@
             </div>
           </label>
         </div>
-      {:else if backupOn && isPackage && backupBlocked}
+      {:else if backupOn && isPackage && backupBlocked && !folderBlock}
         <p class="text-xs text-amber-700 dark:text-amber-400 mb-4">{backupBlocked}</p>
+      {/if}
+
+      {#if folderBlock}
+        <p class="text-xs text-amber-700 dark:text-amber-400 mb-4">{folderBlock}</p>
       {/if}
 
       {#if atRoot}
